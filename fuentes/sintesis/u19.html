@@ -1,0 +1,501 @@
+<section class="unidad" id="u19" data-titulo="Consenso">
+  <h2>U19. Consenso: elección de líder, generales bizantinos, Paxos y Raft</h2>
+  <p class="intro">Un grupo de procesos distribuidos necesita, cada tanto, ponerse de acuerdo: quien manda, que valor se graba, si la transacción procede o aborta. Esta unidad recorre los cuatro escalones del problema: elegir un líder (algoritmo del anillo y Bully), el consenso general con procesos que se caen (algoritmo sincrónico por rondas y la fórmula de quorum N &gt;= 2f + 1), el consenso con procesos que mienten (generales bizantinos, N &gt;= 3f + 1) y dos algoritmos reales de consenso, Paxos y Raft. Es la unidad más grande de la materia y una de las tres o cuatro que aparecen sin falta en todos los finales.</p>
+
+  <h3 id="u19-eleccion-lider">Elección de líder: objetivo y propiedades</h3>
+  <p>El punto de partida es la <a href="#u17-redundancia">redundancia</a>: si el sistema tiene un solo proceso y ese proceso se cae, se cae el sistema. La respuesta es tener un grupo de procesos, pero apenas hay grupo aparece la pregunta siguiente: quien de todos ellos decide como avanza el estado del sistema. Ese rol es el líder, y elegirlo es el primer problema de acuerdo.</p>
+
+  <div class="def"><b>Elección de líder.</b> Algoritmo que elige a un proceso dentro de un grupo para que desempene un rol particular, y que permite reelecciones tanto si el líder decide darse de baja como si se cae.</div>
+
+  <p>Tres características definen al problema:</p>
+  <ul>
+    <li><b>Cualquier</b> proceso puede comenzar una nueva elección. Todos los procesos son homogéneos en este aspecto: si uno tuviera el privilegio exclusivo de convocar elecciones, su caída obligaria a un tratamiento especial y el problema volveria al principio.</li>
+    <li>En ningun momento puede haber más de un líder.</li>
+    <li>El resultado de la elección debe ser <b>único y repetible</b>: no importa quien la inicie, con el mismo conjunto de procesos vivos el resultado tiene que ser el mismo.</li>
+  </ul>
+
+  <h4 id="u19-lider-propiedades">Propiedades formales</h4>
+  <ul>
+    <li>Cada proceso tiene un <b>identificador único</b>.</li>
+    <li>Todos los procesos mantienen un array con el estado del algoritmo. Los estados posibles de la variable <code>elected</code> son un identificador de proceso (<code>P</code>) o <b>indefinido</b> (<code>@</code>), que es el estado inicial de todo proceso al empezar a participar.</li>
+    <li><b>Safety:</b> todo proceso participante <code>Pi</code> tiene <code>elected_i = P</code> o <code>elected_i = @</code>. Es decir: o ya sabe quien es el líder con un valor valido, o todavia no lo sabe; nunca un valor invalido o dos líderes distintos.</li>
+    <li><b>Liveness:</b> todos los procesos participan de la elección y o bien terminan con <code>elected_i != @</code>, o bien comienzan una nueva elección.</li>
+  </ul>
+
+  <div class="idea">La elección de líder es un caso particular de <a href="#u19-consenso">consenso</a>: el valor sobre el que hay que acordar es el ID del líder, y la función de agregación es quedarse con el ID más alto entre los procesos vivos. Todo lo que se diga después sobre consenso aplica aca, y viceversa.</div>
+
+  <div class="warn">Mientras dura la elección el sistema queda inactivo entre comillas: nadie toma decisiones hasta que haya líder nuevo. La tolerancia a fallos no significa continuidad instantanea, significa que existe un camino definido para volver a operar. Ese intervalo (detección de la caída más elección) es parte del calculo de disponibilidad del sistema.</div>
+
+  <h3 id="u19-anillo">Algoritmo del anillo</h3>
+  <p>Condiciones iniciales:</p>
+  <ul>
+    <li>Los procesos se organizan en un anillo lógico: cada proceso conoce y se comunica <b>solamente con su vecino siguiente</b>.</li>
+    <li>Los mensajes se envían siempre en la misma dirección (por ejemplo, sentido horario).</li>
+    <li>Al comienzo, todos los procesos están marcados como <b>no participantes</b>.</li>
+  </ul>
+
+  <figure class="diag">
+    <svg viewBox="0 0 420 250" role="img" aria-label="Anillo logico de cuatro procesos con IDs 45, 3, 48 y 7">
+      <circle cx="90" cy="60" r="28" fill="none" stroke="var(--acc)"/>
+      <text x="90" y="65" text-anchor="middle" fill="currentColor" font-size="14">P45</text>
+      <circle cx="300" cy="60" r="28" fill="none" stroke="var(--acc)"/>
+      <text x="300" y="65" text-anchor="middle" fill="currentColor" font-size="14">P3</text>
+      <circle cx="300" cy="185" r="28" fill="none" stroke="var(--acc2)"/>
+      <text x="300" y="190" text-anchor="middle" fill="currentColor" font-size="14">P48</text>
+      <circle cx="90" cy="185" r="28" fill="none" stroke="var(--acc)"/>
+      <text x="90" y="190" text-anchor="middle" fill="currentColor" font-size="14">P7</text>
+      <line x1="118" y1="60" x2="266" y2="60" stroke="var(--linea)"/>
+      <polygon points="272,60 262,55 262,65" fill="var(--linea)"/>
+      <line x1="300" y1="88" x2="300" y2="151" stroke="var(--linea)"/>
+      <polygon points="300,157 295,147 305,147" fill="var(--linea)"/>
+      <line x1="272" y1="185" x2="124" y2="185" stroke="var(--linea)"/>
+      <polygon points="118,185 128,180 128,190" fill="var(--linea)"/>
+      <line x1="90" y1="157" x2="90" y2="94" stroke="var(--linea)"/>
+      <polygon points="90,88 85,98 95,98" fill="var(--linea)"/>
+      <text x="195" y="45" text-anchor="middle" fill="currentColor" font-size="11">eleccion(45)</text>
+      <text x="195" y="222" text-anchor="middle" fill="currentColor" font-size="11">el mensaje viaja siempre en el mismo sentido</text>
+      <text x="345" y="125" text-anchor="middle" fill="currentColor" font-size="11">48</text>
+    </svg>
+    <figcaption>Anillo lógico: P45 conoce a P3, P3 a P48, P48 a P7 y P7 a P45. Nadie tiene la lista completa de procesos, solo su vecino.</figcaption>
+  </figure>
+
+  <h4 id="u19-anillo-reglas">Reglas</h4>
+  <p>Inicio de la elección: algun proceso <code>Pi</code> se marca como participando y envía a su vecino un mensaje de elección con su propio ID, proponiendose líder.</p>
+  <p>Cuando un proceso <code>Pj</code> recibe un mensaje de elección:</p>
+  <ul>
+    <li>Si esta <b>no participando</b>: cambia su estado a participando, compara el ID del mensaje con el suyo, lo reemplaza por el suyo si el suyo es mayor, y reenvia el mensaje al siguiente.</li>
+    <li>Si ya esta <b>participando</b>:
+      <ul>
+        <li>ID recibido <b>menor</b> al suyo: no reenvia el mensaje (lo descarta).</li>
+        <li>ID recibido <b>mayor</b> al suyo: reenvia el mensaje.</li>
+        <li>ID recibido <b>igual</b> al suyo: el mensaje dio la vuelta completa sin encontrar nadie mayor, entonces el es el líder.</li>
+      </ul>
+    </li>
+  </ul>
+  <p>Cuando <code>Pj</code> se reconoce líder: se setea como no participando y emite un mensaje de <b>líder elegido</b> con su ID. Cuando un proceso recibe un mensaje de líder elegido: pasa a no participando, setea <code>elected</code> con el ID del mensaje y, si ese ID es distinto del suyo, lo retransmite. El líder, al recibir de vuelta su propio anuncio, lo descarta y la elección termina.</p>
+
+  <pre><code># proceso i, en el anillo
+estado = NO_PARTICIPANDO
+elected = @
+
+def iniciar_eleccion():
+    estado = PARTICIPANDO
+    enviar_al_siguiente(ELECCION, mi_id)
+
+def al_recibir(ELECCION, id):
+    if estado == NO_PARTICIPANDO:
+        estado = PARTICIPANDO
+        enviar_al_siguiente(ELECCION, max(id, mi_id))
+    else:                              # ya participando
+        if id &gt; mi_id:
+            enviar_al_siguiente(ELECCION, id)
+        elif id == mi_id:              # soy el lider
+            estado = NO_PARTICIPANDO
+            elected = mi_id
+            enviar_al_siguiente(ELEGIDO, mi_id)
+        # if id &lt; mi_id: descartar
+
+def al_recibir(ELEGIDO, id):
+    estado = NO_PARTICIPANDO
+    elected = id
+    if id != mi_id:
+        enviar_al_siguiente(ELEGIDO, id)</code></pre>
+
+  <div class="ej">
+    <p><b>Traza completa</b> sobre el anillo 45 -&gt; 3 -&gt; 48 -&gt; 7 -&gt; 45, arrancando en P45:</p>
+    <ol>
+      <li>P45 se marca participando y envía <code>eleccion(45)</code> a P3.</li>
+      <li>P3 pasa a participando; 3 &lt; 45, entonces reenvia <code>eleccion(45)</code> a P48.</li>
+      <li>P48 pasa a participando; 48 &gt; 45, entonces reemplaza y envía <code>eleccion(48)</code> a P7.</li>
+      <li>P7 pasa a participando; 7 &lt; 48, reenvia <code>eleccion(48)</code> a P45.</li>
+      <li>P45 (ya participando) ve 48 &gt; 45 y reenvia a P3.</li>
+      <li>P3 (ya participando) ve 48 &gt; 3 y reenvia a P48.</li>
+      <li>P48 recibe su propio ID: es el líder. Pasa a no participando y emite <code>elegido(48)</code>.</li>
+      <li>El anuncio recorre P7, P45 y P3, que setean <code>elected = 48</code>, y al volver a P48 se descarta. Fin.</li>
+    </ol>
+    <p>El resultado no depende de quien arranco: la función de agregación es el máximo de los IDs, y el máximo es único. Si arranca P48 la vuelta es más corta (una sola vuelta y ya se reconoce líder); si arranca P45 hace falta la vuelta completa más el tramo hasta volver a P48.</p>
+  </div>
+
+  <h4 id="u19-anillo-paralelo">Dos elecciones en paralelo</h4>
+  <p>Nada impide que dos procesos inicien la elección al mismo tiempo, y el algoritmo lo tolera sin cambios. Si P45 y P48 arrancan juntos, las dos elecciones se propagan en paralelo por el anillo; cuando el mensaje de P45 llega a P48, que ya está participando y tiene ID mayor, P48 lo <b>descarta</b>. El mensaje de P48 completa la vuelta y la elección termina correctamente con un único líder. La regla de descartar los IDs menores es justamente la que evita que sobrevivan dos elecciones.</p>
+
+  <p>Sobre el costo en mensajes, la cátedra da como cotas <code>3N - 1</code> mensajes en el peor caso y del orden de <code>2N</code> en el mejor: el peor caso es que la elección la inicie el vecino siguiente al líder, con lo que el mensaje de elección recorre casi dos vueltas antes de cerrar, más la vuelta del anuncio.</p>
+
+  <div class="warn">El punto flojo del anillo es la <b>caída de un nodo</b>: se corta el único camino de comunicación y el mensaje nunca completa la vuelta. Reconstruir el anillo (que P45 se conecte directamente con P48 si murio P3) suena fácil en palabras, pero exige detectar la caída con timeouts o pings, y sobre todo que P45 conozca la dirección de su nuevo vecino. Para tolerar <code>f</code> caídas cada proceso necesita conocer al menos a sus <code>f</code> sucesores, y si se quiere tolerar caídas arbitrarias se termina necesitando un mesh completo, lo cual anula la ventaja de simplicidad del anillo. Esa infraestructura topologica queda afuera del algoritmo.</div>
+
+  <h3 id="u19-bully">Bully algorithm</h3>
+  <p>El otro algoritmo clásico de elección de líder parte de hipótesis más fuertes y consigue elecciones más rápidas.</p>
+  <p><b>Hipótesis:</b></p>
+  <ul>
+    <li>Los canales de comunicación son reliables.</li>
+    <li>Cualquier proceso puede morir de forma inesperada, y la detección se hace con <b>timeouts</b>.</li>
+    <li>Todos los procesos pueden comunicarse entre si (mesh de conexiones).</li>
+    <li>Cada proceso conoce el ID de todos los procesos, y en particular sabe <b>cuales tienen un ID superior al suyo</b>.</li>
+  </ul>
+
+  <p><b>Tipos de mensaje:</b></p>
+  <table>
+    <thead><tr><th>Mensaje</th><th>Para que</th></tr></thead>
+    <tbody>
+      <tr><td>Election</td><td>Inicia una elección de líder. Se envía solo a los procesos de ID mayor.</td></tr>
+      <tr><td>Answer</td><td>ACK de un Election: "estoy vivo y mi ID es más alto que el tuyo".</td></tr>
+      <tr><td>Coordinator</td><td>Anuncia quien es el líder elegido.</td></tr>
+      <tr><td>Alive</td><td>Chequeo periódico del estado del líder (health check).</td></tr>
+    </tbody>
+  </table>
+
+  <p><b>Sincronismo.</b> El timeout que decide si un proceso esta caído se calcula a partir de dos parámetros: <code>Tmax</code>, el tiempo máximo de transmisión entre dos procesos, y <code>Tprocess</code>, el tiempo máximo que tarda cualquier proceso en resolver un mensaje.</p>
+  <pre><code>T = 2 * Tmax + Tprocess     # ida + vuelta + procesamiento</code></pre>
+  <p>Es esencialmente un RTT más el tiempo de proceso. Que la detección de fallos forme parte de la definición formal del algoritmo es lo que lo hace implementable, y también lo que lo ata al entorno: los procesos dentro de una misma computadora tienen una varianza mínima (son circuitos integrados de la misma placa), mientras que en multicomputing la varianza crece según sea red local, intranet o Internet. El mismo algoritmo, con el mismo <code>T</code>, es confiable en un caso y genera falsos positivos en el otro.</p>
+
+  <h4 id="u19-bully-algoritmo">Algoritmo</h4>
+  <ol>
+    <li>El proceso con mayor ID puede identificarse como líder directamente y mandar un <b>Coordinator</b> a todos. Sabe que es el mayor porque no conoce a nadie con ID superior al suyo.</li>
+    <li>Si un proceso detecta que el líder esta caído, envía <b>Election</b> a todos los procesos con ID mayor al suyo.</li>
+    <li>Si un proceso recibe un <b>Election</b>, responde con <b>Answer</b> y comienza a su vez una nueva elección (repitiendo el paso 2 hacia arriba).</li>
+    <li>Si un proceso recibe un <b>Coordinator</b>, adopta como líder al emisor.</li>
+    <li>Si un proceso que inicio una elección no recibe ningun <b>Answer</b> tras el tiempo <code>T</code>, concluye que no queda nadie vivo por encima suyo y <b>se autoproclama líder</b>, anunciandolo con un Coordinator.</li>
+    <li>Si un proceso caído vuelve a la vida, comienza una nueva elección. Si resulta ser el de mayor ID, será el nuevo líder aunque ya hubiera uno funcionando.</li>
+  </ol>
+
+  <div class="idea">De ese último punto viene el nombre: el bravucon. El proceso más grande, al volver, desplaza por la fuerza al líder en funciones sin importar que el sistema estuviera operando perfectamente. Es una decisión de diseño con consecuencias: cada reinicio del nodo de ID más alto cuesta una elección y una ventana sin líder.</div>
+
+  <div class="ej">
+    <p><b>Traza</b> con cuatro procesos P1, P2, P3, P4, siendo P4 el líder:</p>
+    <ol>
+      <li>Periódicamente los procesos verifican el estado del líder con Alive. P4 muere y P1 lo detecta porque no responde su Alive.</li>
+      <li>P1 envía Election a P2 y P3 (los de ID mayor).</li>
+      <li>P2 responde Answer a P1 y envía su propio Election a P3.</li>
+      <li>P3 responde Answer a P1 y a P2, y envía Election a P4.</li>
+      <li>P4 no responde: se vence el timeout <code>T</code> en P3.</li>
+      <li>P3 se autoproclama líder y lo informa con Coordinator a P1 y P2.</li>
+      <li>Más tarde P4 vuelve a la vida. Como sabe que su ID es el más alto, se autoproclama líder y manda Coordinator a P1, P2 y P3, que lo aceptan.</li>
+    </ol>
+    <p>Notese que P1, al recibir Answer de P2 y P3, ya sabe que no tiene chance de ser líder: hay procesos mayores vivos. Solo quien no recibe ningun Answer gana.</p>
+  </div>
+
+  <table>
+    <thead><tr><th></th><th>Anillo</th><th>Bully</th></tr></thead>
+    <tbody>
+      <tr><td>Quien conoce a quien</td><td>Cada proceso solo a su vecino siguiente</td><td>Todos con todos (mesh), y sabe quienes son mayores</td></tr>
+      <tr><td>Detección de fallos</td><td>Fuera del algoritmo (hay que reconstruir el anillo)</td><td>Dentro del algoritmo, con timeout <code>T = 2 Tmax + Tprocess</code></td></tr>
+      <tr><td>Mensajes</td><td>Del orden de 2N a 3N - 1</td><td>Hasta O(N^2) en el peor caso, pero pocas rondas</td></tr>
+      <tr><td>Criterio de líder</td><td>Máximo ID que dio la vuelta</td><td>Máximo ID que responde antes del timeout</td></tr>
+      <tr><td>Punto debil</td><td>Una sola caída rompe el anillo</td><td>Timeouts mal calibrados y elecciones repetidas cuando el nodo grande oscila</td></tr>
+    </tbody>
+  </table>
+
+  <div class="examen">Preguntado en finales de forma indirecta pero constante: la respuesta canonica a "Explique un algoritmo de consenso para que N procesos lleguen a un acuerdo..." (2022-08, 2024-07, 2025-02, 2025-07) suele arrancar eligiendo un líder con <b>Bully</b> y recien después votando. Conviene tener la traza de Bully lista, con los tres mensajes (Election, Answer, Coordinator), la fórmula del timeout y la explicación del nombre.</div>
+
+  <h3 id="u19-consenso">El problema del consenso</h3>
+  <div class="def"><b>Consenso.</b> Dado un conjunto de procesos distribuidos y un punto de decisión, todos los procesos deben acordar el mismo valor.</div>
+
+  <p>Es un problema complejo, y para atacarlo se acotan variables con los mismos supuestos que ya se usaron en <a href="#u17-consenso">coordinación y acuerdo</a>:</p>
+  <ul>
+    <li>Los canales de comunicación son reliables.</li>
+    <li>Todos los procesos pueden comunicarse entre si (no hay particionamiento de red: si no encuentro a un proceso, es porque murio).</li>
+    <li>La única falla a considerar es la <b>caída</b> de un proceso. Nadie miente ni responde mal.</li>
+    <li>La caída de un proceso no puede ocasionar la caída de otro: los fallos son independientes.</li>
+  </ul>
+
+  <h4 id="u19-consenso-definicion">Definición formal</h4>
+  <ul>
+    <li>Un conjunto de procesos <code>Pi</code> (i = 1..N) desea llegar a un acuerdo.</li>
+    <li>Cada proceso comienza en estado <b>undecided</b>.</li>
+    <li>Cada proceso posee una <b>decisión variable</b> <code>di</code> y <b>propone</b> un valor <code>vi</code>.</li>
+    <li>Los procesos se comunican por mensajes, intercambiando las propuestas.</li>
+    <li>Tras recibir los mensajes de los demas, <code>Pi</code> setea <code>di</code> aplicando una función de agregación determinista sobre los valores conocidos, y pasa a estado <b>decided</b>.</li>
+  </ul>
+
+  <h4 id="u19-consenso-requerimientos">Requerimientos</h4>
+  <table>
+    <thead><tr><th>Propiedad</th><th>Que exige</th><th>Formalmente</th></tr></thead>
+    <tbody>
+      <tr><td>Agreement</td><td>El valor decidido es el mismo en todos los procesos <b>correctos</b>.</td><td>Si Pi y Pj son correctos, <code>di = dj</code> cuando están decided.</td></tr>
+      <tr><td>Integrity</td><td>Si todos los procesos correctos propusieron el mismo valor, ese es el valor decidido.</td><td>Si todos proponen <code>v</code>, entonces <code>di = v</code>.</td></tr>
+      <tr><td>Termination</td><td>Eventualmente todos los procesos activos setean su decisión variable.</td><td>El algoritmo no queda colgado para siempre.</td></tr>
+    </tbody>
+  </table>
+  <div class="idea">Integrity es la propiedad que suena trivial y no lo es: si cinco personas eligen un número y las cinco dicen 2, el acuerdo tiene que ser 2. Un algoritmo que decidiera 7 cumpliria agreement (todos deciden lo mismo) pero sería inutil. Agreement sin integrity se satisface con un algoritmo que siempre decide una constante.</div>
+
+  <div class="def"><b>Fórmula de quorum.</b> Cantidad mínima de procesos necesarios para que el algoritmo pueda decidir. Depende de la función de agregación: si la agregación requiere <b>mayoría</b>, para tolerar <code>f</code> caídas hacen falta <code>N &gt;= 2f + 1</code> procesos.</div>
+
+  <div class="ej">
+    <p>P1, P2 y P3 deben acordar si proceder o abortar. P1 propone <code>proceed</code>, P2 propone <code>proceed</code>, P3 propone <code>abort</code>. Tras el intercambio, los tres tienen el mismo vector <code>[proceed, proceed, abort]</code>, aplican mayoría y los tres deciden <code>proceed</code>: P3 cambia de decisión y sigue al consenso.</p>
+    <p>Si en cambio P3 no es correcto y crashea antes de poder cambiar de decisión, se declara defectuoso y queda afuera: P1 y P2 siguen de acuerdo por mayoría y el sistema avanza igual. Ese es el punto del consenso: la caída de una minoría no detiene al grupo.</p>
+  </div>
+
+  <div class="warn">Los dos primeros supuestos (canales reliables y ausencia de particionamiento) se violan constantemente en la vida real. Un algoritmo bien fundamentado en el papel puede quedar flojo exactamente ahí: si la red se parte en dos mitades y cada una cree que la otra murio, ambas pueden formar quorum si no se controla el tamaño de los subgrupos, y aparece el split brain con dos líderes.</div>
+
+  <h3 id="u19-algoritmo-sincronico">Algoritmo de consenso sincrónico por rondas</h3>
+  <p>El algoritmo genérico de la cátedra (también llamado <b>floodset</b> o consenso por inundación) resuelve el problema bajo esas hipótesis en <code>f + 1</code> rondas, donde <code>f</code> es la cantidad de caídas a tolerar. Cada proceso mantiene el conjunto de valores que conoce y en cada ronda difunde solo lo nuevo:</p>
+
+  <pre><code># proceso i
+# inicializacion
+values[0] = {}
+values[1] = { v }                 # mi propuesta
+
+for r in 1 .. f+1:
+    broadcast(values[r] - values[r-1])      # difundo solo lo que aprendi
+    values[r+1] = values[r]
+    while ronda r abierta:
+        recibir values_j de cada proceso j
+        values[r+1] = values[r+1] + values_j
+
+# despues de f+1 rondas
+decidir d = agregacion(values[f+1])     # ojo con este indice, ver la nota</code></pre>
+
+  <div class="warn">Cuidado con el índice de la última línea, que se copia tal cual de la diapositiva de la cátedra (y de Coulouris) pero es confuso. Con esta indexación, en la ronda <code>r</code> se difunde <code>values[r]</code> y se <em>construye</em> <code>values[r+1]</code>, así que después de la última ronda (<code>r = f+1</code>) el conocimiento acumulado está en <code>values[f+2]</code>, no en <code>values[f+1]</code>. Leído literalmente, decidir sobre <code>values[f+1]</code> significa decidir con el estado <b>previo</b> a la última ronda, es decir con f rondas de información, que es exactamente lo que no alcanza para garantizar agreement. Lo que el algoritmo quiere decir, y lo que muestra el ejemplo de más abajo, es <b>decidir sobre todo lo acumulado, incluida la última ronda</b>. En el final conviene reproducir la notación de la cátedra y aclarar en una línea que la agregación se hace sobre el conjunto final: la idea de fondo (f+1 rondas para tolerar f caídas, y agregación determinista sobre el mismo conjunto) es lo que se evalúa.</div>
+
+  <p>Al cabo de <code>f + 1</code> rondas todos los procesos correctos tienen exactamente el mismo conjunto de valores y aplican la misma función de agregación determinista (mayoría, máximo, mínimo, mediana), por lo que deciden lo mismo. La agregación tiene que ser la misma en todos y no depender del orden de llegada.</p>
+
+  <details class="mas">
+    <summary>Por que hacen falta f + 1 rondas y no f</summary>
+    <p>El peor caso son las caídas en cadena. Supongamos que un proceso aprende un valor nuevo, lo alcanza a difundir a un solo companero y muere inmediatamente después. En la ronda siguiente ese companero debe propagarlo, pero puede pasarle lo mismo. Con <code>f</code> caídas se puede armar una cadena donde en cada ronda muere exactamente el proceso que acababa de contarle el valor a uno solo. Hace falta una ronda extra en la que se garantice que al menos un proceso no falle y difunda el conocimiento a todos los restantes: de ahí <code>f + 1</code>.</p>
+    <p>Ejemplo con tres procesos y f = 1 (dos rondas): P1 propone A, P2 propone B, P3 propone C. En la ronda 1 P3 falla a mitad de la difusión y solo P2 recibe C, con lo que P1 = {A, B} y P2 = {A, B, C}. En la ronda 2 P2 le cuenta a P1 lo que aprendio y ambos quedan con {A, B, C}: aplican la agregación y deciden lo mismo.</p>
+  </details>
+
+  <div class="warn">El pseudocodigo de la cátedra usa <b>conjuntos</b>, y un conjunto pierde la multiplicidad: <code>{1000, 1000, 1010}</code> colapsa a <code>{1000, 1010}</code> y la función de mayoría deja de tener sentido. Cuando la agregación es por mayoría hay que difundir pares <code>(proceso, valor)</code> y agregar sobre el vector de votos, no sobre el conjunto de valores distintos. Es una sutileza que conviene aclarar explicitamente al resolver el ejercicio de final.</div>
+
+  <div class="warn">También queda deliberadamente abierto cuando se cierra una ronda: "mientras la ronda r está abierta" se implementa esperando N - 1 mensajes o hasta que venza un timeout. Ese timeout es lo que hace que el algoritmo sea <b>sincrónico</b>: sin cotas de tiempo conocidas no se puede distinguir un proceso lento de uno caído y el algoritmo no termina.</div>
+
+  <div class="ej">
+    <p><b>Cuatro sensores de humedad deciden si prender el riego.</b> P1, P2 y P4 miden suelo seco y proponen <code>true</code>; P3 mide humedo y propone <code>false</code>. Con f = 1 hacen falta 2 rondas y N = 4 &gt;= 2(1) + 1 alcanza el quorum de mayoría.</p>
+    <ol>
+      <li>Ronda 1: cada proceso hace broadcast de su par (id, voto) a los otros tres.</li>
+      <li>Ronda 2: cada uno difunde lo que aprendio de más. Si P3 murio a mitad de la ronda 1, esta ronda garantiza que todos los que quedan tengan el mismo vector.</li>
+      <li>Decisión: todos tienen <code>[true, true, false, true]</code>, aplican mayoría y deciden <code>true</code>. Se prende el riego, y todos los procesos correctos lo saben.</li>
+    </ol>
+    <p>Regla de desempate: hay que fijarla de antemano y que sea determinista. Una convención habitual es que un voto que no llega antes del timeout cuenta como <code>false</code> y que el empate resuelve <code>false</code>, de modo que el sistema nunca actúa sin mayoría efectiva.</p>
+  </div>
+
+  <div class="ej">
+    <p><b>Cuatro servicios acuerdan la cotización del dolar</b> con mediciones independientes: 1010, 1000, 1000 y 1030. Tras las rondas los cuatro tienen el mismo vector <code>[1010, 1000, 1000, 1030]</code>. La agregación decide el resultado y tiene que estar definida antes: la moda da 1000 (dos votos contra uno y uno), la mediana da 1005, el promedio da 1010. Cualquiera es valida siempre que sea determinística e igual en todos; lo que no se puede es dejarla implicita, porque ahí se rompe agreement. Con valores numericos la mediana suele ser preferible: descarta outliers de sensores desviados sin necesitar mayoría absoluta.</p>
+  </div>
+
+  <div class="examen">De las preguntas más repetidas de la materia, en varias formas: "Explique un algoritmo de consenso para que 4 procesos puedan llegar a un acuerdo sobre cierta variable que ellos definen. Como actúa el algoritmo al caerse 1 proceso? Y al caerse 2?" (2022-08, 2024-07); "Detalle un algoritmo de consenso que permita que 4 servicios concuerden en el valor de tasa de cambio dolar a publicar, con mediciones 1010, 1000, 1000, 1030" (2025-02); "Explique un algoritmo de consenso para que 4 procesos que capturan la humedad del suelo definan si prender o no el riego. Describa paso a paso la transferencia de mensajes requerida" (2025-07); "Detalle un algoritmo de consenso que permita que 3 procesos concuerden en el valor de altitud de un dron en pleno vuelo, si A y B miden 10m y C mide 9m" (2024-07). La respuesta completa lleva: elección de líder o esquema de rondas, la transferencia de mensajes paso a paso, la función de agregación explicita con su regla de desempate, y la fórmula de quorum con el número concreto de réplicas (f = 1 implica N &gt;= 3; f = 2 implica N &gt;= 5).</div>
+
+  <h3 id="u19-bizantinos">El problema de los generales bizantinos</h3>
+  <p>Hasta aca los procesos estaban vivos o muertos. Falta el caso incomodo: un proceso que está vivo, responde a tiempo, pero <b>no se comporta como se espera</b>. Por ejemplo, un servicio que debia sumar dos números y por un bug (o porque fue comprometido) los resta: sigue contestando, y su respuesta parece legitima.</p>
+
+  <div class="def"><b>Falla bizantina.</b> Falla arbitraria en tiempos y en respuestas: el proceso puede entregar información incorrecta, y puede entregar información <b>diferente a diferentes consumidores</b>, incluso con intención maliciosa. Es el tipo de falla más complejo de la <a href="#u17-clasificacion">clasificación</a> porque no se puede confiar en la información que llega.</div>
+
+  <h4 id="u19-bizantinos-marco">El marco: comandante y generales</h4>
+  <ul>
+    <li>Tres o más generales deben decidir si atacan o se retiran.</li>
+    <li>Un <b>comandante</b> envía la orden de ataque o retirada.</li>
+    <li>Los generales retransmiten a los demas la orden que recibieron.</li>
+    <li>Un <b>general traicionero</b> le dice a los otros lo contrario de lo que le ordeno el comandante.</li>
+    <li>Un <b>comandante traicionero</b> envía ordenes diferentes a diferentes generales.</li>
+    <li>Ser traicionero es la forma de modelar un proceso que falla: no hace falta suponer maldad, alcanza con un bug que produzca datos inconsistentes.</li>
+  </ul>
+
+  <p>Los requerimientos son los mismos tres, con integrity ajustada al rol del comandante:</p>
+  <ul>
+    <li><b>Agreement:</b> el valor decidido es el mismo en todos los procesos activos.</li>
+    <li><b>Integrity:</b> si el comandante <b>no</b> es traicionero, todos los procesos deben setear su decisión variable al valor que el comandante envio.</li>
+    <li><b>Termination:</b> eventualmente todos los procesos activos setean su decisión variable.</li>
+  </ul>
+  <div class="def"><b>Fórmula de quorum bizantina.</b> Para tolerar <code>f</code> procesos traicioneros hacen falta <code>N &gt;= 3f + 1</code> procesos en total. Equivalentemente: menos de un tercio de los procesos puede ser bizantino, y los leales tienen que ser al menos <code>2f + 1</code>.</div>
+
+  <h4 id="u19-bizantinos-imposibilidad">Imposibilidad con N &lt;= 3f</h4>
+  <p>Con tres nodos y un traidor el problema no tiene solución, y la razón es que dos escenarios distintos son <b>indistinguibles</b> desde el punto de vista de un general leal.</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 440 210" role="img" aria-label="Comandante y dos generales: escenarios indistinguibles">
+      <circle cx="220" cy="40" r="30" fill="none" stroke="var(--acc)"/>
+      <text x="220" y="37" text-anchor="middle" fill="currentColor" font-size="12">Com</text>
+      <text x="220" y="51" text-anchor="middle" fill="currentColor" font-size="11">(P1)</text>
+      <circle cx="80" cy="160" r="30" fill="none" stroke="var(--acc)"/>
+      <text x="80" y="157" text-anchor="middle" fill="currentColor" font-size="12">Gen</text>
+      <text x="80" y="171" text-anchor="middle" fill="currentColor" font-size="11">(P2)</text>
+      <circle cx="360" cy="160" r="30" fill="none" stroke="var(--acc2)"/>
+      <text x="360" y="157" text-anchor="middle" fill="currentColor" font-size="12">Gen</text>
+      <text x="360" y="171" text-anchor="middle" fill="currentColor" font-size="11">(P3)</text>
+      <line x1="198" y1="61" x2="103" y2="141" stroke="var(--linea)"/>
+      <polygon points="98,145 104,133 111,141" fill="var(--linea)"/>
+      <text x="120" y="95" text-anchor="middle" fill="currentColor" font-size="11">1: v</text>
+      <line x1="242" y1="61" x2="337" y2="141" stroke="var(--linea)"/>
+      <polygon points="342,145 329,141 336,133" fill="var(--linea)"/>
+      <text x="325" y="95" text-anchor="middle" fill="currentColor" font-size="11">1: v (o 1: u)</text>
+      <line x1="110" y1="152" x2="330" y2="152" stroke="var(--linea)"/>
+      <polygon points="336,152 326,147 326,157" fill="var(--linea)"/>
+      <text x="220" y="145" text-anchor="middle" fill="currentColor" font-size="11">2: (1: v)</text>
+      <line x1="330" y1="172" x2="110" y2="172" stroke="var(--linea)"/>
+      <polygon points="104,172 114,167 114,177" fill="var(--linea)"/>
+      <text x="220" y="190" text-anchor="middle" fill="currentColor" font-size="11">3: (1: u)</text>
+    </svg>
+    <figcaption>Notación: <code>1: v</code> es "el proceso 1 me dijo v"; <code>3: (1: u)</code> es "el proceso 3 me dijo que el proceso 1 le dijo u". P2 recibe v del comandante y u de P3, y no puede saber quien miente.</figcaption>
+  </figure>
+
+  <p>P2 termina con el par de valores <code>[v del comandante, u de P3]</code> y tiene dos explicaciones igualmente consistentes:</p>
+  <ul>
+    <li><b>P3 es el traidor:</b> el comandante mando <code>v</code> a los dos y P3 retransmitio <code>u</code> para sabotear.</li>
+    <li><b>El comandante es el traidor:</b> mando <code>v</code> a P2 y <code>u</code> a P3, y P3 está retransmitiendo honestamente lo que recibio.</li>
+  </ul>
+  <p>Los mensajes que ve P2 son identicos en los dos escenarios, así que ninguna regla puede distinguirlos: con dos votos y un empate no hay mayoría posible. De ahí la imposibilidad para <code>N &lt;= 3f</code>: hacen falta al menos cuatro nodos para tolerar un traidor.</p>
+
+  <h4 id="u19-bizantinos-solucion">Solución con N &gt;= 3f + 1</h4>
+  <p>Con cuatro nodos y un traidor, el algoritmo tiene dos rondas:</p>
+  <ol>
+    <li><b>Ronda 1.</b> El comandante envía su valor a cada uno de los N - 1 generales. Si es leal manda el mismo valor a todos; si es traidor puede mandar valores distintos.</li>
+    <li><b>Ronda 2.</b> Cada general retransmite a los otros generales el valor que recibio del comandante. Así cada uno construye un vector de "quien dijo que".</li>
+    <li><b>Decisión.</b> Cada general aplica mayoría sobre su vector. Si hay mayoría clara, decide ese valor; si no hay mayoría, decide un valor por defecto determinista (por ejemplo, retirarse).</li>
+  </ol>
+
+  <div class="ej">
+    <p><b>Caso A: un general es traidor.</b> El comandante (leal) manda <code>v</code> a P2, P3 y P4. P2 y P4 retransmiten <code>v</code> honestamente; P3 retransmite valores inventados (<code>u</code> a uno, <code>w</code> al otro).</p>
+    <ul>
+      <li>P2 arma <code>[v, v, u]</code>: mayoría <code>v</code>.</li>
+      <li>P4 arma <code>[v, v, w]</code>: mayoría <code>v</code>.</li>
+    </ul>
+    <p>Los dos generales leales deciden <code>v</code>, que es exactamente lo que ordeno el comandante: se cumplen agreement e integrity. Y hay un bonus: como con cuatro nodos se tolera una sola falla, el que quedo aislado con un valor distinto del resto <b>queda identificado</b> como el traicionero, y el sistema puede aislarlo.</p>
+  </div>
+
+  <div class="ej">
+    <p><b>Caso B: el comandante es traidor.</b> Manda <code>u</code> a P2, <code>w</code> a P3 y <code>v</code> a P4. Los tres generales son leales y retransmiten fielmente lo que recibieron, así que cada uno arma un vector con los tres valores distintos, en distinto orden: <code>[u, w, v]</code>, <code>[w, u, v]</code>, <code>[v, u, w]</code>.</p>
+    <p>La mayoría no decide nada: los tres valores son distintos. Pero eso mismo es información. Si un general fuera el traidor, el vector tendría dos valores iguales y uno distinto (como en el caso A); <b>la única forma de que los tres sean distintos es que el comandante haya mandado algo diferente a cada uno</b>. Los generales concluyen entonces que el comandante es el traicionero: no se ataca ni se retira, se decide que no hay comandante valido, se lo aisla y se elige uno nuevo con un <a href="#u19-eleccion-lider">algoritmo de elección de líder</a>. El sistema no ejecuta la orden, pero sigue adelante: hubo acuerdo sobre que no hay acuerdo, que es exactamente lo que se necesita.</p>
+  </div>
+
+  <details class="mas">
+    <summary>Variante de la solución presentada en la cátedra: comandante traidor sin identificar al culpable</summary>
+    <p>El material de cursada presenta también la versión donde, con el comandante traidor y valores mixtos, cada general aplica mayoría sobre su vector y todos terminan decidiendo lo mismo por casualidad estructural. Por ejemplo con N = 4 y el comandante mandando <code>u</code> a dos generales y <code>w</code> a uno: los vectores quedan <code>[u, w, u]</code>, <code>[u, u, w]</code> y <code>[w, u, u]</code>, y los tres generales deciden <code>u</code> por mayoría. Se cumple agreement (todos deciden igual) aunque no haya integrity que exigir, porque el comandante no era leal. Es la propiedad importante: con <code>N &gt;= 3f + 1</code> los leales <b>siempre</b> convergen al mismo valor, sea el comandante leal o traidor.</p>
+    <p>El caso general del algoritmo (conocido como Oral Messages, OM(f)) es recursivo: cada general actúa a su vez como comandante de una instancia más chica, y hacen falta <code>f + 1</code> rondas de intercambio. La cátedra desarrolla el caso base f = 1, N = 4.</p>
+  </details>
+
+  <table>
+    <thead><tr><th>Tipo de falla a tolerar</th><th>Fórmula de quorum</th><th>f = 1</th><th>f = 2</th></tr></thead>
+    <tbody>
+      <tr><td>Caída (crash): el proceso deja de responder</td><td><code>N &gt;= 2f + 1</code></td><td>N = 3</td><td>N = 5</td></tr>
+      <tr><td>Bizantina (arbitraria): el proceso responde mal o miente</td><td><code>N &gt;= 3f + 1</code></td><td>N = 4</td><td>N = 7</td></tr>
+    </tbody>
+  </table>
+
+  <div class="warn">Las dos fórmulas de quorum son la confusión clásica del final. <code>2f + 1</code> es para <b>bajas</b> (Paxos, votación por mayoría); <code>3f + 1</code> es para comportamientos <b>erraticos</b> (bizantinos). El motivo de la diferencia: un proceso caído no vota, alcanza con que los vivos sean mayoría; un proceso bizantino <b>si</b> vota, y vota mal, así que hay que superarlo en votos <i>y</i> tener suficientes testimonios cruzados para detectar la mentira.</div>
+
+  <div class="examen">Bloque casi garantizado en finales recientes, en tres formas: "Explique un algoritmo de consenso bizantino. Indique cuantas réplicas son necesarias para garantizar que el algoritmo funcione si: a) se cae 1 proceso, b) se caen 2 procesos, c) se comporta erraticamente 1 proceso" (2025-07); "Que estrategia se puede utilizar para la solución de un problema bizantino? Que fórmula de quorum posee dicha solución respecto de cantidad de procesos defectuosos?" (2025-07); "Describa como resolver un problema de procesos bizantinos con un algoritmo de consenso. Indique como interpretar la función de quorum del algoritmo detallado" (2025-03). Las respuestas del inciso de réplicas son a) 3, b) 5 (crash, <code>2f + 1</code>) y c) 4 (bizantino, <code>3f + 1</code>). Interpretar la función de quorum significa decir en palabras que menos de un tercio de los procesos puede ser defectuoso y por que: con <code>N &lt;= 3f</code> un proceso leal no puede distinguir quien miente.</div>
+
+  <h3 id="u19-paxos">Paxos</h3>
+  <div class="def"><b>Paxos.</b> Algoritmo de consenso que permite acordar un valor aunque múltiples procesos realicen propuestas diferentes al mismo tiempo. Progresa siempre que haya una mayoría de procesos vivos (<code>N &gt;= 2f + 1</code>), y garantiza un orden consistente de las operaciones en el cluster: los eventos de los clientes quedan almacenados de forma incremental por ID.</div>
+
+  <p>Dos características centrales:</p>
+  <ul>
+    <li><b>Tolerante a fallos:</b> mientras exista quorum (mayoría de aceptadores vivos) el algoritmo sigue funcionando. Con 10 procesos hacen falta 6 vivos, o sea que se toleran 4 caídas.</li>
+    <li><b>Puede rechazar propuestas:</b> el pedido de un cliente puede ser rechazado, y el cliente lo reintenta las veces que quiera.</li>
+  </ul>
+
+  <div class="idea">Ese segundo punto cambia la forma de programar contra el sistema. Cuando se hace un <code>UPDATE</code> en SQL, el happy path es que funcione y el error es la excepción que se cachea. Aca el rechazo es <b>parte del flujo esperado</b>: el proposer puede rechazar el pedido simplemente porque está ocupado consensuando otro valor. El código del cliente no se parece a una instrucción con try/catch, se parece a un <code>while</code> que reintenta hasta que la propuesta entra.</div>
+
+  <h4 id="u19-paxos-actores">Actores</h4>
+  <table>
+    <thead><tr><th>Rol</th><th>Responsabilidad</th></tr></thead>
+    <tbody>
+      <tr><td>Client</td><td>Realiza el request (por ejemplo, setear una clave en un key/value store) y espera OK o reintenta.</td></tr>
+      <tr><td>Proposer</td><td>Recibe los requests de los clientes y comienza el protocolo. Hay varios, y entre ellos se elige un <b>líder</b> para evitar starvation: si todos proponen a la vez con números crecientes, ninguno llega a completar sus dos fases.</td></tr>
+      <tr><td>Acceptor</td><td>Recibe los prepare y propose de los proposers y mantiene el estado del protocolo en <b>almacenamiento estable</b>. Existe <b>quorum</b> cuando la mayoría de los acceptors está viva.</td></tr>
+      <tr><td>Learner</td><td>Cuando el protocolo llega a un acuerdo, ejecuta el request (aplica el cambio a la base, por ejemplo) y responde al cliente.</td></tr>
+    </tbody>
+  </table>
+  <p>El objetivo del protocolo es lograr que todos los acceptors consensuen un valor <code>v</code> asociado a una propuesta hecha por un proposer, para que después los learners apliquen la operación y contesten. Con cinco acceptors de los cuales dos están muertos todavia hay tres vivos, hay mayoría, hay quorum y el algoritmo prosigue.</p>
+
+  <h4 id="u19-paxos-fases">Fases del protocolo</h4>
+  <figure class="diag">
+    <svg viewBox="0 0 640 320" role="img" aria-label="Secuencia de mensajes de Paxos entre cliente, proposer, acceptors y learner">
+      <text x="55" y="20" text-anchor="middle" fill="currentColor" font-size="12">Client</text>
+      <text x="215" y="20" text-anchor="middle" fill="currentColor" font-size="12">Proposer</text>
+      <text x="410" y="20" text-anchor="middle" fill="currentColor" font-size="12">Acceptors</text>
+      <text x="590" y="20" text-anchor="middle" fill="currentColor" font-size="12">Learner</text>
+      <line x1="55" y1="30" x2="55" y2="300" stroke="var(--linea)" stroke-dasharray="4 4"/>
+      <line x1="215" y1="30" x2="215" y2="300" stroke="var(--linea)" stroke-dasharray="4 4"/>
+      <line x1="410" y1="30" x2="410" y2="300" stroke="var(--linea)" stroke-dasharray="4 4"/>
+      <line x1="590" y1="30" x2="590" y2="300" stroke="var(--linea)" stroke-dasharray="4 4"/>
+      <line x1="55" y1="60" x2="207" y2="60" stroke="var(--acc)"/>
+      <polygon points="213,60 203,55 203,65" fill="var(--acc)"/>
+      <text x="132" y="53" text-anchor="middle" fill="currentColor" font-size="11">0. request(v)</text>
+      <line x1="215" y1="100" x2="402" y2="100" stroke="var(--acc)"/>
+      <polygon points="408,100 398,95 398,105" fill="var(--acc)"/>
+      <text x="310" y="93" text-anchor="middle" fill="currentColor" font-size="11">1a. prepare(N)</text>
+      <line x1="410" y1="140" x2="223" y2="140" stroke="var(--acc2)"/>
+      <polygon points="217,140 227,135 227,145" fill="var(--acc2)"/>
+      <text x="313" y="133" text-anchor="middle" fill="currentColor" font-size="11">1b. promise(N', v')</text>
+      <line x1="215" y1="180" x2="402" y2="180" stroke="var(--acc)"/>
+      <polygon points="408,180 398,175 398,185" fill="var(--acc)"/>
+      <text x="310" y="173" text-anchor="middle" fill="currentColor" font-size="11">2a. propose(N, v)</text>
+      <line x1="410" y1="220" x2="582" y2="220" stroke="var(--acc2)"/>
+      <polygon points="588,220 578,215 578,225" fill="var(--acc2)"/>
+      <text x="500" y="213" text-anchor="middle" fill="currentColor" font-size="11">2b. accept(N, v)</text>
+      <line x1="410" y1="250" x2="223" y2="250" stroke="var(--acc2)"/>
+      <polygon points="217,250 227,245 227,255" fill="var(--acc2)"/>
+      <text x="313" y="243" text-anchor="middle" fill="currentColor" font-size="11">2b. accept(N, v)</text>
+      <line x1="590" y1="288" x2="63" y2="288" stroke="var(--acc)"/>
+      <polygon points="57,288 67,283 67,293" fill="var(--acc)"/>
+      <text x="330" y="281" text-anchor="middle" fill="currentColor" font-size="11">2c. do(N, v) y respuesta al cliente</text>
+    </svg>
+    <figcaption>Paxos en dos fases: primero se reserva el derecho a proponer (prepare/promise), recien después se propone el valor (propose/accept). Cada flecha hacia los acceptors necesita respuesta de la mayoría para avanzar.</figcaption>
+  </figure>
+
+  <ul>
+    <li><b>Fase 0.</b> El cliente hace un <code>request(v)</code> al proposer.</li>
+    <li><b>Fase 1a, prepare.</b> El proposer crea una propuesta con número <code>N</code>, mayor a cualquier propuesta que el haya realizado antes, y envía <code>prepare(N)</code> a los acceptors esperando alcanzar quorum. Ojo: <b>no manda el valor</b>, solo el número de propuesta.</li>
+    <li><b>Fase 1b, promise.</b> Si el <code>N</code> recibido es mayor al último que vieron, los acceptors <b>prometen rechazar cualquier request con ID menor a N</b> y responden <code>promise(N', v')</code>, donde <code>N'</code> y <code>v'</code> son el número y el valor de la propuesta previa que tuvieran pendiente. Si llega un <code>N</code> que no supera al ya prometido, simplemente no contestan. El proposer necesita promesas de la mayoría para seguir.</li>
+    <li><b>Fase 2a, propose.</b> Con mayoría de promesas, el proposer rechaza todo request con ID menor a <code>N</code> y envía <code>propose(N, v)</code> a los acceptors.</li>
+    <li><b>Fase 2b, accept.</b> Si la promesa sigue en pie (no llego ningun ID superior a <code>N</code> en el medio), cada acceptor anuncia el nuevo valor enviando <code>accept(N, v)</code> a todos los learners y al proposer que origino el request. El learner acepta el valor cuando recibe la mayoría de accepts.</li>
+    <li><b>Fase 2c.</b> El learner ejecuta la operación asociada (<code>do(N, v)</code>: grabar en la base, aplicar el cambio en las réplicas) y responde al cliente.</li>
+  </ul>
+
+  <h4 id="u19-paxos-tolerancia">Por que la promesa lleva (N', v'): tolerancia a la caída del proposer</h4>
+  <p>El detalle más sutil del protocolo es por que la promesa devuelve el número y el valor previos. Supongamos que un proposer llego a la fase 2a, alcanzo a mandar <code>propose(N, v)</code> a <b>un solo</b> acceptor y se murio. No hubo quorum, esa operación no se completo, y sin embargo un acceptor ya guardo <code>(N, v)</code> en almacenamiento estable.</p>
+  <p>Cuando los proposers eligen un nuevo líder y este arranca su propia fase 1a con un número mayor, ese acceptor le responde la promesa <b>incluyendo el <code>(N, v)</code> pendiente</b>: le avisa que habia una operación a medio camino. El proposer nuevo entonces no propone su propio valor: propone el <b>valor anterior</b> con el ID nuevo. Así la transacción que quedo cortada en el medio se completa igual, y el algoritmo tolera la caída del proposer sin perder ni duplicar la decisión. Es el mecanismo de pasar la posta a la siguiente generación de líderes.</p>
+
+  <div class="idea">Lo que Paxos entrega, mirado desde arriba, no es tanto "un valor acordado" como una <b>secuencia de operaciones serializada y tolerante a fallos</b>: cada request queda etiquetado con un ID autoincremental consensuado, y todas las réplicas aplican las operaciones en ese orden. Eso es <a href="#u20">orden total</a>, y es la base de la <a href="#u17-replicacion-activa">replicación activa</a> de máquinas de estados. Es el rol que cumple Paxos en bases distribuidas reales como Spanner de Google.</div>
+
+  <div class="warn">Paxos asume fallos de <b>caída</b>, no bizantinos: <code>N &gt;= 2f + 1</code>, no <code>3f + 1</code>. Un acceptor que mienta sobre lo que prometio rompe el protocolo. Y para que el algoritmo avance hace falta un líder entre los proposers: sin líder, varios proposers pisandose con números cada vez más altos producen livelock (starvation), donde todos preparan y ninguno logra completar la fase 2. El paper de referencia se llama "Paxos made simple", de Lamport, y la broma de la cátedra es que no es tan simple.</div>
+
+  <div class="examen">Paxos es la respuesta usada en resoluciones de finales anteriores para "Explique un algoritmo de consenso para que varios procesos puedan llegar a un acuerdo sobre cierta variable que ellos definen. Indique cuantas réplicas son necesarias..." (2022-08, 2024-07). Sirve para esa pregunta si se enumeran los cinco pasos (request, prepare, promise, propose, accept) y se cierra con <code>N &gt;= 2f + 1</code>. Para las variantes con sensores concretos (humedad, dolar, altitud del dron) conviene el <a href="#u19-algoritmo-sincronico">esquema por rondas</a>, que es más corto de escribir y se mapea directo al "paso a paso de la transferencia de mensajes" que pide el enunciado.</div>
+
+  <h3 id="u19-raft">Raft</h3>
+  <div class="warn">La cátedra deja Raft como <b>lectura de bibliografia</b> y no lo desarrolla en clase: la última diapositiva del deck lo lista con el paper original, las diapositivas del propio autor del algoritmo, una explicación gráfica paso a paso y etcd como aplicación práctica. Lo que sigue es el mínimo para poder mencionarlo con criterio y compararlo con Paxos; no esperes que el final lo pida en detalle.</div>
+
+  <p>Raft resuelve el mismo problema que Paxos (consenso con fallos de caída, quorum de mayoría <code>N &gt;= 2f + 1</code>, sin tolerancia bizantina) pero lo estructura de forma deliberadamente más comprensible: en lugar de acordar valores sueltos, acuerda directamente un <b>log replicado</b>, y para eso separa el problema en elección de líder, replicación del log y seguridad.</p>
+
+  <ul>
+    <li><b>Roles.</b> Cada nodo está en uno de tres estados: <b>follower</b> (pasivo, responde al líder), <b>candidate</b> (está pidiendo votos) o <b>leader</b> (único que atiende clientes). A diferencia de Paxos, donde el líder es una optimización para evitar starvation, en Raft el líder es parte del diseño: todo request de cliente pasa por el.</li>
+    <li><b>Terms.</b> El tiempo se divide en <b>terms</b> (mandatos) numerados. Cada term tiene a lo sumo un líder. El número de term cumple el papel del número de propuesta <code>N</code> de Paxos: un mensaje de un term viejo se rechaza, lo que evita que un ex líder que estuvo pausado siga dando ordenes (split brain).</li>
+    <li><b>Elección de líder.</b> Los followers esperan latidos (heartbeats) del líder. Si vence su <b>election timeout</b>, un follower se vuelve candidate, incrementa el term y pide votos a todos. Gana quien junta mayoría, y anuncia su liderazgo con heartbeats. Los timeouts son <b>aleatorizados</b> dentro de un rango: ese es el truco que evita que todos se postulen a la vez y se repartan los votos elección tras elección.</li>
+    <li><b>Replicación del log.</b> El líder agrega la operación del cliente a su log y la manda a los followers. Cuando la entrada está replicada en la <b>mayoría</b>, el líder la marca como <b>committed</b>, la aplica a su máquina de estados y responde al cliente; los followers la aplican al enterarse. Todas las réplicas ejecutan las mismas operaciones en el mismo orden: <a href="#u17-replicacion-activa">replicación de máquina de estados</a>.</li>
+    <li><b>Seguridad.</b> Solo puede ganar una elección un nodo cuyo log este al menos tan actualizado como el de la mayoría, de modo que nunca se elige un líder que pueda sobreescribir entradas ya committeadas.</li>
+  </ul>
+
+  <table>
+    <thead><tr><th></th><th>Paxos</th><th>Raft</th></tr></thead>
+    <tbody>
+      <tr><td>Que acuerda</td><td>Un valor por instancia (Multi-Paxos extiende a un log)</td><td>Directamente un log replicado</td></tr>
+      <tr><td>Rol del líder</td><td>Opcional en el modelo, necesario en la práctica para evitar starvation</td><td>Central por diseño: todo pasa por el líder</td></tr>
+      <tr><td>Ordenamiento de propuestas</td><td>Número de propuesta <code>N</code> creciente</td><td>Número de <code>term</code> creciente</td></tr>
+      <tr><td>Quorum</td><td><code>N &gt;= 2f + 1</code></td><td><code>N &gt;= 2f + 1</code></td></tr>
+      <tr><td>Fallos tolerados</td><td>Caídas, no bizantinos</td><td>Caídas, no bizantinos</td></tr>
+      <tr><td>Usos conocidos</td><td>Chubby, Spanner</td><td>etcd (y por lo tanto Kubernetes), CockroachDB, TiDB</td></tr>
+    </tbody>
+  </table>
+
+  <details class="mas">
+    <summary>Consenso y el resultado FLP</summary>
+    <p>El teorema FLP (Fischer, Lynch y Paterson) prueba que en un sistema <b>asincrónico</b> ningun algoritmo determinista puede garantizar que el consenso siempre termine si algun proceso puede caerse. No dice que el consenso sea imposible: dice que no se puede garantizar la <b>terminación</b> en tiempo acotado. La demostración asume que el algoritmo no puede usar relojes ni timeouts; en cuanto se permite sospechar de un proceso por timeout (aun equivocandose a veces), o usar números aleatorios, el consenso se vuelve resoluble. Por eso los algoritmos de esta unidad son <b>sincrónicos</b> o dependen de timeouts: es exactamente el ingrediente que FLP prohibia. Y por eso Raft aleatoriza sus election timeouts.</p>
+    <p>El otro resultado útil de encuadre: consenso, log compartido (equivalente a <a href="#u20">orden total</a>), compare-and-set atómico y commit atómico distribuido (<a href="#u17-2pc">2PC</a>) son problemas <b>equivalentes</b>: una solución a cualquiera de ellos se puede convertir en solución de los demas. La diferencia entre consenso y commit atómico es una sola: en consenso se puede decidir cualquier valor propuesto, mientras que en commit atómico hay que abortar si algun participante voto abortar.</p>
+  </details>
+
+  <h3 id="u19-que-algoritmo-elegir">Que algoritmo elegir: resumen para el final</h3>
+  <p>La unidad entera se puede reducir a un mapa de problema a herramienta, y ese mapa es lo que resuelve la mayoría de los ejercicios de final:</p>
+  <table>
+    <thead><tr><th>Problema</th><th>Herramienta</th><th>Quorum</th></tr></thead>
+    <tbody>
+      <tr><td>Elegir quien coordina un grupo, topología de vecinos</td><td><a href="#u19-anillo">Algoritmo del anillo</a></td><td>Tolera f caídas solo si cada nodo conoce f sucesores</td></tr>
+      <tr><td>Elegir quien coordina, todos se conocen y hay timeouts</td><td><a href="#u19-bully">Bully</a></td><td>Gana el mayor ID vivo</td></tr>
+      <tr><td>N procesos acuerdan un valor y algunos pueden caerse</td><td><a href="#u19-algoritmo-sincronico">Rondas sincrónicas</a> (f + 1 rondas) con agregación por mayoría</td><td><code>N &gt;= 2f + 1</code></td></tr>
+      <tr><td>Acordar un valor con propuestas concurrentes y réplicas que deben quedar en el mismo orden</td><td><a href="#u19-paxos">Paxos</a> o <a href="#u19-raft">Raft</a></td><td><code>N &gt;= 2f + 1</code></td></tr>
+      <tr><td>Algun proceso puede responder mal, mentir o dar información distinta a cada uno</td><td><a href="#u19-bizantinos">Generales bizantinos</a> (Oral Messages)</td><td><code>N &gt;= 3f + 1</code></td></tr>
+      <tr><td>Transacción atómica entre nodos que ya confían entre si</td><td><a href="#u17-2pc">Two-phase commit</a></td><td>Requiere unanimidad, no mayoría</td></tr>
+    </tbody>
+  </table>
+  <div class="examen">Checklist para no perder puntos en cualquiera de las variantes: (1) nombrar el algoritmo y sus hipótesis; (2) describir la <b>transferencia de mensajes paso a paso</b>, que es lo que el enunciado suele pedir literalmente; (3) explicitar la <b>función de agregación</b> y su regla de desempate; (4) dar la <b>fórmula de quorum</b> y despejar el número concreto de réplicas que pide el inciso; (5) decir que pasa si se cae un proceso durante el algoritmo (se lo detecta por timeout, su voto no cuenta, y mientras haya quorum se decide igual). Las dos fórmulas, <code>2f + 1</code> para bajas y <code>3f + 1</code> para comportamientos erraticos, son lo primero que hay que tener memorizado de esta unidad.</div>
+</section>

@@ -1,0 +1,901 @@
+<section class="unidad" id="u20" data-titulo="Tiempo, relojes y orden">
+  <h2>U20. Tiempo, relojes, sincronismo, orden y cortes de estado</h2>
+  <p class="intro">En un sistema distribuido no existe un "ahora" compartido: cada nodo tiene su propio reloj, que se desvia, y los mensajes tardan tiempos distintos en llegar. Esta unidad construye las herramientas para razonar sin tiempo global: sincronización de relojes físicos (Cristian, NTP), relojes lógicos y vectoriales para capturar causalidad, la definición de sincronismo aplicable a sistemas distribuidos (steadiness y tightness), las garantías de orden en el delivery de mensajes (FIFO, causal, total) y, como cierre, como sacarle una foto consistente al sistema entero con el algoritmo de Chandy y Lamport. Es una de las unidades más preguntadas en finales, en teoria y en ejercicios.</p>
+
+  <h3 id="u20-tiempo">Tiempo: que es y para que se usa</h3>
+  <div class="def"><b>Tiempo.</b> Magnitud para medir duración y separación de eventos. Se lo modela como una variable monotónica creciente: en sistemas de computación es discreta y no está necesariamente vinculada con la hora de la vida real. El tiempo siempre avanza, nunca retrocede.</div>
+  <p>Medir el tiempo sirve para tres cosas distintas, y conviene no mezclarlas:</p>
+  <ul>
+    <li><b>Ordenar y sincronizar:</b> decidir que paso antes que que, o coordinar acciones.</li>
+    <li><b>Marcar la ocurrencia de un suceso:</b> un <b>timestamp</b> es un punto absoluto en la línea de tiempo.</li>
+    <li><b>Contabilizar duración entre sucesos:</b> un <b>timespan</b> es un intervalo en la línea de tiempo.</li>
+  </ul>
+  <div class="idea">La monotonia no es un detalle formal: es la propiedad que hace que un reloj sirva para ordenar. Si un reloj puede retroceder, dos eventos distintos pueden recibir el mismo timestamp o incluso timestamps invertidos, y todo el razonamiento posterior sobre "antes" se cae. De ahí la regla práctica de la sincronización de relojes físicos: nunca atrasar un reloj.</div>
+
+  <h3 id="u20-relojes-fisicos">Relojes físicos</h3>
+  <p>Los relojes físicos brindan la fecha y hora del día. Pueden ser de cuarzo (los de cualquier computadora comun), atómicos o por GPS. Un sistema puede tener solo <b>relojes locales</b> (cada máquina con el suyo, sin referencia comun) o relojes locales <b>más una referencia global</b> contra la cual todos se ajustan.</p>
+  <p>Las referencias globales estandarizadas son:</p>
+  <table>
+    <thead><tr><th>Referencia</th><th>Base</th><th>Ajustes</th></tr></thead>
+    <tbody>
+      <tr><td>GMT (Greenwich Mean Time)</td><td>Tiempo de rotación terrestre (tiempo astronomico)</td><td>Es el propio movimiento de la Tierra</td></tr>
+      <tr><td>UTC (Universal Time Coordinated)</td><td>Medición de relojes atómicos</td><td>Difiere hasta +/- 1 segundo de GMT y recibe ajustes periódicos (leap seconds)</td></tr>
+      <tr><td>GPS time</td><td>Relojes atómicos en la Tierra</td><td>No recibe ajustes, pero permite ajustar los satelites</td></tr>
+      <tr><td>TAI (Temps Atomique International)</td><td>Unos 200 relojes atómicos en 70 paises</td><td>No recibe ajustes astronomicos</td></tr>
+    </tbody>
+  </table>
+  <div class="warn">UTC no es lo mismo que TAI ni que GPS time: UTC es la escala atómica corregida para seguir a la rotación de la Tierra, y por eso salta. Un sistema que asume que su reloj de referencia es estrictamente monotónico puede romperse justamente en un leap second.</div>
+
+  <h4 id="u20-drift">Drift (y skew)</h4>
+  <div class="def"><b>Drift.</b> Desvio progresivo de un reloj físico respecto de un reloj de referencia, producto de que su frecuencia real no es exactamente la nominal. Los cambios de temperatura, presión y humedad descalibran los cristales y hacen que el reloj se adelante o se atrase.</div>
+  <figure class="diag">
+    <svg viewBox="0 0 400 250" role="img" aria-label="Grafico de tiempo local contra tiempo de referencia con un reloj ideal, uno adelantado y uno atrasado">
+      <defs>
+        <marker id="u20-ar5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+      </defs>
+      <line x1="50" y1="205" x2="50" y2="22" stroke="var(--linea)" marker-end="url(#u20-ar5)"/>
+      <line x1="50" y1="205" x2="368" y2="205" stroke="var(--linea)" marker-end="url(#u20-ar5)"/>
+      <text x="32" y="18" text-anchor="middle" fill="currentColor" font-size="11">t</text>
+      <text x="32" y="30" text-anchor="middle" fill="currentColor" font-size="11">local</text>
+      <text x="368" y="238" text-anchor="end" fill="currentColor" font-size="11">t reference</text>
+
+      <line x1="50" y1="205" x2="290" y2="49" stroke="var(--linea)" stroke-dasharray="5 4"/>
+      <text x="298" y="52" fill="currentColor" font-size="11">Ideal</text>
+      <polyline points="50,205 165,95 300,32" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="150" y="86" text-anchor="end" fill="currentColor" font-size="11">Advanced</text>
+      <polyline points="50,205 220,164 305,90" fill="none" stroke="var(--acc2)" stroke-width="2"/>
+      <text x="236" y="134" fill="currentColor" font-size="11">Delayed</text>
+
+      <line x1="110" y1="205" x2="110" y2="211" stroke="var(--linea)"/>
+      <text x="110" y="224" text-anchor="middle" fill="currentColor" font-size="10">t0</text>
+      <line x1="165" y1="205" x2="165" y2="211" stroke="var(--linea)"/>
+      <text x="165" y="224" text-anchor="middle" fill="currentColor" font-size="10">t1</text>
+      <line x1="220" y1="205" x2="220" y2="211" stroke="var(--linea)"/>
+      <text x="220" y="224" text-anchor="middle" fill="currentColor" font-size="10">t2</text>
+      <line x1="275" y1="205" x2="275" y2="211" stroke="var(--linea)"/>
+      <text x="275" y="224" text-anchor="middle" fill="currentColor" font-size="10">t3</text>
+    </svg>
+    <figcaption>La diagonal punteada es el reloj ideal, que avanza exactamente igual que la referencia. Un reloj adelantado (Advanced) queda por encima y uno atrasado (Delayed) por debajo: la separación vertical en un instante dado es el skew y la pendiente de esa separación es el drift. Corregir consiste en cambiar la pendiente, es decir la frecuencia del reloj local, y no en pegarle un salto al valor: por eso las curvas tienen quiebres (en t1 y en t2 se aplica la corrección) y nunca bajan.</figcaption>
+  </figure>
+  <p>La consecuencia directa es la que importa para la materia: <b>los relojes físicos no son confiables para comparar eventos entre máquinas</b>. Dos nodos pueden estamparle timestamps a dos eventos y que el orden de los timestamps sea el inverso del orden real, simplemente porque uno de los relojes corre más rápido. Por eso todo el resto de la unidad se apoya en relojes lógicos y no en la hora del día.</p>
+  <p>Mitigarlo requiere sincronización periódica, con tres reglas:</p>
+  <ul>
+    <li><b>Medir el desvio</b> respecto de un reloj de referencia (UTC, GPS, un servidor NTP).</li>
+    <li><b>Aplicar corrección o compensación lineal</b> cambiando la frecuencia del reloj local, en lugar de pegarle un salto al valor.</li>
+    <li><b>Nunca atrasar un reloj:</b> si el local está adelantado, se lo hace correr más lento hasta que converja. Retroceder el reloj rompe la monotonia y con eso los timestamps ya emitidos.</li>
+  </ul>
+  <p>Además hay que sincronizar <b>al despertar la computadora</b>: mientras estuvo suspendida el reloj sigue su propio camino (o directamente se congela) y al volver el desvio puede ser enorme.</p>
+  <div class="warn">Conviene distinguir dos cosas que se confunden. El <b>skew</b> es la diferencia instantanea entre las lecturas de dos relojes en un momento dado; el <b>drift</b> es la tasa a la que esa diferencia crece. Corregir el skew una vez no alcanza: mientras exista drift, el skew vuelve a aparecer, y de ahí la necesidad de resincronizar periódicamente. La cátedra trabaja el concepto bajo el nombre de drift y no profundiza en la distinción.</div>
+
+  <h4 id="u20-cristian">Algoritmo de Cristian</h4>
+  <p>Pedirle la hora a un servidor tiene un problema obvio: cuando la respuesta llega, ya es tarde. El algoritmo de Cristian compensa ese delay de red.</p>
+  <p>El cliente registra <code>T0</code> cuando envía el request, el servidor responde con su hora <code>Tserver</code>, y el cliente registra <code>T1</code> cuando recibe la respuesta. Entonces setea su reloj en:</p>
+  <pre><code>Tnew = Tserver + (T1 - T0) / 2</code></pre>
+  <figure class="diag">
+    <svg viewBox="0 0 540 160" role="img" aria-label="Intercambio cliente servidor del algoritmo de Cristian">
+      <defs>
+        <marker id="u20-ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+      </defs>
+      <text x="30" y="45" text-anchor="middle" fill="currentColor" font-size="12">server</text>
+      <text x="30" y="120" text-anchor="middle" fill="currentColor" font-size="12">client</text>
+      <line x1="60" y1="40" x2="510" y2="40" stroke="var(--linea)"/>
+      <line x1="60" y1="115" x2="510" y2="115" stroke="var(--linea)"/>
+      <line x1="130" y1="115" x2="255" y2="43" stroke="var(--acc)" marker-end="url(#u20-ar1)"/>
+      <line x1="300" y1="40" x2="430" y2="112" stroke="var(--acc2)" marker-end="url(#u20-ar1)"/>
+      <circle cx="130" cy="115" r="3" fill="currentColor"/>
+      <circle cx="430" cy="115" r="3" fill="currentColor"/>
+      <text x="130" y="133" text-anchor="middle" fill="currentColor" font-size="11">T0</text>
+      <text x="430" y="133" text-anchor="middle" fill="currentColor" font-size="11">T1</text>
+      <text x="278" y="28" text-anchor="middle" fill="currentColor" font-size="11">Tserver</text>
+      <text x="165" y="80" text-anchor="middle" fill="currentColor" font-size="11">request</text>
+      <text x="400" y="78" text-anchor="middle" fill="currentColor" font-size="11">reply</text>
+      <line x1="130" y1="145" x2="430" y2="145" stroke="var(--linea)"/>
+      <text x="280" y="158" text-anchor="middle" fill="currentColor" font-size="11">T1 - T0 (round trip medido por el cliente)</text>
+    </svg>
+    <figcaption>Cristian: el cliente mide el round trip completo y asume que la mitad corresponde al viaje de vuelta, así que le suma esa mitad a la hora que informo el servidor.</figcaption>
+  </figure>
+  <div class="warn">Las hipótesis son fuertes y hay que enunciarlas: <b>delays de red constantes</b> (la ida tarda lo mismo que la vuelta) y <b>tiempo de procesamiento nulo</b> en el servidor. Si la red es asimétrica o el servidor tarda en atender, la estimación se sesga. Es la razón por la que NTP no se conforma con una sola medición.</div>
+  <div class="examen">Preguntado en finales: "¿A que se refiere el concepto de drift de un reloj? Explique algun algoritmo para mitigar su efecto" (2025-03, 2025-07). La respuesta esperada: definir drift como el desvio por descalibración física, decir por que impide comparar relojes, y desarrollar Cristian con su fórmula y sus hipótesis (o NTP), mencionando las reglas de corrección lineal y nunca atrasar el reloj.</div>
+
+  <h4 id="u20-ntp">NTP</h4>
+  <div class="def"><b>NTP (Network Time Protocol).</b> Protocolo para sincronizar los relojes de un gran número de computadoras contra UTC, tolerando delays de red y caídas. Sus tres objetivos de diseño son sincronización, alta disponibilidad y escalabilidad.</div>
+  <ul>
+    <li><b>Sincronización:</b> mantener a los clientes sincronizados con UTC aunque existan delays en la red, usando <b>análisis estadistico</b> para filtrar mediciones malas y quedarse con resultados de calidad. Es la diferencia con Cristian: en lugar de creerle a una medición, NTP toma muchas y descarta las que dispersan.</li>
+    <li><b>Alta disponibilidad:</b> sobrevivir a largas caídas de conectividad, con rutas redundantes y servidores redundantes.</li>
+    <li><b>Escalabilidad:</b> soportar un gran número de clientes sincronizando de forma frecuente, teniendo en cuenta los efectos del drift.</li>
+  </ul>
+  <p>La estructura es jerárquica, por <b>estratos</b> (stratums):</p>
+  <ul>
+    <li><b>Estrato 0:</b> los master clocks (relojes atómicos, receptores GPS). No son servidores de red: son las fuentes físicas de tiempo.</li>
+    <li><b>Estrato 1:</b> servidores conectados directamente a los master clocks.</li>
+    <li><b>Estrato 2:</b> servidores sincronizados contra servidores de estrato 1. Y en general, <b>estrato N</b> se sincroniza contra estrato N-1.</li>
+    <li>Además, los servidores de un mismo estrato se sincronizan <b>entre si</b> con conexiones peer-to-peer.</li>
+    <li>Los mensajes viajan de forma no reliable: <b>UDP, puerto 123</b>. Perder una medición no es grave porque hay muchas; esperar retransmisiones si lo sería, porque agregaria latencia justamente a lo que se está midiendo.</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 640 300" role="img" aria-label="Jerarquia de servidores NTP en cuatro estratos con enlaces peer horizontales">
+      <defs>
+        <marker id="u20-ar6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        <marker id="u20-ar6b" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M10,0 L0,5 L10,10 z" fill="currentColor"/></marker>
+      </defs>
+
+      <g stroke="var(--linea)" fill="none">
+        <line x1="250" y1="51" x2="160" y2="94"/>
+        <line x1="250" y1="51" x2="340" y2="94"/>
+        <line x1="160" y1="116" x2="90" y2="159"/>
+        <line x1="160" y1="116" x2="190" y2="159"/>
+        <line x1="160" y1="116" x2="290" y2="159"/>
+        <line x1="160" y1="116" x2="390" y2="159"/>
+        <line x1="340" y1="116" x2="90" y2="159"/>
+        <line x1="340" y1="116" x2="190" y2="159"/>
+        <line x1="340" y1="116" x2="290" y2="159"/>
+        <line x1="340" y1="116" x2="390" y2="159"/>
+        <line x1="90" y1="181" x2="60" y2="231"/>
+        <line x1="90" y1="181" x2="128" y2="231"/>
+        <line x1="90" y1="181" x2="196" y2="231"/>
+        <line x1="190" y1="181" x2="60" y2="231"/>
+        <line x1="190" y1="181" x2="128" y2="231"/>
+        <line x1="190" y1="181" x2="264" y2="231"/>
+        <line x1="290" y1="181" x2="196" y2="231"/>
+        <line x1="290" y1="181" x2="332" y2="231"/>
+        <line x1="290" y1="181" x2="400" y2="231"/>
+        <line x1="390" y1="181" x2="264" y2="231"/>
+        <line x1="390" y1="181" x2="332" y2="231"/>
+        <line x1="390" y1="181" x2="400" y2="231"/>
+      </g>
+
+      <line x1="173" y1="105" x2="327" y2="105" stroke="var(--acc2)" marker-start="url(#u20-ar6b)" marker-end="url(#u20-ar6)"/>
+      <text x="250" y="99" text-anchor="middle" fill="currentColor" font-size="9">peer</text>
+      <line x1="103" y1="170" x2="177" y2="170" stroke="var(--acc2)" marker-start="url(#u20-ar6b)" marker-end="url(#u20-ar6)"/>
+      <line x1="203" y1="170" x2="277" y2="170" stroke="var(--acc2)" marker-start="url(#u20-ar6b)" marker-end="url(#u20-ar6)"/>
+      <line x1="303" y1="170" x2="377" y2="170" stroke="var(--acc2)" marker-start="url(#u20-ar6b)" marker-end="url(#u20-ar6)"/>
+      <text x="240" y="164" text-anchor="middle" fill="currentColor" font-size="9">peer</text>
+
+      <circle cx="250" cy="40" r="11" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="250" y="44" text-anchor="middle" fill="currentColor" font-size="10">0</text>
+      <circle cx="160" cy="105" r="11" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="160" y="109" text-anchor="middle" fill="currentColor" font-size="10">1</text>
+      <circle cx="340" cy="105" r="11" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="340" y="109" text-anchor="middle" fill="currentColor" font-size="10">1</text>
+      <circle cx="90" cy="170" r="11" fill="none" stroke="var(--acc)"/>
+      <text x="90" y="174" text-anchor="middle" fill="currentColor" font-size="10">2</text>
+      <circle cx="190" cy="170" r="11" fill="none" stroke="var(--acc)"/>
+      <text x="190" y="174" text-anchor="middle" fill="currentColor" font-size="10">2</text>
+      <circle cx="290" cy="170" r="11" fill="none" stroke="var(--acc)"/>
+      <text x="290" y="174" text-anchor="middle" fill="currentColor" font-size="10">2</text>
+      <circle cx="390" cy="170" r="11" fill="none" stroke="var(--acc)"/>
+      <text x="390" y="174" text-anchor="middle" fill="currentColor" font-size="10">2</text>
+      <circle cx="60" cy="242" r="10" fill="none" stroke="var(--linea)"/>
+      <text x="60" y="246" text-anchor="middle" fill="currentColor" font-size="10">3</text>
+      <circle cx="128" cy="242" r="10" fill="none" stroke="var(--linea)"/>
+      <text x="128" y="246" text-anchor="middle" fill="currentColor" font-size="10">3</text>
+      <circle cx="196" cy="242" r="10" fill="none" stroke="var(--linea)"/>
+      <text x="196" y="246" text-anchor="middle" fill="currentColor" font-size="10">3</text>
+      <circle cx="264" cy="242" r="10" fill="none" stroke="var(--linea)"/>
+      <text x="264" y="246" text-anchor="middle" fill="currentColor" font-size="10">3</text>
+      <circle cx="332" cy="242" r="10" fill="none" stroke="var(--linea)"/>
+      <text x="332" y="246" text-anchor="middle" fill="currentColor" font-size="10">3</text>
+      <circle cx="400" cy="242" r="10" fill="none" stroke="var(--linea)"/>
+      <text x="400" y="246" text-anchor="middle" fill="currentColor" font-size="10">3</text>
+
+      <text x="430" y="44" fill="currentColor" font-size="10">relojes de referencia (atómicos, GPS)</text>
+      <text x="430" y="109" fill="currentColor" font-size="10">estrato 1</text>
+      <text x="430" y="174" fill="currentColor" font-size="10">estrato 2</text>
+      <text x="430" y="246" fill="currentColor" font-size="10">clientes</text>
+      <text x="20" y="285" fill="currentColor" font-size="10">líneas verticales: relación servidor (arriba) a cliente (abajo) | flechas dobles: relación peer dentro del estrato</text>
+    </svg>
+    <figcaption>Cada nodo se sincroniza contra varios servidores del estrato superior, no contra uno solo: si su fuente habitual cae o empieza a devolver lecturas dispersas, se reconfigura y elige otra. Las flechas dobles son la sincronización peer dentro del mismo estrato, que da backup mutuo. Redundancia de servidores, redundancia de rutas y filtrado estadístico son las tres patas de la tolerancia a fallos de NTP.</figcaption>
+  </figure>
+  <p>Tiene tres modos de sincronización:</p>
+  <table>
+    <thead><tr><th>Modo</th><th>Uso</th><th>Característica</th></tr></thead>
+    <tbody>
+      <tr><td>Multicast / broadcast</td><td>LANs de alta velocidad</td><td>Eficiente pero de baja precisión (no mide el delay de ida)</td></tr>
+      <tr><td>Cliente-servidor (RPC)</td><td>Grupos de aplicaciones que se conectan a un servidor</td><td>Las aplicaciones no se sincronizan entre si, solo contra el servidor</td></tr>
+      <tr><td>Simétrico (peer mode)</td><td>Estratos 1 y 2</td><td>Peers sincronizados entre si, proveyendo backup mutuo y máxima precisión</td></tr>
+    </tbody>
+  </table>
+  <div class="examen">Preguntado en finales: "Explique los conceptos clave del modelo Network Time Protocol (NTP) para la sincronización de relojes. ¿Qué factores se consideran relevantes para garantizar la tolerancia a fallos en dicha arquitectura?" (2025-07). Para la segunda parte hay que apuntar a: redundancia de servidores y de rutas, la jerarquía de estratos que permite reconfigurarse dinamicamente eligiendo otra fuente si cae la propia, la sincronización peer-to-peer dentro del estrato como backup mutuo, y el filtrado estadistico que descarta lecturas erroneas o muy dispersas.</div>
+
+  <h3 id="u20-relojes-logicos">Relojes lógicos: eventos, estado y happened-before</h3>
+  <p>Si los relojes físicos no sirven para comparar, hay que abandonar la idea de tiempo absoluto y quedarse con lo único que el sistema realmente sabe: quien causo que.</p>
+  <div class="def"><b>Evento.</b> Suceso relativo al proceso Pi que modifica su estado.</div>
+  <div class="def"><b>Estado.</b> Valores de todas las variables del proceso Pi en un momento dado.</div>
+  <figure class="diag">
+    <svg viewBox="0 0 520 200" role="img" aria-label="La misma corrida de un proceso vista como linea de tiempo con eventos y estados y como cadena de estados">
+      <defs>
+        <marker id="u20-ar7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+      </defs>
+      <text x="52" y="64" text-anchor="end" fill="currentColor" font-size="12">P0</text>
+      <line x1="65" y1="60" x2="425" y2="60" stroke="var(--linea)" marker-end="url(#u20-ar7)"/>
+      <text x="435" y="64" fill="currentColor" font-size="11">tiempo</text>
+      <circle cx="180" cy="60" r="4" fill="var(--acc)"/>
+      <circle cx="300" cy="60" r="4" fill="var(--acc)"/>
+      <text x="180" y="42" text-anchor="middle" fill="currentColor" font-size="11">e: x = 1</text>
+      <text x="300" y="42" text-anchor="middle" fill="currentColor" font-size="11">f: x += 2</text>
+      <text x="70" y="78" fill="currentColor" font-size="11">init: (x = 0)</text>
+      <text x="186" y="78" fill="currentColor" font-size="11">s: (x = 1)</text>
+      <text x="306" y="78" fill="currentColor" font-size="11">t: (x = 3)</text>
+
+      <text x="52" y="152" text-anchor="end" fill="currentColor" font-size="12">P0</text>
+      <rect x="70" y="130" width="82" height="34" rx="16" fill="none" stroke="var(--acc)"/>
+      <text x="111" y="151" text-anchor="middle" fill="currentColor" font-size="11">init: x = 0</text>
+      <rect x="222" y="130" width="82" height="34" rx="16" fill="none" stroke="var(--acc)"/>
+      <text x="263" y="151" text-anchor="middle" fill="currentColor" font-size="11">s: x = 1</text>
+      <rect x="374" y="130" width="82" height="34" rx="16" fill="none" stroke="var(--acc)"/>
+      <text x="415" y="151" text-anchor="middle" fill="currentColor" font-size="11">t: x = 3</text>
+      <line x1="154" y1="147" x2="218" y2="147" stroke="var(--linea)" marker-end="url(#u20-ar7)"/>
+      <text x="186" y="140" text-anchor="middle" fill="currentColor" font-size="11">e</text>
+      <line x1="306" y1="147" x2="370" y2="147" stroke="var(--linea)" marker-end="url(#u20-ar7)"/>
+      <text x="338" y="140" text-anchor="middle" fill="currentColor" font-size="11">f</text>
+    </svg>
+    <figcaption>La misma corrida vista de dos maneras. Los eventos son las transiciones y los estados son lo que hay entre transiciones: e y f rotulan flechas, init, s y t rotulan nodos. Arriba, sobre la línea de tiempo, cada evento queda anotado arriba del punto y el estado que deja queda anotado abajo. El reloj lógico se define sobre los estados, y esta correspondencia es la que permite hablar indistintamente de "ocurre antes" entre eventos o entre estados.</figcaption>
+  </figure>
+  <div class="def"><b>Relación "ocurre antes" (happened before, <code>-&gt;</code>).</b> Relación de causalidad entre eventos o estados definida por tres reglas:
+    <ul>
+      <li><code>a -&gt; b</code> si a y b pertenecen al mismo proceso Pi y a ocurre antes de b en ese proceso.</li>
+      <li><code>a -&gt; b</code> si a es el evento de envio de un mensaje m en Pi y b es el evento de recepción de ese mismo m en Pj.</li>
+      <li><code>a -&gt; c</code> si <code>a -&gt; b</code> y <code>b -&gt; c</code> (transitividad).</li>
+    </ul>
+  </div>
+  <div class="idea">Happened-before es un <b>orden parcial</b>, no total: hay pares de eventos que no están relacionados en ninguna dirección. A esos se los llama <b>concurrentes</b> o <b>paralelos</b> (<code>a || b</code>) y no es que "no se sabe" cual fue primero: es que la pregunta no tiene sentido, porque ninguno pudo influir sobre el otro. Dos procesos que corren sin intercambiar mensajes evolucionan independientemente, y preguntarse si el evento de uno paso antes que el del otro es una pregunta sobre un tiempo global que no existe.</div>
+  <div class="def"><b>Reloj lógico.</b> Dado S el conjunto de todos los estados locales posibles del sistema y la relación "ocurre antes", un reloj lógico es una función C monotónica creciente que mapea cada estado a un número natural y garantiza: <code>s -&gt; t  =&gt;  C(s) &lt; C(t)</code>.</div>
+
+  <h4 id="u20-lamport">Algoritmo de Lamport</h4>
+  <p>La implementación es un único contador escalar por proceso, con tres reglas:</p>
+  <pre><code># proceso Pi
+c = 0
+
+def evento_interno():
+    c = c + 1
+
+def enviar(m, destino):
+    c = c + 1
+    m.c = c              # el timestamp viaja dentro del mensaje
+    send(destino, m)
+
+def recibir(m):
+    c = max(c, m.c) + 1</code></pre>
+  <p>La regla del <code>max</code> en la recepción es la que hace todo el trabajo: obliga al receptor a "saltar" por delante del emisor, garantizando que el evento de recepción tenga un reloj mayor que el de envio, sin importar cuan atrasado estaba el receptor.</p>
+
+  <h4 id="u20-lamport-limites">Limitaciones de Lamport y detección de eventos paralelos</h4>
+  <p>Lamport garantiza la implicación en un solo sentido:</p>
+  <pre><code>s -&gt; t          =&gt;   C(s) &lt; C(t)        # vale siempre
+C(s) &lt; C(t)     =&gt;   s -&gt; t             # NO vale</code></pre>
+  <p>El contraejemplo se lee directamente sobre el <a href="#u20-vectoriales">diagrama de relojes de más abajo</a>, que es el que usa la cátedra: hay dos pares de eventos con exactamente la misma desigualdad de relojes y conclusiones causales opuestas. Por un lado <code>C(t1) = 1 &lt; 5 = C(s4)</code> y efectivamente <code>t1 -&gt; s4</code>, porque hay una cadena de mensajes que los conecta. Por el otro <code>C(s1) = 1 &lt; 4 = C(t4)</code> y sin embargo s1 no causó a t4: son concurrentes. Mirando solo los escalares los dos casos son indistinguibles, y por eso el reloj de Lamport no alcanza para responder si un evento influyó sobre otro.</p>
+  <p>El reloj de Lamport captura dos cosas (el progreso dentro de un proceso y el progreso a traves del envio de mensajes) pero al comprimir todo en un único escalar pierde la información de <b>que</b> evento ocurrio. Entonces, dado <code>C(s) &lt; C(t)</code>, no se puede distinguir si s realmente causo a t o si simplemente son concurrentes y les toco ese orden de números.</p>
+  <p>Una forma de convencerse de que el escalar no dice <i>cuándo</i> ocurrió nada: si se redibuja el mismo diagrama apiñando los eventos de P0 en un intervalo de tiempo real muy chiquito, sin tocar los mensajes, los relojes de Lamport de todos los eventos salen exactamente iguales. Dos corridas con posiciones temporales muy distintas son indistinguibles desde los escalares, porque el reloj de Lamport solo codifica el progreso dentro del proceso y el progreso a través de los mensajes, y nada más.</p>
+  <div class="idea">Hay sin embargo un corolario útil: si dos eventos de procesos distintos tienen <b>el mismo</b> valor de reloj de Lamport, seguro son paralelos, porque si uno causara al otro el segundo tendría un valor estrictamente mayor. En el ejemplo de la figura, <code>C(s2) = C(t2) = 2</code> y por lo tanto <code>s2 || t2</code>.</div>
+  <div class="warn">Que Lamport de un orden total (rompiendo empates por ID de proceso, como hace <a href="#u17-ricart-agrawala">Ricart y Agrawala</a>) no significa que ese orden sea el causal. Es un orden total <b>arbitrario</b> pero consistente con la causalidad: sirve para desempatar quien entra primero a una sección crítica, no para afirmar que un evento influyo sobre otro.</div>
+
+  <h4 id="u20-vectoriales">Vectores de relojes</h4>
+  <div class="def"><b>Vector de relojes.</b> Mapeo de todo estado de un sistema de k procesos a un vector de k números naturales, tal que <code>s -&gt; t  &lt;=&gt;  s.v &lt; t.v</code>, donde la comparación se define como: <code>s.v &lt; t.v</code> si y solo si <code>s.v[j] &lt;= t.v[j]</code> para todo j, y existe al menos un j con <code>s.v[j] &lt; t.v[j]</code>.</div>
+  <p>La idea es que cada proceso deja de guardar solo su propio contador y guarda su visión de los contadores de todos: la posición j del vector de Pi es "cuantos eventos de Pj conozco".</p>
+  <pre><code># proceso Pi, en un sistema de N procesos
+v = [0] * N              # arranca en ceros: todavia no ocurrio ningun evento
+
+def evento_interno():
+    v[i] = v[i] + 1
+
+def enviar(m, destino):
+    v[i] = v[i] + 1
+    m.v = copia(v)       # el vector entero viaja en el mensaje
+    send(destino, m)
+
+def recibir(m):
+    for j in range(N):
+        v[j] = max(v[j], m.v[j])
+    v[i] = v[i] + 1</code></pre>
+  <div class="warn">Ojo con la inicialización, porque hay dos convenciones dando vuelta. La diapositiva de la cátedra declara la componente propia arrancando en uno (<code>v[i] := 1</code>, <code>v[j] := 0</code> para todo <code>j &lt;&gt; i</code>), pero el diagrama de esa misma diapositiva le asigna <code>(1,0)</code> al primer evento de P0, y eso solo sale si el vector arranca en ceros y cada evento suma uno. Arrancar en ceros, como en el pseudocódigo de arriba, es lo consistente y es lo que se espera en el ejercicio. Si en un final se sigue la otra convención, todos los timestamps quedan corridos en uno respecto de los de acá, pero <b>ninguna conclusión sobre causalidad o concurrencia cambia</b>: la comparación componente a componente da lo mismo porque el corrimiento es igual para todos los eventos del mismo proceso. Lo importante es no mezclar las dos en el mismo ejercicio.</div>
+  <p>Ahora la equivalencia vale en los dos sentidos, y eso habilita tres respuestas posibles al comparar dos eventos:</p>
+  <ul>
+    <li><code>V(a) &lt; V(b)</code>: entonces <code>a -&gt; b</code>, a causo (directa o transitivamente) a b.</li>
+    <li><code>V(b) &lt; V(a)</code>: entonces <code>b -&gt; a</code>.</li>
+    <li>Ninguna de las dos: los eventos son <b>concurrentes</b>, <code>a || b</code>. Esta es la información que Lamport no puede dar.</li>
+  </ul>
+
+  <figure class="diag">
+    <svg viewBox="0 0 660 250" role="img" aria-label="Diagrama espacio tiempo de dos procesos con relojes de Lamport y vectores de relojes">
+      <defs>
+        <marker id="u20-ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+      </defs>
+      <text x="18" y="103" fill="currentColor" font-size="12">P0</text>
+      <text x="18" y="163" fill="currentColor" font-size="12">P1</text>
+      <line x1="50" y1="98" x2="600" y2="98" stroke="var(--linea)"/>
+      <line x1="50" y1="158" x2="600" y2="158" stroke="var(--linea)"/>
+      <text x="608" y="235" fill="currentColor" font-size="11">t</text>
+      <line x1="50" y1="230" x2="600" y2="230" stroke="var(--linea)" marker-end="url(#u20-ar2)"/>
+
+      <circle cx="90" cy="98" r="3.5" fill="currentColor"/>
+      <text x="90" y="84" text-anchor="middle" fill="currentColor" font-size="11">s1</text>
+      <text x="90" y="70" text-anchor="middle" fill="currentColor" font-size="10">1 | (1,0)</text>
+      <circle cx="165" cy="98" r="3.5" fill="currentColor"/>
+      <text x="165" y="84" text-anchor="middle" fill="currentColor" font-size="11">s2</text>
+      <text x="165" y="70" text-anchor="middle" fill="currentColor" font-size="10">2 | (2,0)</text>
+      <circle cx="300" cy="98" r="3.5" fill="var(--acc)"/>
+      <text x="300" y="84" text-anchor="middle" fill="currentColor" font-size="11">s3</text>
+      <text x="300" y="70" text-anchor="middle" fill="currentColor" font-size="10">4 | (3,3)</text>
+      <circle cx="385" cy="98" r="3.5" fill="var(--acc2)"/>
+      <text x="385" y="84" text-anchor="middle" fill="currentColor" font-size="11">s4</text>
+      <text x="385" y="70" text-anchor="middle" fill="currentColor" font-size="10">5 | (4,3)</text>
+      <circle cx="475" cy="98" r="3.5" fill="currentColor"/>
+      <text x="475" y="84" text-anchor="middle" fill="currentColor" font-size="11">s5</text>
+      <text x="475" y="70" text-anchor="middle" fill="currentColor" font-size="10">6 | (5,3)</text>
+
+      <circle cx="70" cy="158" r="3.5" fill="currentColor"/>
+      <text x="70" y="176" text-anchor="middle" fill="currentColor" font-size="11">t1</text>
+      <text x="70" y="190" text-anchor="middle" fill="currentColor" font-size="10">1 | (0,1)</text>
+      <circle cx="130" cy="158" r="3.5" fill="currentColor"/>
+      <text x="130" y="176" text-anchor="middle" fill="currentColor" font-size="11">t2</text>
+      <text x="130" y="190" text-anchor="middle" fill="currentColor" font-size="10">2 | (0,2)</text>
+      <circle cx="205" cy="158" r="3.5" fill="var(--acc)"/>
+      <text x="205" y="176" text-anchor="middle" fill="currentColor" font-size="11">t3</text>
+      <text x="205" y="190" text-anchor="middle" fill="currentColor" font-size="10">3 | (0,3)</text>
+      <circle cx="290" cy="158" r="3.5" fill="currentColor"/>
+      <text x="290" y="176" text-anchor="middle" fill="currentColor" font-size="11">t4</text>
+      <text x="290" y="190" text-anchor="middle" fill="currentColor" font-size="10">4 | (0,4)</text>
+      <circle cx="380" cy="158" r="3.5" fill="currentColor"/>
+      <text x="380" y="176" text-anchor="middle" fill="currentColor" font-size="11">t5</text>
+      <text x="380" y="190" text-anchor="middle" fill="currentColor" font-size="10">5 | (0,5)</text>
+      <circle cx="510" cy="158" r="3.5" fill="var(--acc2)"/>
+      <text x="510" y="176" text-anchor="middle" fill="currentColor" font-size="11">t6</text>
+      <text x="510" y="190" text-anchor="middle" fill="currentColor" font-size="10">6 | (4,6)</text>
+
+      <line x1="207" y1="152" x2="298" y2="104" stroke="var(--acc)" marker-end="url(#u20-ar2)"/>
+      <line x1="387" y1="104" x2="508" y2="152" stroke="var(--acc2)" marker-end="url(#u20-ar2)"/>
+      <text x="240" y="126" fill="currentColor" font-size="10">m1</text>
+      <text x="450" y="122" fill="currentColor" font-size="10">m2</text>
+      <text x="50" y="30" fill="currentColor" font-size="10">cada evento rotulado como: reloj de Lamport | vector de relojes</text>
+    </svg>
+    <figcaption>Dos procesos y dos mensajes. En s3, P0 recibe m1 de t3: Lamport hace max(2,3)+1 = 4 y el vector hace max((2,0),(0,3)) = (2,3) y luego incrementa su componente, dando (3,3). Comparaciones: V(t1) = (0,1) &lt; (4,3) = V(s4), así que t1 -&gt; s4. En cambio V(t4) = (0,4) y V(s1) = (1,0) no se dominan en ninguna dirección, así que t4 || s1. Notar también que C(s2) = C(t2) = 2, otro par concurrente.</figcaption>
+  </figure>
+
+  <div class="ej">Como resolver el ejercicio típico de final. <b>Dado el diagrama, calcular los vectores:</b> se recorre cada proceso de izquierda a derecha aplicando las tres reglas, y en cada recepción se toma el max componente a componente con el vector que viajo en el mensaje antes de incrementar el propio. <b>Dados los vectores, reconstruir el diagrama:</b> conviene ordenar los eventos de cada proceso por su propia componente (el proceso que es dueno del índice j es el único que incrementa la posición j) y después, para cada evento cuyo vector "aprendio" componentes ajenas, buscar el evento del otro proceso cuyo vector coincide exactamente en esa componente: ese es el envio del mensaje recibido. <b>Establecer la relación entre dos eventos:</b> comparar componente a componente y responder una de tres cosas: a -&gt; b, b -&gt; a, o a || b (concurrentes).</div>
+
+  <table>
+    <thead><tr><th></th><th>Reloj de Lamport</th><th>Vector de relojes</th></tr></thead>
+    <tbody>
+      <tr><td>Que guarda cada proceso</td><td>Un escalar</td><td>Un vector de k componentes (una por proceso)</td></tr>
+      <tr><td>Que garantiza</td><td><code>a -&gt; b =&gt; C(a) &lt; C(b)</code></td><td><code>a -&gt; b &lt;=&gt; V(a) &lt; V(b)</code></td></tr>
+      <tr><td>Detecta concurrencia</td><td>No (solo el caso de igualdad delata paralelismo)</td><td>Si: vectores incomparables</td></tr>
+      <tr><td>Costo</td><td>Un entero por mensaje</td><td>k enteros por mensaje; hay que conocer k</td></tr>
+      <tr><td>Para que se usa</td><td>Ordenar eventos, desempatar accesos (exclusión mutua, orden total arbitrario)</td><td>Detectar causalidad y concurrencia (orden causal, detección de conflictos entre réplicas)</td></tr>
+    </tbody>
+  </table>
+  <div class="examen">De los temas más repetidos: "Explique la utilidad de los algoritmos de relojes lógicos de Lamport y de vectores de relojes (lógicos) explicados en clase. ¿Para que sirve cada uno?" (2024-07, 2024-12, 2025-02). Y en la parte práctica: "Dado el siguiente diagrama de tiempo, calcule el valor del vector de relojes lógicos para cada evento. Utilizando únicamente los vectores de relojes, establezca la relación entre b y g, entre d y g. Justifique" (2022-08), y la variante inversa "Reconstruya el diagrama de tiempo de los eventos a, b, c, d, e, f, g para la comunicación de 3 procesos dados los siguientes vectores de relojes. Establezca la relación entre los pares a-d y a-f" (2025-07, 2025-12). Lo que se espera en la teórica: que Lamport ordena pero no detecta concurrencia, y que los vectores si, con la fórmula de comparación explicita.</div>
+
+  <h3 id="u20-sincronismo">Sincronismo y asincronismo</h3>
+  <p>Los términos sincrónico y asincrónico no significan lo mismo en todos los contextos, y buena parte de la confusión viene de mezclarlos:</p>
+  <table>
+    <thead><tr><th>Contexto</th><th>Sincrónico</th><th>Asincrónico</th></tr></thead>
+    <tbody>
+      <tr><td>Ejecución de eventos</td><td>Bloqueante (un socket que bloquea al leer)</td><td>No bloqueante (promises, callbacks)</td></tr>
+      <tr><td>Comunicación entre grupos</td><td>Las entidades interactuan entre si, con puntos de sincronización</td><td>Las entidades son independientes y avanzan sin coordinarse</td></tr>
+      <tr><td>Sistemas digitales</td><td>Entidades coordinadas por el mismo reloj (el clock de una CPU)</td><td>Entidades coordinadas por relojes diferentes</td></tr>
+      <tr><td>Sistemas distribuidos</td><td colspan="2">Se define sobre la <b>delimitación temporal de las acciones</b>, ver abajo</td></tr>
+    </tbody>
+  </table>
+  <div class="def"><b>Sincronismo en sistemas distribuidos.</b> Un algoritmo o protocolo es sincrónico si sus acciones pueden ser delimitadas en el tiempo. Con la entrega de mensajes como acción de referencia:
+    <ul>
+      <li><b>Sincrónico:</b> la entrega de un mensaje posee un timeout conocido.</li>
+      <li><b>Parcialmente sincrónico:</b> la entrega no posee un timeout conocido, o bien el timeout es variable.</li>
+      <li><b>Asincrónico:</b> la entrega no posee timeout asociado; no se sabe cuando puede llegar un mensaje.</li>
+    </ul>
+  </div>
+  <div class="warn">Un protocolo con reintentos sigue siendo sincrónico si la cantidad de reintentos está acotada: si hay a lo sumo 5 retries de timeout T, el peor caso es 5T, que es un tiempo conocido. Lo que rompe el sincronismo no es reintentar, es no poder acotar.</div>
+  <div class="idea">Por que importa: un sistema sincrónico habilita razonar por <b>rondas</b> y usar la ausencia de un mensaje como información ("no llego antes del timeout, entonces el proceso murio"). De ahí que los algoritmos de <a href="#u17-consenso">consenso</a> por rondas y de <a href="#u19">generales bizantinos</a> asuman sincronismo: sin timeout conocido no se puede distinguir un proceso caído de uno lento.</div>
+
+  <h4 id="u20-steadiness-tightness">Steadiness y tightness</h4>
+  <p>Las definiciones anteriores hablan de un protocolo. Para generalizarlas al <b>sistema</b> se usan dos métricas, sobre dos atributos previos:</p>
+  <ul>
+    <li><b>Tiempo de delivery</b> <code>tD_p(m)</code>: el tiempo que tarda el mensaje m en ser recibido por p luego de haber sido enviado.</li>
+    <li><b>Timeout de delivery</b> <code>TDmax</code>: cota superior conocida, todo mensaje enviado se recibe antes de ese tiempo.</li>
+  </ul>
+  <div class="def"><b>Steadiness (sigma).</b> Máxima diferencia entre el mínimo y el máximo tiempo de delivery de cualquier mensaje recibido por un proceso: <code>sigma = max(TDmax - TDmin)</code>. Define la varianza con la que un proceso observa que recibe los mensajes, es decir, que tan constante (steady) es la recepción.</div>
+  <div class="def"><b>Tightness (tau).</b> Máxima diferencia entre los tiempos de delivery de un mismo mensaje m para procesos distintos: <code>tau = max sobre m,p,q de (tD_p(m) - tD_q(m))</code>. Define la simultaneidad con la que un mismo mensaje es recibido por múltiples procesos.</div>
+  <figure class="diag">
+    <svg viewBox="0 0 660 320" role="img" aria-label="Tres procesos p q s con dos mensajes, la banda vertical de tightness y la banda horizontal de steadiness">
+      <defs>
+        <marker id="u20-ar8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+      </defs>
+
+      <rect x="215" y="62" width="175" height="176" fill="var(--acc)" fill-opacity="0.14"/>
+      <text x="302" y="56" text-anchor="middle" fill="currentColor" font-size="12">tau (tightness)</text>
+
+      <line x1="140" y1="62" x2="140" y2="292" stroke="var(--acc2)" stroke-dasharray="3 3"/>
+      <line x1="215" y1="62" x2="215" y2="292" stroke="var(--acc2)" stroke-dasharray="3 3"/>
+      <line x1="540" y1="80" x2="540" y2="292" stroke="var(--acc2)" stroke-dasharray="3 3"/>
+
+      <text x="78" y="84" text-anchor="end" fill="currentColor" font-size="12">p</text>
+      <text x="78" y="154" text-anchor="end" fill="currentColor" font-size="12">q</text>
+      <text x="78" y="224" text-anchor="end" fill="currentColor" font-size="12">s</text>
+      <line x1="90" y1="80" x2="620" y2="80" stroke="var(--linea)"/>
+      <line x1="90" y1="150" x2="620" y2="150" stroke="var(--linea)"/>
+      <line x1="90" y1="220" x2="620" y2="220" stroke="var(--linea)"/>
+
+      <text x="136" y="74" text-anchor="end" fill="currentColor" font-size="10">envía m</text>
+      <text x="136" y="214" text-anchor="end" fill="currentColor" font-size="10">envía m'</text>
+
+      <path d="M142,78 C 165,62 195,62 212,77" fill="none" stroke="var(--acc)" marker-end="url(#u20-ar8)"/>
+      <line x1="143" y1="84" x2="298" y2="216" stroke="var(--acc)" marker-end="url(#u20-ar8)"/>
+      <line x1="143" y1="84" x2="388" y2="146" stroke="var(--acc)" marker-end="url(#u20-ar8)"/>
+      <circle cx="215" cy="80" r="4" fill="var(--acc)"/>
+      <circle cx="300" cy="220" r="4" fill="var(--acc)"/>
+      <circle cx="390" cy="150" r="4" fill="var(--acc)"/>
+      <text x="196" y="106" fill="currentColor" font-size="10">m</text>
+
+      <path d="M142,216 C 250,196 400,196 476,215" fill="none" stroke="var(--acc2)" stroke-dasharray="5 3" marker-end="url(#u20-ar8)"/>
+      <line x1="143" y1="214" x2="498" y2="156" stroke="var(--acc2)" stroke-dasharray="5 3" marker-end="url(#u20-ar8)"/>
+      <line x1="143" y1="214" x2="538" y2="86" stroke="var(--acc2)" stroke-dasharray="5 3" marker-end="url(#u20-ar8)"/>
+      <circle cx="480" cy="220" r="4" fill="var(--acc2)"/>
+      <circle cx="500" cy="150" r="4" fill="var(--acc2)"/>
+      <circle cx="540" cy="80" r="4" fill="var(--acc2)"/>
+      <text x="188" y="196" fill="currentColor" font-size="10">m'</text>
+
+      <line x1="140" y1="258" x2="540" y2="258" stroke="var(--linea)"/>
+      <line x1="140" y1="253" x2="140" y2="263" stroke="var(--linea)"/>
+      <line x1="540" y1="253" x2="540" y2="263" stroke="var(--linea)"/>
+      <text x="340" y="252" text-anchor="middle" fill="currentColor" font-size="10">TDmax(p): delivery de m' en p</text>
+
+      <rect x="215" y="276" width="325" height="16" fill="var(--acc2)" fill-opacity="0.18"/>
+      <text x="378" y="288" text-anchor="middle" fill="currentColor" font-size="10">sigma (steadiness) = TDmax(p) - TDmin(p)</text>
+      <line x1="140" y1="284" x2="215" y2="284" stroke="var(--linea)"/>
+      <line x1="140" y1="279" x2="140" y2="289" stroke="var(--linea)"/>
+      <line x1="215" y1="279" x2="215" y2="289" stroke="var(--linea)"/>
+      <text x="177" y="304" text-anchor="middle" fill="currentColor" font-size="10">TDmin(p)</text>
+
+      <text x="14" y="316" fill="currentColor" font-size="9">m y m' salen en el mismo instante (línea vertical de puntos de la izquierda) | los puntos marcan el delivery</text>
+    </svg>
+    <figcaption>Sobre el mismo escenario se leen las dos métricas. <b>Tau se mide en vertical</b>, comparando cuándo llega un mismo mensaje a procesos distintos: m se entrega primero en p (que se lo manda a sí mismo, casi sin costo), después en s y por último en q, y el ancho de esa banda es la tightness. <b>Sigma se mide en horizontal sobre una sola línea de vida</b>: p entregó m rapidísimo y m' muy tarde, así que la diferencia entre su tiempo de delivery más corto y el más largo es la steadiness. En los dos casos, más chico es mejor.</figcaption>
+  </figure>
+  <div class="idea">La regla mnemotecnica: <b>steadiness</b> compara mensajes distintos en un mismo proceso (constancia), <b>tightness</b> compara un mismo mensaje en procesos distintos (simultaneidad). En ambos casos, <b>valor más chico es mejor</b>: sigma chico significa latencia predecible, tau chico significa que un broadcast llega a todos casi al mismo tiempo. Sin recaudos extra los valores son grandes por razones triviales de topología: un mensaje que un proceso se manda a si mismo en la misma máquina tarda casi nada, y el mismo mensaje enviado a otro continente tarda cientos de milisegundos.</div>
+  <p>Para que sirven: no son adornos formales, son las métricas que permiten <b>comparar dos protocolos</b> y decidir si alguno sirve para el caso de uso, y son las precondiciones que se enuncian al diseñar un algoritmo que necesita predictibilidad.</p>
+
+  <h4 id="u20-protocolos-sincronismo">Protocolos: del mejor esfuerzo a TDMA</h4>
+  <p>Tres familias, en orden creciente de control:</p>
+  <ol>
+    <li><b>Sincrónico con timeout y retries (el approach habitual).</b> Un proceso hace multicast del mensaje y espera los ACK de todos con un timeout; si falta alguno, reenvia, hasta un máximo de reintentos, y después arranca la ronda siguiente. Es sincrónico porque el timeout total está acotado, pero <b>no ofrece ninguna garantía de steadiness ni de tightness</b>: los mensajes llegan cuando llegan. Es lo que se obtiene al mandar mensajes por un socket TCP sin agregar nada.</li>
+    <li><b>Time-driven (protocolos delta).</b> Las acciones se definen relativas a un evento disparador: si el mensaje se envio en el tiempo t, se garantiza que se entrega dentro de la ventana <code>(t, t + delta)</code>; pasado ese lapso, se considera falla.</li>
+    <li><b>Clock-driven.</b> Los procesos comparten un reloj global sincronizado. El emisor manda el mensaje etiquetado con el instante <code>t</code> en que lo genero, y <b>todos los receptores retienen el mensaje y hacen el delivery recien en <code>t + delta</code></b>. Aunque el mensaje haya llegado a cada uno en momentos distintos, se procesa en la misma franja en todos: eso acota tau directamente por construcción.</li>
+  </ol>
+  <div class="ej"><b>TDMA (Time División Múltiple Access)</b> es el caso extremo de clock-driven. Además del delivery diferido, el tiempo se divide en <b>slots</b> y a cada proceso le corresponde un slot fijo del periodo del sistema en el que tiene permiso para enviar. Llega el frente de tiempo t, P1 envía (si tiene algo que enviar) y su mensaje se entrega en la franja siguiente; llega el frente t+1 y le toca a P2, y así. Es muy steady y muy tight: no elimina la posibilidad de que un mensaje se pierda, pero garantiza que en ese intervalo o llega o no llega, y eso es exactamente lo que un algoritmo que necesita predictibilidad requiere. Es la familia de protocolos que aparece en <a href="#u21-comunicacion">sistemas de tiempo real</a>.</div>
+  <figure class="diag">
+    <svg viewBox="0 0 660 700" role="img" aria-label="Tres paneles comparando el protocolo de timeout con retries, el protocolo delta y el protocolo TDMA">
+      <defs>
+        <marker id="u20-ar9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+      </defs>
+
+      <text x="10" y="18" fill="currentColor" font-size="12">A. timeout y retries: sincrónico, pero ni steady ni tight</text>
+      <line x1="120" y1="40" x2="310" y2="40" stroke="var(--linea)"/>
+      <line x1="120" y1="35" x2="120" y2="45" stroke="var(--linea)"/>
+      <line x1="310" y1="35" x2="310" y2="45" stroke="var(--linea)"/>
+      <text x="215" y="34" text-anchor="middle" fill="currentColor" font-size="10">Ttout</text>
+      <text x="52" y="66" text-anchor="end" fill="currentColor" font-size="11">P1</text>
+      <text x="52" y="100" text-anchor="end" fill="currentColor" font-size="11">P2</text>
+      <text x="52" y="134" text-anchor="end" fill="currentColor" font-size="11">P3</text>
+      <text x="52" y="168" text-anchor="end" fill="currentColor" font-size="11">P4</text>
+      <line x1="60" y1="62" x2="630" y2="62" stroke="var(--linea)"/>
+      <line x1="60" y1="96" x2="630" y2="96" stroke="var(--linea)"/>
+      <line x1="60" y1="130" x2="630" y2="130" stroke="var(--linea)"/>
+      <line x1="60" y1="164" x2="630" y2="164" stroke="var(--linea)"/>
+
+      <rect x="117" y="59" width="6" height="6" fill="var(--acc)"/>
+      <path d="M124,60 C 133,46 148,46 155,58" fill="none" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <line x1="123" y1="64" x2="174" y2="94" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <line x1="123" y1="64" x2="196" y2="120" stroke="var(--acc)"/>
+      <line x1="196" y1="120" x2="204" y2="128" stroke="var(--acc)"/>
+      <line x1="204" y1="120" x2="196" y2="128" stroke="var(--acc)"/>
+      <line x1="123" y1="64" x2="203" y2="162" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <circle cx="158" cy="62" r="3.5" fill="none" stroke="var(--acc)"/>
+      <circle cx="177" cy="96" r="3.5" fill="none" stroke="var(--acc)"/>
+      <circle cx="206" cy="164" r="3.5" fill="none" stroke="var(--acc)"/>
+      <line x1="163" y1="62" x2="226" y2="62" stroke="var(--linea)" stroke-dasharray="3 3"/>
+      <line x1="182" y1="96" x2="316" y2="96" stroke="var(--linea)" stroke-dasharray="3 3"/>
+      <line x1="211" y1="164" x2="286" y2="164" stroke="var(--linea)" stroke-dasharray="3 3"/>
+      <circle cx="230" cy="62" r="4" fill="var(--acc)"/>
+      <circle cx="320" cy="96" r="4" fill="var(--acc)"/>
+      <circle cx="290" cy="164" r="4" fill="var(--acc)"/>
+      <line x1="182" y1="92" x2="248" y2="66" stroke="var(--acc2)" marker-end="url(#u20-ar9)"/>
+      <line x1="210" y1="160" x2="270" y2="66" stroke="var(--acc2)" marker-end="url(#u20-ar9)"/>
+      <text x="262" y="86" fill="currentColor" font-size="9">ack</text>
+      <rect x="307" y="59" width="6" height="6" fill="var(--acc)"/>
+      <text x="316" y="54" fill="currentColor" font-size="9">retry [k=1]</text>
+      <line x1="313" y1="64" x2="390" y2="126" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <circle cx="392" cy="130" r="3.5" fill="none" stroke="var(--acc)"/>
+      <line x1="397" y1="130" x2="416" y2="130" stroke="var(--linea)" stroke-dasharray="3 3"/>
+      <circle cx="420" cy="130" r="4" fill="var(--acc)"/>
+      <line x1="120" y1="190" x2="450" y2="190" stroke="var(--linea)"/>
+      <line x1="120" y1="185" x2="120" y2="195" stroke="var(--linea)"/>
+      <line x1="450" y1="185" x2="450" y2="195" stroke="var(--linea)"/>
+      <text x="285" y="204" text-anchor="middle" fill="currentColor" font-size="10">fase 1</text>
+      <line x1="470" y1="190" x2="620" y2="190" stroke="var(--linea)"/>
+      <line x1="470" y1="185" x2="470" y2="195" stroke="var(--linea)"/>
+      <line x1="620" y1="185" x2="620" y2="195" stroke="var(--linea)"/>
+      <text x="545" y="204" text-anchor="middle" fill="currentColor" font-size="10">fase 2</text>
+
+      <text x="10" y="244" fill="currentColor" font-size="12">B. clock-driven, protocolo delta: steady y tight</text>
+      <rect x="520" y="272" width="30" height="124" fill="var(--acc)" fill-opacity="0.16"/>
+      <line x1="520" y1="266" x2="550" y2="266" stroke="var(--linea)"/>
+      <line x1="520" y1="261" x2="520" y2="271" stroke="var(--linea)"/>
+      <line x1="550" y1="261" x2="550" y2="271" stroke="var(--linea)"/>
+      <text x="535" y="258" text-anchor="middle" fill="currentColor" font-size="11">pi</text>
+      <line x1="130" y1="272" x2="130" y2="396" stroke="var(--acc2)" stroke-dasharray="3 3"/>
+      <text x="130" y="410" text-anchor="middle" fill="currentColor" font-size="10">t</text>
+      <text x="535" y="410" text-anchor="middle" fill="currentColor" font-size="10">t + delta</text>
+      <text x="58" y="296" text-anchor="end" fill="currentColor" font-size="11">P1</text>
+      <text x="58" y="326" text-anchor="end" fill="currentColor" font-size="11">P2</text>
+      <text x="58" y="356" text-anchor="end" fill="currentColor" font-size="11">P3</text>
+      <text x="58" y="386" text-anchor="end" fill="currentColor" font-size="11">P4</text>
+      <g fill="none" stroke="var(--acc2)">
+        <circle cx="76" cy="292" r="7"/><circle cx="76" cy="322" r="7"/><circle cx="76" cy="352" r="7"/><circle cx="76" cy="382" r="7"/>
+        <path d="M76,288 L76,292 L79,294"/><path d="M76,318 L76,322 L79,324"/><path d="M76,348 L76,352 L79,354"/><path d="M76,378 L76,382 L79,384"/>
+      </g>
+      <line x1="92" y1="292" x2="630" y2="292" stroke="var(--linea)"/>
+      <line x1="92" y1="322" x2="630" y2="322" stroke="var(--linea)"/>
+      <line x1="92" y1="352" x2="630" y2="352" stroke="var(--linea)"/>
+      <line x1="92" y1="382" x2="630" y2="382" stroke="var(--linea)"/>
+      <rect x="127" y="289" width="6" height="6" fill="var(--acc)"/>
+      <path d="M133,290 C 142,278 156,278 163,288" fill="none" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <line x1="133" y1="296" x2="197" y2="318" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <line x1="133" y1="296" x2="257" y2="348" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <line x1="133" y1="296" x2="347" y2="378" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <circle cx="167" cy="292" r="3.5" fill="none" stroke="var(--acc)"/>
+      <circle cx="200" cy="322" r="3.5" fill="none" stroke="var(--acc)"/>
+      <circle cx="260" cy="352" r="3.5" fill="none" stroke="var(--acc)"/>
+      <circle cx="350" cy="382" r="3.5" fill="none" stroke="var(--acc)"/>
+      <g stroke="var(--linea)" stroke-dasharray="3 3">
+        <line x1="172" y1="292" x2="518" y2="292"/>
+        <line x1="205" y1="322" x2="518" y2="322"/>
+        <line x1="265" y1="352" x2="518" y2="352"/>
+        <line x1="355" y1="382" x2="518" y2="382"/>
+      </g>
+      <circle cx="535" cy="292" r="4" fill="var(--acc)"/>
+      <circle cx="535" cy="322" r="4" fill="var(--acc)"/>
+      <circle cx="535" cy="352" r="4" fill="var(--acc)"/>
+      <circle cx="535" cy="382" r="4" fill="var(--acc)"/>
+      <text x="76" y="268" text-anchor="middle" fill="currentColor" font-size="9">reloj global</text>
+
+      <text x="10" y="454" fill="currentColor" font-size="12">C. TDMA: además, cada proceso emite solo en su slot</text>
+      <line x1="120" y1="474" x2="600" y2="474" stroke="var(--linea)"/>
+      <line x1="120" y1="469" x2="120" y2="479" stroke="var(--linea)"/>
+      <line x1="600" y1="469" x2="600" y2="479" stroke="var(--linea)"/>
+      <text x="360" y="468" text-anchor="middle" fill="currentColor" font-size="10">período del sistema</text>
+      <text x="114" y="478" text-anchor="end" fill="currentColor" font-size="10">ti</text>
+      <text x="606" y="478" fill="currentColor" font-size="10">ti+1</text>
+      <g fill="none" stroke="var(--acc2)">
+        <circle cx="120" cy="490" r="6"/><circle cx="240" cy="490" r="6"/><circle cx="360" cy="490" r="6"/><circle cx="480" cy="490" r="6"/><circle cx="600" cy="490" r="6"/>
+        <path d="M120,487 L120,490 L123,492"/><path d="M240,487 L240,490 L243,492"/><path d="M360,487 L360,490 L363,492"/><path d="M480,487 L480,490 L483,492"/><path d="M600,487 L600,490 L603,492"/>
+      </g>
+      <text x="229" y="524" text-anchor="middle" fill="currentColor" font-size="9">pi</text>
+      <line x1="360" y1="506" x2="480" y2="506" stroke="var(--linea)"/>
+      <line x1="360" y1="501" x2="360" y2="511" stroke="var(--linea)"/>
+      <line x1="480" y1="501" x2="480" y2="511" stroke="var(--linea)"/>
+      <text x="420" y="520" text-anchor="middle" fill="currentColor" font-size="10">SlotTime</text>
+      <text x="52" y="544" text-anchor="end" fill="currentColor" font-size="11">P1</text>
+      <text x="52" y="572" text-anchor="end" fill="currentColor" font-size="11">P2</text>
+      <text x="52" y="600" text-anchor="end" fill="currentColor" font-size="11">P3</text>
+      <text x="52" y="628" text-anchor="end" fill="currentColor" font-size="11">P4</text>
+      <rect x="218" y="528" width="22" height="108" fill="var(--acc)" fill-opacity="0.16"/>
+      <rect x="338" y="528" width="22" height="108" fill="var(--acc)" fill-opacity="0.16"/>
+      <rect x="458" y="528" width="22" height="108" fill="var(--acc)" fill-opacity="0.16"/>
+      <rect x="578" y="528" width="22" height="108" fill="var(--acc)" fill-opacity="0.16"/>
+      <g stroke="var(--acc2)" stroke-dasharray="3 3">
+        <line x1="120" y1="528" x2="120" y2="636"/>
+        <line x1="240" y1="528" x2="240" y2="636"/>
+        <line x1="360" y1="528" x2="360" y2="636"/>
+        <line x1="480" y1="528" x2="480" y2="636"/>
+        <line x1="600" y1="528" x2="600" y2="636"/>
+      </g>
+      <line x1="60" y1="540" x2="630" y2="540" stroke="var(--linea)"/>
+      <line x1="60" y1="568" x2="630" y2="568" stroke="var(--linea)"/>
+      <line x1="60" y1="596" x2="630" y2="596" stroke="var(--linea)"/>
+      <line x1="60" y1="624" x2="630" y2="624" stroke="var(--linea)"/>
+      <rect x="127" y="537" width="6" height="6" fill="var(--acc)"/>
+      <path d="M133,538 C 141,527 151,527 156,536" fill="none" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <line x1="133" y1="542" x2="172" y2="564" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <line x1="133" y1="542" x2="190" y2="592" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <line x1="133" y1="542" x2="200" y2="620" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <circle cx="158" cy="540" r="3.5" fill="none" stroke="var(--acc)"/>
+      <circle cx="175" cy="568" r="3.5" fill="none" stroke="var(--acc)"/>
+      <circle cx="193" cy="596" r="3.5" fill="none" stroke="var(--acc)"/>
+      <circle cx="203" cy="624" r="3.5" fill="none" stroke="var(--acc)"/>
+      <g stroke="var(--linea)" stroke-dasharray="3 3">
+        <line x1="163" y1="540" x2="216" y2="540"/>
+        <line x1="180" y1="568" x2="216" y2="568"/>
+        <line x1="198" y1="596" x2="216" y2="596"/>
+      </g>
+      <circle cx="229" cy="540" r="4" fill="var(--acc)"/>
+      <circle cx="229" cy="568" r="4" fill="var(--acc)"/>
+      <circle cx="229" cy="596" r="4" fill="var(--acc)"/>
+      <circle cx="229" cy="624" r="4" fill="var(--acc)"/>
+      <rect x="247" y="565" width="6" height="6" fill="var(--acc)"/>
+      <line x1="253" y1="566" x2="330" y2="542" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <circle cx="349" cy="540" r="4" fill="var(--acc)"/>
+      <circle cx="349" cy="568" r="4" fill="var(--acc)"/>
+      <circle cx="349" cy="596" r="4" fill="var(--acc)"/>
+      <circle cx="349" cy="624" r="4" fill="var(--acc)"/>
+      <rect x="367" y="593" width="6" height="6" fill="var(--acc)"/>
+      <line x1="373" y1="594" x2="450" y2="542" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <circle cx="469" cy="540" r="4" fill="var(--acc)"/>
+      <circle cx="469" cy="568" r="4" fill="var(--acc)"/>
+      <circle cx="469" cy="596" r="4" fill="var(--acc)"/>
+      <circle cx="469" cy="624" r="4" fill="var(--acc)"/>
+      <rect x="487" y="621" width="6" height="6" fill="var(--acc)"/>
+      <line x1="493" y1="622" x2="570" y2="542" stroke="var(--acc)" marker-end="url(#u20-ar9)"/>
+      <circle cx="589" cy="540" r="4" fill="var(--acc)"/>
+      <circle cx="589" cy="568" r="4" fill="var(--acc)"/>
+      <circle cx="589" cy="596" r="4" fill="var(--acc)"/>
+      <circle cx="589" cy="624" r="4" fill="var(--acc)"/>
+      <text x="180" y="650" text-anchor="middle" fill="currentColor" font-size="9">slot P1</text>
+      <text x="300" y="650" text-anchor="middle" fill="currentColor" font-size="9">slot P2</text>
+      <text x="420" y="650" text-anchor="middle" fill="currentColor" font-size="9">slot P3</text>
+      <text x="540" y="650" text-anchor="middle" fill="currentColor" font-size="9">slot P4</text>
+
+      <text x="14" y="674" fill="currentColor" font-size="9">cuadrado: envío | círculo hueco: recepción | círculo relleno: delivery | línea de puntos: espera en la hold-back queue</text>
+      <text x="14" y="688" fill="currentColor" font-size="9">cruz: mensaje perdido | banda sombreada: franja de delivery, de ancho pi | reloj: reloj global sincronizado</text>
+    </svg>
+    <figcaption>En <b>A</b> los deliveries caen donde caen: cada proceso entrega en cuanto puede, la fase solo está acotada por Ttout y el mensaje perdido obliga a un retry antes de que la ronda cierre. El protocolo es sincrónico (el peor caso está acotado) pero ni steady ni tight. En <b>B</b> las recepciones siguen siendo dispersas, pero como todos los procesos comparten el reloj global y difieren el delivery hasta <code>t + delta</code>, las entregas colapsan en una franja de ancho <code>pi</code>: eso es acotar tau por construcción, y pi es la tightness que efectivamente queda (no es cero porque los relojes tampoco están sincronizados de forma perfecta). En <b>C</b> se agrega la disciplina de emisión: el período del sistema se parte en slots de largo SlotTime, cada proceso emite solo en el suyo y su mensaje se entrega en la franja del borde de slot, con lo cual también queda acotado sigma.</figcaption>
+  </figure>
+  <p class="nota">La nomenclatura del deck y la de este apunte no calzan uno a uno, y conviene tenerlo claro si en un final se pide clasificar. La clase agrupa en dos familias: bajo <b>time-driven</b> pone el protocolo de timeout con acks, reintentos y fases (panel A), y bajo <b>clock-driven</b> pone tanto el protocolo delta como TDMA (paneles B y C). Acá el protocolo delta aparece separado porque la ventana <code>(t, t + delta)</code> se puede definir relativa al evento de envío sin reloj global, pero la figura de la clase que le corresponde es la de clock-driven.</p>
+  <div class="examen">Preguntado en finales: "¿Cómo se garantiza que un algoritmo o protocolo sea sincrónico en el contexto de sistemas distribuidos?" (2025-07). Respuesta esperada: la definición (acciones delimitables en el tiempo, timeout de entrega conocido), la distinción sincrónico / parcialmente sincrónico / asincrónico, y como se logra en la práctica: timeouts acotados con reintentos acotados, o mejor, protocolos time-driven y clock-driven tipo TDMA que acotan steadiness y tightness. Conviene nombrar sigma y tau con su interpretación, que es lo que distingue una respuesta completa.</div>
+
+  <h3 id="u20-orden">Orden de mensajes</h3>
+  <h4 id="u20-holdback">Recepción no es delivery: la hold-back queue</h4>
+  <div class="def"><b>Delivery.</b> Acto de procesar un mensaje, provocando eventualmente cambios en el estado del proceso. Es distinto de la recepción, que es la llegada del mensaje al nodo. Entre una y otro hay una <b>hold-back queue</b>: una cola donde los mensajes se retienen, permitiendo demorar el delivery y también reordenar.</div>
+  <p>El mecanismo tiene dos colas. Los mensajes que llegan entran a la hold-back queue; cuando se cumple la garantía que el sistema quiere proveer, pasan a la <b>delivery queue</b>, de la que el proceso los consume (bloqueandose si está vacia).</p>
+  <pre><code>def al_recibir(m):
+    holdback.push(m)
+    while cumple_garantia(holdback.head()):
+        delivery.push(holdback.pop())
+
+def loop_del_proceso():
+    while True:
+        m = delivery.pop()      # bloquea si esta vacia
+        procesar(m)</code></pre>
+  <div class="ej">TCP es exactamente esto. Su buffer de recepción es una hold-back queue: si llegan los segmentos 1 y 3 pero falta el 2, el 3 no se entrega a la aplicación, se retiene hasta que llegue el 2, y entonces se pasan ordenados. La aplicación lee 1, 2, 3 y no se entera del desorden. UDP no tiene este control: el paquete llega y se entrega tal cual. Y la misma estructura sirve para otras garantías que no son orden: deduplicación, filtrado, o esperar a que un mensaje sea estable en todo el grupo (<a href="#u05-atomicidad">atomicidad de mensajes</a>).</div>
+  <div class="warn">Toda la teoria de orden que sigue está definida sobre el <b>delivery</b>, no sobre la recepción ni el envio. Es una distinción que hay que explicitar en el final: un proceso puede recibir un mensaje y encolarlo, y el orden que interesa es el orden en que efectivamente lo procesa, porque el orden de llegada depende del estado de la red y no se puede controlar.</div>
+
+  <h4 id="u20-orden-sincronico">Orden sincrónico</h4>
+  <div class="def"><b>Orden sincrónico.</b> Todo mensaje posee el mismo timestamp en el proceso emisor y en el receptor, es decir, la transmisión insume tiempo nulo.</div>
+  <p>Es el modelo ideal, y no se implementa: sirve como referencia contra la cual medir las garantías reales. Si la transmisión fuera instantanea, no habría discusión posible sobre el orden porque envio y delivery serían el mismo instante para todos.</p>
+
+  <h4 id="u20-orden-fifo">Orden FIFO</h4>
+  <div class="def"><b>Orden FIFO.</b> Todo par de mensajes desde un mismo emisor a un mismo receptor se entrega en el orden en que fueron enviados.</div>
+  <p>Es la garantía más debil de las útiles, y la más fácil de implementar (números de secuencia más hold-back queue: TCP la provee sobre cada conexión). Lo importante es lo que <b>no</b> garantiza: no dice nada sobre mensajes de emisores distintos. Si el emisor 1 mando su mensaje antes en el tiempo del dibujo y llego después que el del emisor 2, eso es perfectamente valido bajo FIFO.</p>
+  <div class="idea">FIFO es un contrato entre un par emisor-receptor, no entre todos los participantes del sistema. Esto lo diferencia del orden causal y del total, que son contratos que involucran a todo el grupo, y explica por que FIFO es barato y los otros dos no.</div>
+
+  <h4 id="u20-orden-causal">Orden causal</h4>
+  <div class="def"><b>Orden causal.</b> Todo mensaje que implique la generación de un nuevo mensaje es entregado manteniendo esa secuencia de causalidad, sin importar el receptor. Es una generalización de FIFO: si <code>m1 -&gt; m2 -&gt; m3</code>, entonces en todo proceso los deliveries respetan <code>d1 -&gt; d2 -&gt; d3</code>.</div>
+  <div class="ej">P1 hace multicast de m1 al grupo. P2 recibe m1 y eso lo lleva a generar y difundir m2. Si en P3 el mensaje m2 llegara antes que m1, P3 veria un efecto sin su causa: sabe que m2 se genero porque alguien recibio m1, y al no tener m1 la única conclusión posible es que se perdio, o sea, una inconsistencia. La solución es la hold-back queue: m2 se retiene hasta que m1 haya sido entregado, y entonces se entregan en orden.</div>
+  <figure class="diag">
+    <svg viewBox="0 0 660 250" role="img" aria-label="Cadena causal de tres mensajes entre tres procesos con un mensaje retenido en la hold-back queue">
+      <defs>
+        <marker id="u20-ar10" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+      </defs>
+      <text x="58" y="54" text-anchor="end" fill="currentColor" font-size="12">P1</text>
+      <text x="58" y="134" text-anchor="end" fill="currentColor" font-size="12">P2</text>
+      <text x="58" y="214" text-anchor="end" fill="currentColor" font-size="12">P3</text>
+      <line x1="70" y1="50" x2="590" y2="50" stroke="var(--linea)" marker-end="url(#u20-ar10)"/>
+      <line x1="70" y1="130" x2="590" y2="130" stroke="var(--linea)" marker-end="url(#u20-ar10)"/>
+      <line x1="70" y1="210" x2="590" y2="210" stroke="var(--linea)" marker-end="url(#u20-ar10)"/>
+      <text x="600" y="44" fill="currentColor" font-size="9">tiempo</text>
+
+      <rect x="106" y="46" width="8" height="8" fill="var(--acc)"/>
+      <text x="110" y="36" text-anchor="middle" fill="currentColor" font-size="11">M1</text>
+      <line x1="114" y1="54" x2="166" y2="127" stroke="var(--acc)" marker-end="url(#u20-ar10)"/>
+      <line x1="114" y1="54" x2="246" y2="207" stroke="var(--acc)" marker-end="url(#u20-ar10)"/>
+      <circle cx="170" cy="130" r="4" fill="var(--acc)"/>
+      <text x="170" y="148" text-anchor="middle" fill="currentColor" font-size="11">d1</text>
+      <circle cx="250" cy="210" r="4" fill="var(--acc)"/>
+      <text x="250" y="228" text-anchor="middle" fill="currentColor" font-size="11">d1</text>
+
+      <rect x="196" y="126" width="8" height="8" fill="var(--acc)"/>
+      <text x="200" y="118" text-anchor="middle" fill="currentColor" font-size="11">M2</text>
+      <line x1="204" y1="134" x2="286" y2="207" stroke="var(--acc)" marker-end="url(#u20-ar10)"/>
+      <line x1="204" y1="126" x2="416" y2="54" stroke="var(--acc)" marker-end="url(#u20-ar10)"/>
+      <circle cx="290" cy="210" r="4" fill="var(--acc)"/>
+      <text x="290" y="228" text-anchor="middle" fill="currentColor" font-size="11">d2</text>
+      <circle cx="420" cy="50" r="4" fill="var(--acc)"/>
+      <text x="420" y="36" text-anchor="middle" fill="currentColor" font-size="11">d2</text>
+
+      <rect x="306" y="206" width="8" height="8" fill="var(--acc)"/>
+      <text x="324" y="230" text-anchor="middle" fill="currentColor" font-size="11">M3</text>
+      <line x1="314" y1="206" x2="456" y2="134" stroke="var(--acc)" marker-end="url(#u20-ar10)"/>
+      <circle cx="460" cy="130" r="4" fill="var(--acc)"/>
+      <text x="460" y="148" text-anchor="middle" fill="currentColor" font-size="11">d3</text>
+      <line x1="314" y1="206" x2="366" y2="84" stroke="var(--acc)" marker-end="url(#u20-ar10)"/>
+      <circle cx="368" cy="78" r="4" fill="none" stroke="var(--acc)"/>
+      <line x1="374" y1="76" x2="442" y2="60" stroke="var(--acc2)" stroke-dasharray="4 3" marker-end="url(#u20-ar10)"/>
+      <circle cx="448" cy="50" r="4" fill="var(--acc)"/>
+      <text x="454" y="36" fill="currentColor" font-size="11">d3</text>
+      <text x="378" y="100" fill="currentColor" font-size="8">retenido en la hold-back queue hasta entregar d2</text>
+
+      <text x="470" y="178" fill="currentColor" font-size="10">M1 -&gt; M2 -&gt; M3</text>
+      <text x="470" y="194" fill="currentColor" font-size="10">luego d1 -&gt; d2 -&gt; d3 en todos</text>
+    </svg>
+    <figcaption>La causalidad viaja en cadena a través de tres procesos: P1 difunde M1, P2 lo entrega y por eso genera M2, P3 entrega M2 y por eso genera M3. Cada proceso puede <b>recibir</b> los mensajes en cualquier orden, pero el orden causal obliga a que los <b>deliveries</b> en todos respeten d1, d2, d3. El círculo hueco en P1 es M3 llegando antes de que P1 haya entregado M2: se retiene en la hold-back queue y se entrega recién después (círculo relleno). Se asume que cada emisor se entrega automáticamente su propio mensaje en el momento de emitirlo, así que los envíos de la figura ya cuentan como delivery en su propio proceso.</figcaption>
+  </figure>
+  <p>Una implementación posible es que cada mensaje viaje con su <b>lista de dependencias</b>: m1 no depende de nada y se entrega apenas llega; m2 declara que depende de m1, así que la hold-back queue chequea si m1 ya fue entregado y, si no, lo retiene hasta que llegue. Esta es exactamente la aplicación práctica de los <a href="#u20-vectoriales">vectores de relojes</a>: el vector que viaja con el mensaje es esa lista de dependencias en forma compacta.</p>
+  <div class="idea">Lo importante del orden causal es que <b>ningun proceso pierde información de causalidad</b>. Implementarlo no es trivial: hay que garantizar la condición en cada proceso del grupo, lo que implica propagar y chequear dependencias en todos, no solo entre un par.</div>
+
+  <h4 id="u20-orden-total">Orden total</h4>
+  <div class="def"><b>Orden total.</b> Todo par de mensajes entregado a los mismos receptores es entregado en el mismo orden por todos esos receptores.</div>
+  <p>No dice cual es el orden correcto: dice que tiene que haber <b>uno solo</b> y que todos lo vean igual. Si el emisor 2 mando m2 después que el emisor 1 mando m1, pero por congestion m2 llega primero a un receptor, entonces el orden acordado es m2 antes que m1 y <b>todos</b> los receptores deben entregar m2 antes que m1.</p>
+  <div class="ej">Caso donde se cumple (la forma típica de responder el final):
+    <pre><code>t0: E1 emite M1 a R1 y R2
+t1: E2 emite M2 a R1 y R2
+t2: R2 entrega M2
+t3: R1 entrega M2
+t4: R1 entrega M1
+t5: R2 entrega M1</code></pre>
+    Tanto R1 como R2 entregaron primero M2 y después M1, así que se respeta el orden total, aunque M1 se haya emitido antes que M2.</div>
+  <div class="warn">Una variante que conviene tener presente, porque es la que usa la clase: en un multicast a un grupo <b>los emisores también son miembros del grupo</b>, así que el orden total los obliga a ellos también. Si P2 emite M1, P1 emite M2 y el orden acordado termina siendo M2 antes que M1, entonces P2 tiene que entregarse M2 primero y su propio M1 después, aunque lo generó él y lo tuvo disponible desde el principio. Un proceso puede tener que demorar el delivery de su propio mensaje para no romper el orden acordado, y esa es una de las razones por las que el orden total es caro: no basta con coordinar a los receptores, hay que coordinar a todo el grupo incluido quien emite. Notar de paso que la clase reparte los nombres al revés que el ejemplo de arriba (ahí el mensaje emitido primero es M1 y lo emite el segundo emisor); el razonamiento es idéntico.</div>
+  <div class="warn">El ejemplo de arriba respeta el orden total y <b>no</b> viola el orden causal, aunque a primera vista parezca que sí. E1 y E2 son emisores independientes que no se comunican entre sí, así que M1 y M2 son <b>concurrentes</b>: no hay relación happened-before entre ellos y el orden causal no dice nada sobre en qué orden entregarlos. De hecho, entre dos emisores que no se comunican, el "antes" ni siquiera está bien definido: son dos procesos con su propio reloj, sin sincronización, así que preguntarse cuál mandó antes no tiene respuesta objetiva. Confundir concurrencia con causalidad es el error clásico en esta pregunta.</div>
+
+  <h4 id="u20-total-sin-causal">Orden total que viola el orden causal</h4>
+  <p>Orden total y orden causal <b>no</b> son lo mismo y ninguno contiene al otro. Para ver que el orden total no implica el causal hace falta una traza donde los mensajes sí estén causalmente relacionados:</p>
+  <pre><code>t0: P1 multicastea m1 al grupo {P2, P3, P4}
+t1: P2 recibe m1 y, como consecuencia de su contenido, emite m2
+    (entonces m1 -&gt; m2: hay happened-before, NO son concurrentes)
+t2: P3 entrega m2
+t3: P4 entrega m2
+t4: P3 entrega m1
+t5: P4 entrega m1</code></pre>
+  <ul>
+    <li><b>Orden total: se respeta.</b> P3 y P4 entregaron el mismo par en el mismo orden (m2 y después m1). Hay un único orden y todos lo ven igual.</li>
+    <li><b>Orden causal: se viola.</b> m1 causó m2, así que la causalidad exige entregar m1 antes de m2, y acá se entregó al revés. Un receptor ve la respuesta antes de la pregunta.</li>
+  </ul>
+  <div class="ej">El caso concreto es un foro o un chat de grupo: P1 publica "¿alguien sabe a qué hora es el parcial?" (m1) y P2 responde "a las 19" (m2). Con orden total pero sin orden causal, P3 y P4 leen la respuesta "a las 19" antes de ver la pregunta, y los dos la leen en ese mismo orden equivocado. El sistema es consistente entre receptores, pero incoherente para el lector.</div>
+  <p>La combinación de ambas garantías se llama <b>orden total causal</b> y es la más costosa: hay que acordar una secuencia única (total) y además que esa secuencia respete las dependencias (causal).</p>
+  <div class="examen">Preguntado en finales: dar un ejemplo donde se respete el orden total y se viole el orden causal (2022-08). La respuesta tiene que usar mensajes <b>causalmente relacionados</b>: si se plantea con dos emisores independientes no hay violación causal que mostrar, porque esos mensajes son concurrentes.</div>
+  <table>
+    <thead><tr><th>Orden</th><th>Que garantiza</th><th>Alcance del contrato</th><th>Costo</th></tr></thead>
+    <tbody>
+      <tr><td>Sincrónico</td><td>Transmisión de tiempo nulo</td><td>Ideal, no implementable</td><td>Referencia teórica</td></tr>
+      <tr><td>FIFO</td><td>Orden de envio por cada par emisor-receptor</td><td>Un emisor y un receptor</td><td>Bajo (números de secuencia, lo da TCP)</td></tr>
+      <tr><td>Causal</td><td>Si m1 causo m2, todos entregan m1 antes de m2</td><td>Todo el grupo</td><td>Medio-alto (dependencias o vectores por mensaje)</td></tr>
+      <tr><td>Total</td><td>Todos entregan el mismo par de mensajes en el mismo orden</td><td>Todo el grupo</td><td>Alto (requiere acuerdo, típicamente un secuenciador o consenso)</td></tr>
+    </tbody>
+  </table>
+  <p>Donde aparecen estas garantías en el resto de la materia: la <a href="#u17-replicacion-activa">replicación activa</a> exige orden total, porque réplicas que ejecutan las mismas operaciones en distinto orden divergen; el algoritmo de <a href="#u20-chandy-lamport">Chandy y Lamport</a> exige FIFO por canal; y la <a href="#u05-atomicidad">atomicidad</a> en grupos se apoya en las mismas hold-back queues.</p>
+  <div class="examen">Preguntado en finales: "Defina el concepto de Orden Total de eventos en un sistema distribuido y muestre un caso donde se cumpla" (2025-12). Dos cosas hacen la diferencia en la corrección: dar un ejemplo concreto con la secuencia de emisiones y entregas (como el de arriba), y aclarar explicitamente los términos <b>envio</b>, <b>recepción</b> y <b>entrega (delivery)</b>, porque el orden total se define sobre el delivery y no sobre la llegada por red.</div>
+
+  <h3 id="u20-estado-global">Estado local y estado global</h3>
+  <div class="def"><b>Estado local.</b> El estado local del proceso j en el instante t es la tupla de todas sus variables internas: <code>sj = (X0(t), X1(t), ..., Xn(t))</code>, con Xi la variable i del proceso j.</div>
+  <div class="def"><b>Estado global.</b> El estado global del sistema en el instante t es la union de los estados locales de todos los procesos: <code>S = s0 U s1 U ... U sn</code>. La definición completa incluye además <b>el estado de los canales de comunicación</b>, es decir, los mensajes en curso (en vuelo) que fueron enviados pero todavia no entregados.</div>
+  <div class="warn">Olvidarse de los canales es el error más comun en esta pregunta. Un estado global que solo junta estados locales no alcanza para reproducir el sistema: si un mensaje ya salio pero no llego, ese mensaje es parte del estado, y al restaurar el snapshot hay que reinyectarlo o el efecto nunca ocurre.</div>
+  <p>El estado global sirve para <b>monitorear</b> el sistema, <b>debuggearlo</b> y <b>recuperarlo</b> ante una falla (es la base del checkpointing que se ve en <a href="#u17-recuperacion">recuperación</a>).</p>
+
+  <h4 id="u20-maquina-estados">El sistema como máquina de estados</h4>
+  <p>El modelo es: cada proceso es una máquina de estados, un estado evoluciona al siguiente por la ocurrencia de un evento, y asumiendo instrucciones determinísticas el procesamiento de cualquier evento bajo el estado actual se puede reproducir. Esto es lo que hace útil al modelo: si guardo el estado <code>s0</code> y la secuencia de eventos <code>e1, e2, e3</code>, puedo re-ejecutarlos desde s0 cuantas veces quiera y siempre llego al mismo resultado, lo que permite replicar el sistema, reproducir un bug o restaurar desde el último punto conocido.</p>
+  <p>Con un único proceso esto es directo. Con varios, determinar el estado global se vuelve difícil, porque no todas las combinaciones de estados locales son posibles.</p>
+
+  <h4 id="u20-estados-validos">Estados globales validos e invalidos</h4>
+  <div class="ej">Dos procesos. P0 arranca en <code>s0</code>, el evento e1 lo lleva a <code>t0</code>, y el evento e2 lo lleva a <code>u0</code> y además <b>envía</b> el mensaje m a P1. P1 arranca en <code>s1</code>, el evento f1 lo lleva a <code>t1</code>, y el evento f2 (que es la <b>recepción</b> de m) lo lleva a <code>u1</code>.
+    <p>Estados globales <b>validos</b>: <code>s0 U s1</code>, <code>t0 U s1</code>, <code>s0 U t1</code>, <code>u0 U t1</code>, <code>u0 U u1</code>, y otros. Notar que <code>u0 U s1</code> es valido: P0 ya envio el mensaje y P1 todavia no llego ni a t1, no hay nada que lo impida, simplemente el mensaje está en vuelo.</p>
+    <p>Estado global <b>invalido</b>: <code>t0 U u1</code>. Para que P1 este en u1, tuvo que recibir m; pero si P0 está en t0, m todavia no se envio. Un mensaje recibido que nunca fue enviado es imposible: el efecto sin la causa.</p>
+  </div>
+  <div class="ej">La versión bancaria del mismo ejemplo, útil para el final: P0 tiene 100 pesos, el evento e1 le resta 10 y envía la transferencia a P1; P1 tiene 0 y al recibir suma 10. El estado global <code>{P0: 100, P1: 10}</code> es invalido: hay 110 pesos en el sistema, dinero que no existe. El simétrico <code>{P0: 90, P1: 0}</code> si es valido: son 90 más 10 en vuelo por el canal, y por eso el estado del canal es parte del estado global.</div>
+  <div class="examen">Preguntado en finales: "Defina los conceptos de Estado Local y Estado Global de un sistema distribuido. Explique un algoritmo para realizar cortes consistentes de estado global" (2023-07, 2025-07) y "Defina el concepto de estado global de un sistema distribuido. De un ejemplo donde el estado global capturado sea invalido" (2025-02). En la resolución de ese final de 2025-02-27 el alumno dibuja dos procesos con sus estados encadenados por eventos (P0: A, B, C y P1: D, E, F), con un mensaje que sale del evento que lleva a C y provoca el estado F, y argumenta que <code>B U F</code> es invalido porque F surge de un mensaje enviado por un evento que el corte no captura, enumerando los validos (<code>A U D</code>, <code>A U E</code>, <code>B U D</code>, <code>B U E</code>, <code>C U F</code>). Ese es el patrón de respuesta que conviene reproducir: definición, un diagrama chico, un invalido justificado por causalidad, y la lista de validos.</div>
+
+  <h3 id="u20-cortes">Historia y cortes de estado</h3>
+  <div class="def"><b>Historia (o corrida).</b> Caracteriza al proceso Pi, considerandolo una máquina de estados, mediante la secuencia de todos los eventos que proceso: <code>hi = (e0, e1, e2, ...)</code>.</div>
+  <div class="def"><b>Corte.</b> Union del subconjunto de las historias de todos los procesos del sistema hasta cierto evento k de cada proceso: <code>C = (e0, ..., ek) U ... U (e'0, ..., e'k')</code>. El conjunto de los últimos eventos de cada proceso incluidos en el corte se llama <b>frontera</b> (frontier).</div>
+  <p class="nota">Cuidado con el término: la diapositiva de la clase rotula la frontera de su corte consistente enumerando <b>todos</b> los eventos contenidos en el corte, no el último de cada proceso. La definición que vale es la de arriba (un evento por proceso, el último incluido), así que si en un final se pide la frontera de un corte hay que dar exactamente un evento por línea de vida y no la lista completa.</p>
+  <div class="def"><b>Corte consistente.</b> Un corte es consistente si por cada evento que contiene, también contiene a aquellos que "ocurren antes" que dicho evento: <code>para todo e en C: f -&gt; e =&gt; f en C</code>.</div>
+  <figure class="diag">
+    <svg viewBox="0 0 660 250" role="img" aria-label="Corte consistente y corte inconsistente sobre tres procesos">
+      <defs>
+        <marker id="u20-ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+      </defs>
+      <text x="18" y="55" fill="currentColor" font-size="12">P0</text>
+      <text x="18" y="130" fill="currentColor" font-size="12">P1</text>
+      <text x="18" y="205" fill="currentColor" font-size="12">P2</text>
+      <line x1="50" y1="50" x2="610" y2="50" stroke="var(--linea)" marker-end="url(#u20-ar3)"/>
+      <line x1="50" y1="125" x2="610" y2="125" stroke="var(--linea)" marker-end="url(#u20-ar3)"/>
+      <line x1="50" y1="200" x2="610" y2="200" stroke="var(--linea)" marker-end="url(#u20-ar3)"/>
+
+      <circle cx="90" cy="50" r="3.5" fill="currentColor"/><text x="90" y="38" text-anchor="middle" fill="currentColor" font-size="11">a</text>
+      <circle cx="190" cy="50" r="3.5" fill="currentColor"/><text x="190" y="38" text-anchor="middle" fill="currentColor" font-size="11">b</text>
+      <circle cx="430" cy="50" r="3.5" fill="currentColor"/><text x="430" y="38" text-anchor="middle" fill="currentColor" font-size="11">g</text>
+      <circle cx="130" cy="125" r="3.5" fill="currentColor"/><text x="130" y="113" text-anchor="middle" fill="currentColor" font-size="11">c</text>
+      <circle cx="345" cy="125" r="3.5" fill="currentColor"/><text x="345" y="113" text-anchor="middle" fill="currentColor" font-size="11">d</text>
+      <circle cx="110" cy="200" r="3.5" fill="currentColor"/><text x="110" y="222" text-anchor="middle" fill="currentColor" font-size="11">e</text>
+      <circle cx="260" cy="200" r="3.5" fill="currentColor"/><text x="260" y="222" text-anchor="middle" fill="currentColor" font-size="11">f</text>
+
+      <line x1="192" y1="56" x2="343" y2="119" stroke="var(--linea)" marker-end="url(#u20-ar3)"/>
+      <text x="258" y="80" fill="currentColor" font-size="10">m1</text>
+      <line x1="262" y1="194" x2="428" y2="56" stroke="var(--linea)" marker-end="url(#u20-ar3)"/>
+      <text x="360" y="140" fill="currentColor" font-size="10">m2</text>
+
+      <polyline points="270,20 255,50 240,88 250,125 285,165 305,232" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="270" y="14" text-anchor="middle" fill="currentColor" font-size="11">C1</text>
+      <polyline points="490,20 470,50 400,88 320,125 250,165 205,232" fill="none" stroke="var(--acc2)" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="500" y="14" text-anchor="middle" fill="currentColor" font-size="11">C2</text>
+    </svg>
+    <figcaption>C1 (línea llena) es consistente: su frontera es {b, c, f} y contiene {a, b, c, e, f}. Los mensajes m1 y m2 quedan en vuelo (envio dentro del corte, recepción afuera) y por eso forman parte del estado de los canales. C2 (línea de puntos) es inconsistente: incluye g, que es la recepción de m2, pero deja afuera a f, que es su envio. Como f -&gt; g y f no pertenece al corte, se viola la condición.</figcaption>
+  </figure>
+  <div class="idea">Dos lecturas que suelen generar dudas. Primero: que un evento del corte haya <b>generado</b> otro evento que queda afuera no es problema, la condición solo mira hacia atras (los predecesores deben estar), no hacia adelante. Segundo: justamente ese caso, envio adentro y recepción afuera, es lo que produce los mensajes en curso, y capturarlos es parte de sacar el corte bien. El corte inconsistente, en cambio, es inutil: si se intentara reproducir el sistema desde ahí, habría un evento de recepción sin su envio y la corrida nunca llegaria al mismo estado.</div>
+
+  <h3 id="u20-chandy-lamport">Algoritmo de Chandy y Lamport (distributed snapshot)</h3>
+  <div class="def"><b>Chandy y Lamport.</b> Algoritmo que permite obtener snapshots de estados globales en un sistema distribuido. Almacena los estados de un conjunto de procesos y los estados de los canales de forma que, <b>aunque los estados no hayan sido capturados al mismo tiempo</b>, el estado global resultante sea consistente. No requiere detener el sistema ni sincronizar relojes físicos.</div>
+  <p>Hipótesis:</p>
+  <ul>
+    <li>Los procesos y los canales de comunicación no fallan.</li>
+    <li>Los canales son <b>unidireccionales</b> y poseen <b>orden FIFO</b>. Esta es la hipótesis que hace funcionar todo el algoritmo, las demas son para que nada se rompa.</li>
+    <li>El grafo es <b>fuertemente conexo</b>: hay caminos de ida y vuelta definidos entre todos los procesos.</li>
+    <li>Cada proceso puede iniciar un snapshot en cualquier momento.</li>
+  </ul>
+  <p>El algoritmo usa un mensaje de control especial, el <b>marcador</b> (marker), que no pertenece a la lógica de la aplicación: su única función es actuar como barrera que separa el "antes" del "después" del snapshot en cada canal.</p>
+  <pre><code># proceso Pi
+corte = None
+log = {c: [] for c in canales_in}     # mensajes en curso por canal
+pendientes = set(canales_in)          # canales sin marcador recibido
+
+# regla de envio de marcador
+def grabar_estado():
+    corte = estado_local(Pi)
+    for c in canales_out:
+        enviar_marcador(c)            # antes de cualquier otro mensaje
+
+# regla de recepcion de marcador
+def al_recibir_marcador(c):
+    if corte is None:
+        grabar_estado()               # el canal c se considera vacio
+    else:
+        corte = corte + log[c]        # estado del canal c
+        log[c] = []
+    pendientes.remove(c)
+    if not pendientes:
+        reportar(corte)               # Pi termino su parte del snapshot
+
+# mensajes de aplicacion
+def al_recibir_mensaje(c, m):
+    procesar(m)                       # el sistema no se detiene
+    if corte is not None and c in pendientes:
+        log[c].append(m)              # esta en curso: es parte del corte</code></pre>
+  <figure class="diag">
+    <svg viewBox="0 0 680 250" role="img" aria-label="Propagacion de marcadores en el algoritmo de Chandy y Lamport">
+      <defs>
+        <marker id="u20-ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+      </defs>
+      <text x="18" y="55" fill="currentColor" font-size="12">P0</text>
+      <text x="18" y="130" fill="currentColor" font-size="12">P1</text>
+      <text x="18" y="205" fill="currentColor" font-size="12">P2</text>
+      <line x1="50" y1="50" x2="640" y2="50" stroke="var(--linea)" marker-end="url(#u20-ar4)"/>
+      <line x1="50" y1="125" x2="640" y2="125" stroke="var(--linea)" marker-end="url(#u20-ar4)"/>
+      <line x1="50" y1="200" x2="640" y2="200" stroke="var(--linea)" marker-end="url(#u20-ar4)"/>
+
+      <circle cx="120" cy="50" r="4" fill="var(--acc)"/><text x="120" y="36" text-anchor="middle" fill="currentColor" font-size="10">S0</text>
+      <circle cx="220" cy="125" r="4" fill="var(--acc)"/><text x="220" y="113" text-anchor="middle" fill="currentColor" font-size="10">S1</text>
+      <circle cx="265" cy="200" r="4" fill="var(--acc)"/><text x="265" y="222" text-anchor="middle" fill="currentColor" font-size="10">S2</text>
+
+      <line x1="122" y1="56" x2="218" y2="119" stroke="var(--acc)" marker-end="url(#u20-ar4)"/>
+      <line x1="122" y1="56" x2="263" y2="194" stroke="var(--acc)" marker-end="url(#u20-ar4)"/>
+      <line x1="222" y1="119" x2="328" y2="56" stroke="var(--acc)" marker-end="url(#u20-ar4)"/>
+      <line x1="222" y1="131" x2="318" y2="194" stroke="var(--acc)" marker-end="url(#u20-ar4)"/>
+      <line x1="267" y1="194" x2="378" y2="131" stroke="var(--acc)" marker-end="url(#u20-ar4)"/>
+      <line x1="267" y1="194" x2="398" y2="56" stroke="var(--acc)" marker-end="url(#u20-ar4)"/>
+
+      <line x1="200" y1="194" x2="298" y2="56" stroke="var(--acc2)" stroke-dasharray="5 3" marker-end="url(#u20-ar4)"/>
+      <text x="212" y="120" fill="currentColor" font-size="10">m1</text>
+      <line x1="440" y1="131" x2="545" y2="194" stroke="var(--linea)" stroke-dasharray="5 3" marker-end="url(#u20-ar4)"/>
+      <text x="480" y="150" fill="currentColor" font-size="10">m2</text>
+
+      <text x="60" y="242" fill="currentColor" font-size="10">lineas llenas: marcadores | m1 (en curso, entra al corte) | m2 (posterior, queda afuera)</text>
+    </svg>
+    <figcaption>P0 inicia: graba S0 y difunde marcadores. P1 y P2, al recibir su primer marcador, graban su estado y propagan. El mensaje de aplicación m1 fue enviado por P2 antes de su marcador, y como el canal es FIFO llega a P0 antes del marcador de P2: P0 ya estaba logueando ese canal, así que m1 entra al corte. El corte final es <code>S0 U S1 U S2 U (P2 -&gt; P0: m1)</code>. En cambio m2 lo genera P1 después de haber grabado su estado, y llega a P2 después del marcador de P1, así que P2 ya cerro ese canal: m2 se procesa normalmente pero no forma parte del corte.</figcaption>
+  </figure>
+  <p>Por que funciona: el marcador viaja por un canal FIFO, así que <b>empuja delante de si</b> todos los mensajes de aplicación que el emisor mando antes de grabar su estado. Todo lo que llegue por un canal entre el momento en que el receptor graba su estado y el momento en que llega el marcador de ese canal es, por construcción, un mensaje enviado antes del snapshot del emisor y recibido después del snapshot del receptor: exactamente la definición de mensaje en curso. Sin FIFO esa garantía se pierde y el marcador podría adelantarse a mensajes previos.</p>
+  <p>El algoritmo termina, para cada proceso, cuando le llegaron marcadores por <b>todos</b> sus canales de entrada. Cuando eso vale en todos los procesos, la union de los cortes locales es un estado global consistente.</p>
+  <div class="warn">Un detalle práctico que la formulación del algoritmo deja abierto: cada proceso guarda su parte del corte <b>localmente</b>, y el estado global solo tiene sentido completo. Hace falta decidir como agregarlo: que cada proceso le envíe su corte a un servicio agregador a medida que lo cierra, o que lo almacene local y un watchdog lo consulte y agregue periódicamente o bajo pedido. Sin ese paso hay N fotos parciales y ninguna foto del sistema.</div>
+  <div class="examen">Preguntado en finales, muy frecuente: "Explique como garantizar un corte consistente al capturar un estado global de cierto sistema distribuido. Indique pasos principales del algoritmo propuesto" (2022-08) y "Defina los conceptos de Estado Local y Estado Global... Explique un algoritmo para realizar cortes consistentes de estado global" (2023-07, 2025-07). Checklist de una respuesta completa: definición de estado local y global (con los canales), definición de corte consistente con la condición sobre happened-before, las hipótesis del algoritmo (destacando FIFO y por que es necesaria), las dos reglas (envio y recepción de marcador), el tratamiento de los mensajes en curso, y la condición de terminación (un marcador por cada canal de entrada).</div>
+
+  <h3 id="u20-reliable">Comunicación reliable y orden en grupos</h3>
+  <div class="def"><b>Comunicación reliable (confiable).</b> Comunicación que garantiza <b>integridad</b> (los datos llegan sin corromperse), <b>validez</b> (lo que llego es lo que se envio) y <b>atomicidad</b> del delivery (el mensaje se entrega completo, y en grupos, a todos o a ninguno).</div>
+  <ul>
+    <li><b>Uno a uno:</b> es casi trivial contando con protocolos sobre TCP/IP y una red segura: TCP ya da integridad, orden FIFO y entrega. Además, en una comunicación punto a punto el orden causal y el total son vacuos (con un solo emisor y un solo receptor todos ven lo mismo), así que el único orden interesante es FIFO, que ya viene resuelto.</li>
+    <li><b>Uno a muchos:</b> el grupo tiene que proveer las tres propiedades por su cuenta, y sobre TCP/IP la <b>atomicidad requiere atención especial</b>: si un multicast llega a tres de cinco procesos, hay que decidir que hacer (descartar en todos, o retener en hold-back queues hasta saber que todos lo tienen y solo entonces hacer el delivery). Y además hay que definir explicitamente que orden se garantiza: FIFO, causal, total.</li>
+  </ul>
+  <div class="idea">El cierre conceptual de la unidad: pasar de uno a uno a uno a muchos convierte propiedades que damos por sentadas (orden, entrega, atomicidad) en decisiones de diseño con costo. Cada garantía adicional se paga con mensajes de coordinación, delivery demorado o dependencia de un secuenciador. Elegir la garantía más debil que el problema tolere es parte del diseño, no una concesión.</div>
+</section>

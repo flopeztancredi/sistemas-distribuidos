@@ -1,0 +1,174 @@
+<section class="unidad" id="u15" data-titulo="Arquitecturas de gran escala">
+  <h2>U15. Diseño de arquitecturas de gran escala</h2>
+  <p class="intro">Esta unidad es práctica: toma todo lo visto en la materia (colas, boundaries, partición, replicación, elasticidad) y lo aplica a diseñar desde cero un sistema de gran escala a partir de requerimientos vagos, al estilo de una entrevista de Google o Facebook. El método se llama NALSD (Non-Abstract Large-Scale System Design) y es, casi literalmente, el ejercicio 10 de todos los finales de la materia: análisis de volumen, endpoints y vista física.</p>
+
+  <h3 id="u15-nalsd">NALSD: diseño no abstracto de sistemas de gran escala</h3>
+
+  <div class="def"><b>NALSD (Non-Abstract Large-Scale System Design).</b> Práctica de diseño en la que, a partir de requerimientos concretos y poco detallados, se produce una arquitectura justificada con números: qué datos circulan, cuánto pesan, cuántos hay por unidad de tiempo, y qué topología física soporta ese volumen. "No abstracto" significa que no alcanza con dibujar cajitas: cada decisión se defiende con estimaciones de orden de magnitud.</div>
+
+  <div class="idea">Es el tipo de ejercicio que toman en entrevistas de Amazon, Google, Facebook, Microsoft y startups de Silicon Valley: "armame un sistema para resolver esto", donde "esto" no se resuelve con un PHP y un MySQL. La diferencia entre resolverlo bien y mal es traer fundamentos de sistemas distribuidos a la mesa: quien no los trae termina con un diseño con cuellos de botella, sin tolerancia a fallos, que no escala y sin alta disponibilidad.</div>
+
+  <p>La referencia bibliográfica de la cátedra es el capítulo "Introducing Non-Abstract Large System Design" del <i>Site Reliability Workbook</i> de Google (sre.google/workbook/non-abstract-design). Allí el proceso se plantea como iterativo, guiado por preguntas:</p>
+
+  <table>
+    <thead><tr><th>Fase</th><th>Pregunta</th><th>Qué se hace</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="2">Diseño básico</td><td>Es posible?</td><td>Plantear una solución que funcione, aunque sea ingenua.</td></tr>
+      <tr><td>Se puede hacer mejor?</td><td>Atacar lo obviamente lento, caro o frágil.</td></tr>
+      <tr><td rowspan="3">Escalar</td><td>Es factible a escala?</td><td>Poner números: volumen de datos, requests, storage. Ver si la solución sobrevive.</td></tr>
+      <tr><td>Es resiliente?</td><td>Qué pasa si se cae un nodo, un datacenter, un enlace.</td></tr>
+      <tr><td>Se puede hacer mejor?</td><td>Iterar de nuevo con lo aprendido.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="examen">Preguntado en finales, siempre: el ejercicio 10 de prácticamente todos los integradores es NALSD puro, con la forma "Diseñe una arquitectura que asegure la escalabilidad para un sistema con los siguientes requisitos: (4 a 6 bullets). Resuelva el problema mediante análisis de volumen, endpoints y vista física con su explicación" (2022-08, 2023-07, 2024-07 x2, 2024-12, 2025-02 x2, 2025-03, 2025-07 x3). Los dominios varían (reporte de infracciones en CABA, cámaras de shoppings, eventos de TikTok, Smart TVs, contenedores de basura con QR, terminales de autoservicio, mensajes de WhatsApp de ANSES, aires acondicionados IoT, aulas virtuales) pero la estructura pedida es idéntica. Alguna variante agrega: "Considere distribución geográfica de la solución y particionamiento de datos" (2025-07).</div>
+
+  <h3 id="u15-metodo">El método de trabajo</h3>
+
+  <p>La dinámica que muestra la cátedra, resumida por el propio docente: primero analizar el enunciado y extraer datos para no perderse en el texto; entender el scope y los boundaries del sistema a construir; identificar qué endpoints piden; si algo no está claro, tomar assumptions y avanzar; y después iterar hasta armarse la foto mental de la arquitectura. En concreto:</p>
+
+  <ol>
+    <li><b>Scope y boundaries.</b> Definir dónde arranca y dónde termina el sistema. Qué subsistemas ya existen y solo se integran (sistemas embebidos, bases externas, entes gubernamentales) y qué hay que construir. Lo externo se conecta vía adaptadores o llamadas de fan-out, no es parte del diseño interno.</li>
+    <li><b>Actores y casos de uso.</b> Quién produce datos, quién consulta, quién administra.</li>
+    <li><b>Datos y entidades.</b> Qué campos hay que transmitir y almacenar, y cuánto pesa cada uno. Separar los datos de gran volumen (imágenes, audio, video) de los despreciables (strings, ids, estados).</li>
+    <li><b>Endpoints.</b> Inbounds y outbounds del sistema. Ojo: no todo lo que hace el sistema es un endpoint propio; avisar a una entidad externa es una flecha de salida (fan-out), no un endpoint nuestro.</li>
+    <li><b>Análisis de volumen.</b> Estimaciones de orden de magnitud, con todo factor dudoso parametrizado (ver abajo).</li>
+    <li><b>Vista física.</b> Dónde vive cada componente geográficamente, qué enlaces hay entre ellos y de qué ancho de banda, dónde van colas, balanceadores, storage. Además del volumen hay que tener en cuenta la geografía.</li>
+    <li><b>Iterar.</b> Con los números en la mano, volver atrás: mover lógica al borde, filtrar antes de transmitir, particionar el storage.</li>
+  </ol>
+
+  <h4 id="u15-estimaciones">Estimaciones de orden de magnitud</h4>
+
+  <p>El corazón de NALSD es estimar sin datos exactos. Las reglas que usa la cátedra:</p>
+  <ul>
+    <li><b>Solo importa el orden de magnitud.</b> Si una foto pesa 250 KB o medio mega da igual: lo que importa es saber si el total diario es gigas, teras o petas.</li>
+    <li><b>Parametrizar lo incierto.</b> Cuando un número es imposible de conocer (autos por minuto por semáforo), se declara un parámetro, se eligen cotas razonables descartando los extremos absurdos, y se sigue. Mostrar conciencia de que el valor es variable vale más que el valor elegido.</li>
+    <li><b>Factores de ajuste.</b> El mundo real no es uniforme: no todas las esquinas tienen semáforo, no todos los autos cruzan en rojo. Se corrige con factores (0.5, 0.1, 0.01) explícitos y justificados.</li>
+    <li><b>Anclarse en hechos conocidos.</b> Un carácter es un byte; un pixel RGB son 3 bytes; una imagen de 600x400 RGB son ~720 KB; la avenida Rivadavia mide ~10 km. De ahí se deriva todo lo demás.</li>
+  </ul>
+
+  <div class="warn">Errores típicos marcados por los correctores en finales reales: estimar una imagen en 65 KB ("muy bajo... un orden más": una foto útil ronda cientos de KB); decir "al menos N eventos" sin ponerle un factor y duplicar; y equivocarse en el pasaje de unidades (bytes a MB a GB) sin chequear que el resultado sea plausible. También valoran identificar picos de carga previsibles (predictable bursts, por ejemplo los cambios de turno al mediodía y a la noche) porque justifican cómo escalar.</div>
+
+  <h3 id="u15-traffic">Caso 1: Traffic Lights Violations Detector</h3>
+
+  <p>Requerimientos dados: se requiere un sistema de detección de infracciones para la ciudad; se cuenta con imágenes de las patentes capturadas por cámaras en cada semáforo; los semáforos emiten seniales de su estado (verde, amarillo, rojo); se debe emitir una infracción enviada al propietario del vehículo y al ente regulador; las infracciones deben soportar inspección y administración por personal del gobierno. Eso es todo: el resto son assumptions.</p>
+
+  <h4 id="u15-traffic-scope">Scope y boundaries</h4>
+  <p>Los semáforos y cámaras son sistemas embebidos ya funcionales: no los programamos (el título del ejercicio es "arquitecturas de gran escala", no "sistemas embebidos"; el contexto define el corte). Hace falta un <b>adaptador</b> que exponga la información de esos dispositivos hacia nuestro sistema: un conversor que reciba el protocolo electrónico (tipo RS232 u otro serial) y lo pase a transmisiones IP. El envío de la infracción al ente regulador y la emisión de la carta documento al propietario son fan-out hacia sistemas externos, no endpoints propios. La inspección y administración por personal del gobierno es un caso de uso transaccional clásico (ABM y consultas), no es la parte interesante de la arquitectura distribuida.</p>
+
+  <h4 id="u15-traffic-datos">Datos y entidades</h4>
+  <table>
+    <thead><tr><th>Dato</th><th>Tamanio estimado</th><th>De dónde sale</th></tr></thead>
+    <tbody>
+      <tr><td>Imagen de la patente</td><td>~250 KB (grayscale) a ~1 MB (RGB 600x400 son ~720 KB)</td><td>Cámara del semáforo. Es el único dato de gran volumen.</td></tr>
+      <tr><td>String de la patente (OCR)</td><td>char(10), decenas de bytes</td><td>Se procesa a partir de la foto, dentro del sistema.</td></tr>
+      <tr><td>Propietario (nombre y dirección)</td><td>~250 caracteres</td><td>Base externa maestra de propietarios: se joinea por patente, no viaja desde el semáforo.</td></tr>
+      <tr><td>Lugar de la infracción</td><td>~250 caracteres</td><td>No viaja en cada mensaje: cada semáforo manda su ID y una base conoce la dirección de cada semáforo.</td></tr>
+      <tr><td>Estado del semáforo</td><td>1 bit útil (rojo o no rojo, el amarillo no interesa)</td><td>Senial del semáforo. Candidato a resolverse in situ.</td></tr>
+      <tr><td>Fecha y hora</td><td>bytes</td><td>Se captura junto con la foto.</td></tr>
+    </tbody>
+  </table>
+  <div class="idea">Regla práctica: junto a un mensaje que carga una foto de cientos de KB, todos los campos de texto son despreciables. El análisis de volumen se concentra en el dato dominante.</div>
+
+  <h4 id="u15-traffic-volumen">Análisis de volumen</h4>
+  <p>Cuántas fotos por día? No hay dato: se estima. Capital Federal como cuadrado perfecto de 10 km x 10 km (Rivadavia llega a la altura ~9000, redondeamos a 10 km), manzanas de 100 m:</p>
+  <pre><code># parametros explicitos
+LADO_KM = 10                # CABA como cuadrado de 10x10 km
+CUADRAS_LADO = 100          # manzanas de 100 m
+FACTOR_SEMAFORO = 0.5       # no toda interseccion tiene semaforo
+FOTOS_MIN = 5               # por semaforo; 1 es poco, 100 es absurdo
+
+intersecciones = CUADRAS_LADO * CUADRAS_LADO      # 10.000
+semaforos = intersecciones * FACTOR_SEMAFORO      # 5.000
+fotos_dia = semaforos * FOTOS_MIN * 60 * 24       # 36.000.000
+bytes_dia = fotos_dia * 0.5 MB                    # ~18 TB por dia
+# en un anio: salta de teras a petas</code></pre>
+  <p>36 millones de fotos diarias, del orden del mega cada una: decenas de terabytes por día y petabytes al año. Ese número, justificado, es muy distinto a tirarlo sobre la mesa. Y dispara la iteración clave del diseño:</p>
+
+  <h4 id="u15-traffic-filtrado">Filtrar en el borde</h4>
+  <p>Si el sistema central recibe todas las fotos y descarta las que no ocurrieron en rojo, igual se come los terabytes de tráfico de datos irrelevantes. La conclusión es que esa parte de la senial es improcesable adentro del sistema distribuido: conviene que el cruce foto-estado se resuelva antes, en la electrónica o en el nodo de borde, y que al sistema central viaje solo lo que es candidato a infracción (quizás un millón o 500 mil fotos por día en lugar de 36 millones). Perder funcionalidad (no guardar todas las fotos crudas) está justificado si el cálculo lo respalda.</p>
+
+  <h4 id="u15-traffic-fisica">Vista física: hubs y distribución geográfica</h4>
+  <p>La primera tentación es un gran servidor en el centro de la ciudad al que todos los semáforos le abren conexión. Para una sola ciudad puede ser viable; para un país es absurdo: no hay forma de que un semáforo abra un socket contra un servidor en Buenos Aires con la latencia de una comunicación ida y vuelta a mil kilómetros. La alternativa es introducir <b>hubs</b> intermedios: nodos con afinidad geográfica que agrupan un radio de semáforos cercanos, bufferean en colas y reenvían al procesador central en ráfagas por socket, en tanto el ancho de banda lo permita. Hubs hay muchos; central hay una sola. El enlace hub-central es "grueso" (muchas conexiones, alto ancho de banda); los enlaces semáforo-hub son cortos y baratos.</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 780 300" role="img" aria-label="Arquitectura del detector de infracciones: semáforos con cámaras se conectan por RS232 a un conversor, este por IP a un hub zonal con cola y buffer, y el hub envía ráfagas por socket al boundary de la central, donde colas y controllers filtran, hacen OCR y joins contra bases externas, y escriben en un storage escalable">
+      <defs>
+        <marker id="u15-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.2">
+        <rect x="10" y="30" width="120" height="38" rx="6"/>
+        <rect x="10" y="110" width="120" height="38" rx="6"/>
+        <rect x="10" y="190" width="120" height="38" rx="6"/>
+        <rect x="185" y="105" width="110" height="48" rx="6" stroke="var(--acc)"/>
+        <rect x="345" y="105" width="120" height="48" rx="6" stroke="var(--acc)"/>
+        <rect x="515" y="20" width="255" height="260" rx="8" stroke="var(--linea)" stroke-dasharray="6 4"/>
+        <rect x="535" y="55" width="100" height="40" rx="6" stroke="var(--acc2)"/>
+        <rect x="535" y="130" width="215" height="40" rx="6" stroke="var(--acc2)"/>
+        <rect x="535" y="205" width="100" height="50" rx="6"/>
+        <rect x="655" y="205" width="95" height="50" rx="6"/>
+      </g>
+      <g stroke="currentColor" stroke-width="1.2" marker-end="url(#u15-arr)" fill="none">
+        <line x1="130" y1="49" x2="182" y2="120"/>
+        <line x1="130" y1="129" x2="182" y2="129"/>
+        <line x1="130" y1="209" x2="182" y2="140"/>
+        <line x1="295" y1="129" x2="342" y2="129"/>
+        <line x1="465" y1="129" x2="532" y2="80"/>
+        <line x1="585" y1="95" x2="585" y2="127"/>
+        <line x1="585" y1="170" x2="585" y2="202"/>
+        <line x1="702" y1="202" x2="660" y2="173"/>
+      </g>
+      <g fill="currentColor" font-size="11" text-anchor="middle">
+        <text x="70" y="47">Semáforo +</text><text x="70" y="60">cámara</text>
+        <text x="70" y="127">Semáforo +</text><text x="70" y="140">cámara</text>
+        <text x="70" y="207">Semáforo +</text><text x="70" y="220">cámara</text>
+        <text x="240" y="125">Conversor</text><text x="240" y="139">RS232 a IP</text>
+        <text x="405" y="125">Hub zonal</text><text x="405" y="139">(cola + buffer)</text>
+        <text x="585" y="72">Boundary</text><text x="585" y="86">(endpoint)</text>
+        <text x="642" y="147">Colas + controllers</text><text x="642" y="161">(filtrado, OCR, joins)</text>
+        <text x="585" y="225">Storage</text><text x="585" y="239">escalable</text>
+        <text x="702" y="222">Bases:</text><text x="702" y="234">propietarios,</text><text x="702" y="246">semáforos</text>
+        <text x="155" y="105" font-size="10">RS232</text>
+        <text x="318" y="118" font-size="10">IP</text>
+        <text x="480" y="98" font-size="10">ráfagas</text>
+        <text x="480" y="110" font-size="10">socket</text>
+        <text x="642" y="38" font-size="11" fill="var(--acc)">Central (una sola)</text>
+        <text x="405" y="180" font-size="10">muchos hubs</text>
+      </g>
+    </svg>
+    <figcaption>Vista física del detector de infracciones: adaptadores en el borde, hubs zonales con colas que bufferean y reenvían por ráfagas, y una central asincrónica con colas, storage escalable y bases maestras para los joins (propietario por patente, dirección por ID de semáforo).</figcaption>
+  </figure>
+
+  <p>Adentro de la central no se da abasto procesando en línea la cantidad de seniales e infracciones que ocurren todo el tiempo: el procesamiento es <b>asincrónico con colas de mensajes</b>, con controllers que filtran, hacen el OCR de la patente, joinean contra las bases maestras y escriben en un storage que tiene que poder escalar (particionado, y con decisiones como generar thumbnails o guardar crudo). Sobre ese flujo se arma el DAG o el diagrama de robustez, que para estas arquitecturas son claves.</p>
+
+  <div class="examen">Preguntado en finales: la variante de este mismo dominio apareció como ejercicio 10 en 2024-07: "Permitir el reporte ciudadano de infracciones de tránsito en CABA... analizar automáticamente la foto para 'cruce en rojo' y emitir una multa por email... permitir consulta para auditoría por 10 años. Resuelva mediante análisis de volumen, endpoints y vista física". Es exactamente este caso con el ciudadano como fuente en lugar del semáforo.</div>
+
+  <h3 id="u15-snippets">Caso 2: Shared Code Snippets</h3>
+
+  <p>Requerimientos dados: los usuarios comparten pequeños bloques de código; los bloques son públicos para quien conozca su ruta de acceso; se formatea el código según un lenguaje indicado por el usuario; los snippets se almacenan por tiempo indefinido; se espera gran cantidad de accesos diarios con nuevos snippets; el sistema debe mostrar disponibilidad constante.</p>
+
+  <p>Aplicando el mismo método, lo que el enunciado ya insinúa:</p>
+  <ul>
+    <li><b>Datos livianos pero eternos:</b> un snippet son KB de texto, el problema no es el tamanio unitario sino que el almacenamiento crece sin cota ("por tiempo indefinido"): el storage necesita <a href="#u13">particionamiento</a> y una clave de acceso (la ruta pública) que se preste a distribuir, por ejemplo un hash como ID del snippet.</li>
+    <li><b>Read-heavy:</b> muchos más accesos de lectura que escrituras; eso invita a <a href="#u13">réplicas</a> de lectura y cache.</li>
+    <li><b>Formateo por lenguaje:</b> un paso de procesamiento asincrónico (o en el momento de la lectura) que se modela como worker detrás de una cola.</li>
+    <li><b>Disponibilidad constante:</b> redundancia de los boundaries con balanceo de carga y replicación del storage; sin puntos únicos de falla (ver <a href="#u11">alta disponibilidad</a>).</li>
+    <li><b>Endpoints:</b> esencialmente <code>POST /snippet</code> (retorna la ruta pública) y <code>GET /snippet/{id}</code>.</li>
+  </ul>
+
+  <div class="warn">Este segundo ejercicio se resuelve en vivo en la clase práctica y el foco declarado por la cátedra es el <b>diagrama de robustez y el DAG</b> de la solución, más que la vista geográfica (a diferencia del caso 1, acá no hay necesidad de visualizar físicamente dónde pasan las cosas). El deck solo fija los requerimientos; el desarrollo detallado de la solución no quedó registrado en las fuentes de la cátedra, por eso este apunte lo esboza con los criterios generales del método.</div>
+
+  <h3 id="u15-final">Cómo encarar el ejercicio en el final</h3>
+
+  <p>Checklist de resolución, en el orden en que conviene escribirlo (es el mismo orden que piden los enunciados):</p>
+  <ol>
+    <li><b>Supuestos y actores:</b> declarar el escenario concreto (cuántas sucursales, usuarios, dispositivos) con números redondos defendibles, y los casos de uso completos.</li>
+    <li><b>Endpoints:</b> lista de inbounds y outbounds con verbo, ruta y cuerpo (<code>POST /screenshot {camara_id, timestamp, img}</code>). Distinguir retorno de body en los GET. Recordar que las salidas hacia sistemas externos (un POST a otra plataforma, un email) son fan-out, no endpoints propios.</li>
+    <li><b>Análisis de volumen:</b> tamanio del dato dominante, eventos por día, storage por día/semana/año. Parametrizar factores, duplicar los "al menos", chequear órdenes de magnitud y pasajes de unidades, y marcar los picos previsibles de carga.</li>
+    <li><b>Vista física con explicación:</b> dónde vive cada cosa (borde, hubs zonales, central o región cloud), colas para desacoplar y absorber ráfagas, balanceadores y réplicas para disponibilidad, partición del storage por una clave razonable, filtrado cerca de la fuente si el volumen lo exige, y distribución geográfica si los usuarios o dispositivos están dispersos.</li>
+  </ol>
+
+  <div class="examen">Preguntado en finales: además de la forma general del ejercicio 10 (ver <a href="#u15-nalsd">arriba</a>), las correcciones reales muestran que puntúa: estimaciones con factores explícitos y del orden de magnitud correcto, endpoints con sus cuerpos bien tipados, y una vista física que justifique escalabilidad. En 2025-07 se agregó explícitamente "considere distribución geográfica de la solución y particionamiento de datos": conviene siempre cerrar con esos dos puntos aunque no los pidan.</div>
+</section>

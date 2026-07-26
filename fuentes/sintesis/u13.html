@@ -1,0 +1,359 @@
+<section class="unidad" id="u13" data-titulo="Data intensive applications">
+  <h2>U13. Data intensive applications: partición, replicación, DSM y DFS</h2>
+  <p class="intro">Cuando el cuello de botella de un sistema deja de ser el cómputo y pasa a ser el volumen de datos, el diseño gira alrededor del storage: como se modela la información (relacional, NoSQL, columnar), como se copia (replicación), como se divide (particionamiento) y que abstracciones distribuidas se construyen encima (memoria compartida distribuida y sistemas de archivos distribuidos como NFS y HDFS). Esta unidad recorre esas piezas y sus trade-offs, que son de los temas más preguntados en finales.</p>
+
+  <h3 id="u13-flujo-datos">Flujo de datos en sistemas de gran escala</h3>
+  <p>Una aplicación actual de gran escala rara vez tiene "una base de datos": tiene un ecosistema de storages, cada uno optimizado para un patrón de acceso distinto. El flujo típico es:</p>
+  <ul>
+    <li><b>Master data:</b> entidades con poco crecimiento (provincias, localidades, categorías, productos). Base acotada, recibe lookups y writes ocasionales.</li>
+    <li><b>Transactional data:</b> registros que se acumulan sin parar con la operación del negocio (ventas, cotizaciones, vistas de página). Es donde el volumen explota.</li>
+    <li><b>Cache:</b> para que los servicios respondan rápido se cachea la información más consultada. Cada write obliga a actualizar o invalidar el cache, si no se sirven datos sucios.</li>
+    <li><b>Search indexes:</b> índices optimizados para consultas complejas (ej: "todas las transacciones con monto mayor a 100"). Se consultan mucho y se escriben poco, porque su estructura interna está optimizada para leer; se los popula por detección de cambios o por batch periódico.</li>
+    <li><b>MOM:</b> los pedidos muy demandantes en cómputo no se atienden en línea: se encolan y un servicio los procesa en background, lo que a su vez dispara nuevas escrituras y reinicia el ciclo (write, invalidación de cache, repopulación de índices).</li>
+    <li><b>Servicios externos:</b> se integran de forma asincrónica. Ejemplo típico: una reserva de turismo se responde como "aceptada" al instante, pero la reserva real de hotel y avion ocurre en background y el resultado llega después por mail.</li>
+  </ul>
+  <div class="idea">La pregunta de diseño nunca es "que base uso" sino "que patrón de acceso tengo". Cada componente del flujo (cache, índice, cola, base transaccional) existe porque hay un patrón de lectura o escritura que la base principal no atiende bien.</div>
+
+  <h3 id="u13-relacional-nosql">Relacional vs NoSQL</h3>
+  <p>Los modelos de datos jerárquico, de red y relacional nacen en los 60s y 70s. El relacional (tablas y filas, SQL estandarizado) predomina hasta aproximadamente 2010: da soporte excelente a joins y a relaciones many-to-one y many-to-many. Desde 2010, la necesidad de Big Data potencia los almacenamientos NoSQL (Not Only SQL), que como enfoque son tan viejos como el relacional: clave-valor, documentales, orientados a grafos y columnares.</p>
+  <p>NoSQL conviene cuando el modelo es afin:</p>
+  <ul>
+    <li>Sin relaciones, o relaciones one-to-many (jerarquías tipo JSON): se graban de forma muy simple en una base documental.</li>
+    <li>Alta conectividad entre entidades: mucho mejor soportada en una base de grafos que con un par de tablas.</li>
+    <li>Esquemas cambiantes o no definidos: las relacionales pierden flexibilidad ahí.</li>
+  </ul>
+  <div class="warn">NoSQL no es "mejor" ni más nuevo: es otro trade-off. Una base NoSQL típica está optimizada para accesos aleatorios rápidos sobre tráfico pesado, no para análisis, y suele ser menos eficiente en espacio. Además, operaciones como join pueden existir en ambos mundos, pero en NoSQL el soporte no es nativo ni natural. A veces conviene ser conservador: hay mucha más experiencia acumulada operando modelos relacionales.</div>
+
+  <h3 id="u13-oltp-olap">OLTP vs OLAP</h3>
+  <div class="def"><b>OLTP (Online Transaction Processing).</b> Procesamiento orientado a unidades lógicas: grupos de reads y writes (transacciones), no necesariamente ACID. Es la base que usa una aplicación normal todos los días: pocas filas por operación, busqueda por clave, escrituras pequeñas con acceso aleatorio.</div>
+  <div class="def"><b>OLAP (Online Analytical Processing).</b> Procesamiento orientado a analizar el conjunto de los datos: funciones de agregación (SUM, COUNT, MAX, MIN, AVG) sobre enormes cantidades de registros. No está orientado al insert individual sino a cargas batch (ETLs) o streams.</div>
+  <table>
+    <thead><tr><th></th><th>OLTP</th><th>OLAP</th></tr></thead>
+    <tbody>
+      <tr><td>Patrón de read</td><td>Pocos registros, busqueda por clave</td><td>Agregación de muchos registros</td></tr>
+      <tr><td>Patrón de write</td><td>Acceso aleatorio, registros pequeños</td><td>Importaciones batch (ETLs) o streams</td></tr>
+      <tr><td>Uso principal</td><td>Info maestra y transaccional para usuarios</td><td>Exploración de datos, análisis estadistico</td></tr>
+      <tr><td>Datos</td><td>Instantanea del momento actual, MBs a GBs</td><td>Histórico de los datos, TBs a PBs</td></tr>
+    </tbody>
+  </table>
+  <p>Suelen convivir en el mismo sistema porque tienen propositos diferentes: la OLTP atiende a los usuarios, la OLAP se alimenta de ella para analizar.</p>
+
+  <h3 id="u13-almacenamiento">Modelos de almacenamiento: filas, columnas y cubos</h3>
+  <h4 id="u13-almacenamiento-relacional">Relacional (por filas)</h4>
+  <p>Normalmente un archivo de almacenamiento por tabla, relaciones vía foreign keys, y operaciones fila a fila: para retornar una proyección (un subconjunto de columnas) hay que leer la fila entera. Ejemplo típico: tabla transaccional <code>Sales</code> (date_id, product_id, quantity, price, discount) y tabla maestra <code>Products</code> (product_id, name, price) unidas por join.</p>
+  <h4 id="u13-almacenamiento-columnar">Columnar</h4>
+  <p>Normalmente un archivo por columna: todas las celdas de <code>date_id</code> juntas en un archivo, todos los <code>product_id</code> en otro, y así. El registro lógico se reconstruye por posición. Beneficios:</p>
+  <ul>
+    <li><b>Compresión:</b> los valores de una misma columna son de la misma naturaleza y se repiten mucho (precios de los mismos productos, fechas contiguas, nulls), así que comprimen muy bien. Comprimir una fila mezcla datos heterogéneos y rinde mal.</li>
+    <li><b>Lectura de proyecciones:</b> "dame todos los prices de ventas" es leer un archivo en secuencia, contra leer la tabla entera saltando dentro de cada tupla.</li>
+    <li><b>Agregaciones:</b> sumar o promediar una columna es un recorrido lineal de un solo archivo.</li>
+  </ul>
+  <p>El almacenamiento columnar es un mecanismo de persistencia en disco: puede aplicarse en distintos tipos de base y suele clasificarse dentro del mundo NoSQL aunque acepte consultas SQL.</p>
+  <h4 id="u13-almacenamiento-cubos">Cubos de información (vistas materializadas)</h4>
+  <p>Escenario típico de OLAP: se mantienen vistas materializadas con precalculos estadisticos, grillas agrupadas por dimensiones (ej: cubo date_id x product_id sobre quantity). Consultas como "suma de ventas de los días 1 y 2" se resuelven sumando dos celdas precalculadas en lugar de filtrar y recorrer todos los registros.</p>
+  <div class="warn">Que precalcular lo decide un arquitecto de datos con conocimiento de las consultas reales: cada cruza agregada cuesta operatoria en cada write y espacio en memoria y disco. Si un dato se pide una vez al mes, conviene calcularlo on demand y no mantenerlo materializado.</div>
+
+  <h3 id="u13-replicacion">Replicación</h3>
+  <div class="def"><b>Replicación.</b> Mantener copias de los mismos datos en varios nodos. Motivaciones: performance de lectura (muchas lecturas en paralelo contra distintas réplicas), disponibilidad y tolerancia a fallos (si una réplica muere, otra sigue sirviendo; al volver, se resincroniza con el resto antes de aceptar pedidos y no se pierden datos).</div>
+
+  <h4 id="u13-replicacion-leader">Leader based</h4>
+  <p>Una réplica se designa <b>leader</b> (o master); las demas son <b>followers</b> (mirrors, slaves). Solo el leader acepta escrituras; leader y followers aceptan lecturas. El leader despacha cada cambio a los followers (mirroring).</p>
+  <figure class="diag">
+    <svg viewBox="0 0 460 190" role="img" aria-label="Replicacion leader based">
+      <rect x="170" y="15" width="120" height="44" rx="6" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="230" y="34" text-anchor="middle" fill="currentColor" font-size="12">Leader</text>
+      <text x="230" y="50" text-anchor="middle" fill="currentColor" font-size="11">read / write</text>
+      <rect x="40" y="120" width="120" height="44" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="100" y="139" text-anchor="middle" fill="currentColor" font-size="12">Follower</text>
+      <text x="100" y="155" text-anchor="middle" fill="currentColor" font-size="11">read only</text>
+      <rect x="300" y="120" width="120" height="44" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="360" y="139" text-anchor="middle" fill="currentColor" font-size="12">Follower</text>
+      <text x="360" y="155" text-anchor="middle" fill="currentColor" font-size="11">read only</text>
+      <line x1="195" y1="59" x2="115" y2="118" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="115,118 126,110 121,120" fill="var(--linea)"/>
+      <line x1="265" y1="59" x2="345" y2="118" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="345,118 334,110 339,120" fill="var(--linea)"/>
+      <text x="230" y="100" text-anchor="middle" fill="currentColor" font-size="11">mirroring</text>
+    </svg>
+    <figcaption>Leader based: las escrituras entran solo por el leader y se propagan a los followers.</figcaption>
+  </figure>
+  <p>La replicación puede ser <b>sincrónica</b> o <b>asincrónica</b>. Sincrónica: el leader confirma el write recien cuando los followers lo recibieron; garantiza que la copia está al día, pero cada write tarda lo que tarde el follower más lento (y si un canal está intermitente, el sistema entero se frena). Asincrónica: el leader confirma de inmediato y propaga después; es rápida, pero si el leader cae antes de propagar se pierden writes confirmados. En la práctica es comun un esquema semisincronico: un follower sincrónico y el resto asincrónicos.</p>
+  <p>Con followers asincrónicos las lecturas pueden devolver datos viejos hasta que la réplica alcanza al leader (consistencia eventual). Dos anomalías con nombre propio:</p>
+  <ul>
+    <li><b>Read your own writes:</b> escribo en el leader, leo enseguida de un follower atrasado y mi propio dato "no esta". La garantía read-after-write asegura que un usuario siempre ve sus propias escrituras (ej: leyendo del leader lo que el mismo usuario pudo haber modificado).</li>
+    <li><b>Monotonic reads:</b> dos lecturas sucesivas caen en réplicas con distinto atraso y el usuario ve datos que "van hacia atras en el tiempo" (un comentario aparece y después desaparece). Se garantiza, por ejemplo, ruteando siempre al mismo usuario a la misma réplica.</li>
+  </ul>
+  <p>Aun con estas desventajas es el modelo más usado: es simple de entender e implementar, y las anomalías se mitigan con reintentos, timeouts y ruteo. La relación costo beneficio paga bien.</p>
+  <details class="mas"><summary>Kleppmann: failover y como se implementa el log de replicación</summary>
+    <p>Si cae un follower, se recupera con catch-up del log. Si cae el leader hay <b>failover</b>: detectar la caída (timeout), elegir nuevo leader (idealmente el follower más actualizado; es un problema de consenso) y reconfigurar clientes y followers. Peligros clásicos: con replicación asincrónica el nuevo leader puede no tener los últimos writes (se suelen descartar: writes "confirmados" que no eran durables); <b>split brain</b> si dos nodos se creen leader a la vez y ambos aceptan escrituras; y timeouts mal calibrados que disparan failovers innecesarios bajo carga.</p>
+    <p>El log de replicación puede ser de sentencias (fragil ante funciones no deterministas como <code>NOW()</code> o <code>RAND()</code>), de WAL físico, o lógico por filas, que es lo más usado.</p>
+  </details>
+
+  <h4 id="u13-replicacion-multileader">Multi-leader based</h4>
+  <p>Varios leaders aceptan escrituras a la vez, cada uno con sus followers; los leaders se mirrorean entre si con resolución de conflictos. Es el modelo normal con múltiples data centers: los usuarios de cada region escriben contra su leader local, y frente a la caída de un data center se puede promover al otro como líder global.</p>
+  <p>Problemas: los mismos de leader based, más los <b>conflictos por concurrencia</b>. Ejemplo típico: en un data center alguien crea el pais "Argentina" con un ID y en el otro alguien crea "Argentina" con otro ID; al mirrorear, la clave única no se cumple. O peor, ambos lados asignan el mismo ID incremental a registros distintos. También fallan cosas como el manejo de triggers (si están de un solo lado no ven los cambios del otro; si están de ambos, leen información parcial), las claves incrementales y la integridad de relaciones. Las resoluciones de conflicto (duplicar registros, last-write-wins, lógica de negocio) vienen preconfiguradas o quedan en manos de la aplicación: ninguna es buena en general, dependen del negocio y de la tabla.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 470 230" role="img" aria-label="Replicacion multi leader based">
+      <rect x="30" y="10" width="90" height="30" rx="6" fill="none" stroke="currentColor"/>
+      <text x="75" y="29" text-anchor="middle" fill="currentColor" font-size="11">Clientes</text>
+      <rect x="350" y="10" width="90" height="30" rx="6" fill="none" stroke="currentColor"/>
+      <text x="395" y="29" text-anchor="middle" fill="currentColor" font-size="11">Clientes</text>
+      <rect x="20" y="80" width="110" height="44" rx="6" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="75" y="99" text-anchor="middle" fill="currentColor" font-size="12">Leader</text>
+      <text x="75" y="115" text-anchor="middle" fill="currentColor" font-size="12">Replica</text>
+      <rect x="340" y="80" width="110" height="44" rx="6" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="395" y="99" text-anchor="middle" fill="currentColor" font-size="12">Leader</text>
+      <text x="395" y="115" text-anchor="middle" fill="currentColor" font-size="12">Replica</text>
+      <rect x="20" y="175" width="110" height="44" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="75" y="194" text-anchor="middle" fill="currentColor" font-size="12">Follower</text>
+      <text x="75" y="210" text-anchor="middle" fill="currentColor" font-size="12">Replica</text>
+      <rect x="340" y="175" width="110" height="44" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="395" y="194" text-anchor="middle" fill="currentColor" font-size="12">Follower</text>
+      <text x="395" y="210" text-anchor="middle" fill="currentColor" font-size="12">Replica</text>
+      <line x1="75" y1="40" x2="75" y2="77" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="75,78 70,68 80,68" fill="var(--linea)"/>
+      <line x1="395" y1="40" x2="395" y2="77" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="395,78 390,68 400,68" fill="var(--linea)"/>
+      <text x="88" y="60" fill="currentColor" font-size="10">Read/Writes</text>
+      <text x="330" y="60" text-anchor="end" fill="currentColor" font-size="10">Read/Writes</text>
+      <line x1="132" y1="102" x2="338" y2="102" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="130,102 140,97 140,107" fill="var(--linea)"/>
+      <polygon points="340,102 330,97 330,107" fill="var(--linea)"/>
+      <text x="235" y="93" text-anchor="middle" fill="currentColor" font-size="9">Mirroring w/ Conflict Resolution</text>
+      <line x1="75" y1="125" x2="75" y2="173" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="75,174 70,164 80,164" fill="var(--linea)"/>
+      <line x1="395" y1="125" x2="395" y2="173" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="395,174 390,164 400,164" fill="var(--linea)"/>
+      <text x="88" y="152" fill="currentColor" font-size="10">Mirroring</text>
+      <text x="330" y="152" text-anchor="end" fill="currentColor" font-size="10">Mirroring</text>
+    </svg>
+    <figcaption>Multi-leader: cada data center escribe contra su leader local; los leaders se sincronizan entre sí resolviendo conflictos.</figcaption>
+  </figure>
+
+  <h4 id="u13-replicacion-leaderless">Leaderless based</h4>
+  <p>Replicación totalmente distribuida: todas las réplicas aceptan reads y writes y deben sincronizarse mutuamente. Hay que elegir una topología de sincronización: anillo (cada réplica sincroniza solo con la siguiente, formando un círculo cerrado), jerárquica (una estructura de árbol donde los cambios bajan de nivel en nivel) o todos contra todos (cada réplica sincroniza directamente con cualquier otra; en la práctica esta última suele reemplazarse por una capa comun de comunicación, un middleware, donde todos publican y escuchan novedades). Los conflictos son muy frecuentes a menos que además se particione; la otra alternativa es que las réplicas consigan un <b>consenso</b> para aplicar cada escritura (tema que se desarrolla en las unidades de coordinación y consenso).</p>
+  <details class="mas"><summary>Kleppmann: quorums de lectura y escritura</summary>
+    <p>En los sistemas estilo Dynamo, con <code>n</code> réplicas, un write se confirma con <code>w</code> nodos y un read consulta <code>r</code> nodos. Si <code>w + r &gt; n</code>, todo read intersecta al menos un nodo actualizado (quorum). Config típica: <code>n</code> impar y <code>w = r = (n+1)/2</code>. Con n=3, w=2, r=2 se tolera 1 nodo caído. Las réplicas atrasadas se emparejan con read repair (el cliente detecta versiones viejas al leer de varios nodos y las corrige), hinted handoff y procesos anti-entropia en background.</p>
+  </details>
+
+  <div class="examen">Preguntado en finales: "Explique el beneficio de la replicación de datos y desarrolle una estrategia de implementación" (2024-07, 2025-03). La respuesta esperada: beneficio de disponibilidad y tolerancia a fallos (una réplica suplanta a la caída de forma transparente) más el desarrollo de una estrategia concreta, típicamente leader-follower con sus problemas (read your own writes, monotonic reads). También aparecio "Indique las diferencias entre los modelos de Replicación Activa y Pasiva" (2022-08), que se cubre en la unidad de tolerancia a fallos.</div>
+
+  <h3 id="u13-particionamiento">Particionamiento</h3>
+  <div class="def"><b>Particionamiento (sharding).</b> Dividir el conjunto de datos en particiones, de modo que cada operación caiga solo en la partición que corresponde. Motivaciones, en contraste con la replicación: <b>performance</b> (una escritura en la partición 2 no afecta una lectura en la partición 1; velocidades de lectura y escritura coherentes aunque el volumen crezca), <b>conflictos</b> (particionar minimiza colisiones: cada clave vive en una sola partición, la resolución queda local) y <b>redundancia</b> (si la función de partición asigna cada registro a dos particiones en lugar de una, ya hay replicación e información redundante para recuperarse de fallos: particionamiento y replicación se combinan para high availability).</div>
+
+  <h4 id="u13-particionamiento-h-v">Horizontal vs vertical</h4>
+  <table>
+    <thead><tr><th></th><th>Horizontal</th><th>Vertical</th></tr></thead>
+    <tbody>
+      <tr><td>Que se segrega</td><td>Registros (filas)</td><td>Atributos / dimensiones / campos (columnas)</td></tr>
+      <tr><td>Donde queda cada registro</td><td>En UNA partición a la vez</td><td>Repartido entre TODAS las particiones</td></tr>
+      <tr><td>Ejemplo</td><td>Ventas de enero en la partición 1, las de febrero en la 2</td><td>(date_id, product_id, qty, price) en una partición, (date_id, product_id, discount) en otra</td></tr>
+    </tbody>
+  </table>
+  <p>Particionar horizontalmente por fecha es muy comun: las escrituras del día van todas juntas a la misma partición (sin fragmentar), las lecturas consultan varias particiones en paralelo, y el archivado es trivial: una partición vieja entera se manda "al congelador" sin migrar una base gigante.</p>
+  <div class="warn">El particionamiento vertical tiene una trampa: si la consulta pide solo <code>price</code>, alcanza una partición; pero si pide <code>price</code> más <code>product_id</code> para un join, hay que leer pedazos del mismo registro en dos particiones, y si una está siendo escrita en el medio se puede leer un registro inconsistente. En escenarios de gran volumen las propiedades ACID se suelen relajar a propósito, en tanto el negocio lo tolere.</div>
+
+  <h4 id="u13-particionamiento-funcion">Función de partición</h4>
+  <ul>
+    <li><b>Value-of-key:</b> el valor (o parte) de la clave decide la partición. Ej: primera letra del email, usuarios pares a X e impares a Y.</li>
+    <li><b>Range-of-keys:</b> rangos de claves por partición. Ej: de la A a la C en la partición 0, de la D a la F en la 1; o posteos de enero a junio en X y de julio a diciembre en Y. Permite adaptar los límites a la distribución real de los datos.</li>
+    <li><b>Hash-of-key:</b> se hashea la clave y se mapea (por ejemplo con módulo N). Da buena distribución "aleatoria" cuando no importa donde quede cada registro y se quiere escribir en paralelo sin hot spots.</li>
+    <li><b>Mixtos:</b> generar N shards por cada clave (el registro puede ir a cualquiera de ellos: sirve por ejemplo para un contador que se graba fragmentado en n lugares y se lee sumando los n valores), o particionar por claves secundarias.</li>
+  </ul>
+  <details class="mas"><summary>Kleppmann: skew, hot spots y por que hash mod N rebalancea mal</summary>
+    <p>Si algunas particiones concentran más datos o más tráfico que otras hay <b>skew</b> y la partición sobrecargada es un <b>hot spot</b> (ej: la clave de un usuario celebridad). Range-of-keys mantiene las claves ordenadas y habilita range scans, pero es propenso a hot spots (si la clave es un timestamp, todos los writes del día caen en la misma partición; se mitiga anteponiendo otro campo a la clave, o agregando digitos aleatorios a una clave caliente a costa de leer y combinar). Hash-of-key distribuye uniforme pero pierde los range scans eficientes.</p>
+    <p><code>hash(key) mod N</code> tiene un problema operativo: si cambia la cantidad de nodos N, casi todas las claves cambian de nodo y el rebalanceo mueve muchisimos datos. La solución usual es crear muchas más particiones que nodos (particiones fijas, ej: 1000 shards para 10 nodos) y mover shards enteros entre nodos cuando el cluster crece.</p>
+  </details>
+
+  <h4 id="u13-particionamiento-ruteo">Enrutamiento de consultas</h4>
+  <p>Con los datos particionados, cada pedido tiene que llegar a la partición correcta. Tres alternativas:</p>
+  <ol>
+    <li><b>Consultar cualquier partición:</b> el cliente le pega a cualquier nodo; si el dato está ahí, lo devuelve; si no, el nodo aplica la función de partición, sabe donde esta el dato y redirige (o reenvia) el pedido a la partición correcta.</li>
+    <li><b>Router o centinela:</b> un nodo de ruteo conoce donde quedo grabado cada dato; el cliente le pregunta, el router responde a que partición ir (o reenvia directamente). Es simple para el cliente pero agrega un punto de falla y posible cuello de botella.</li>
+    <li><b>Conocimiento total del cliente:</b> el cliente conoce la función de partición, la aplica y salta directo a la partición. Elimina el cuello de botella central, pero el cliente necesita mucha más información: no solo la función, también las direcciones (IPs o naming/DNS) de cada partición y el estado del sistema. Es menos transparente y el cliente se vuelve más complejo.</li>
+  </ol>
+  <figure class="diag">
+    <svg viewBox="0 0 870 200" role="img" aria-label="Las tres alternativas de enrutamiento a particiones">
+      <text x="15" y="10" fill="currentColor" font-size="10">(1) Consultar cualquier partición</text>
+      <rect x="15" y="65" width="90" height="34" rx="6" fill="none" stroke="var(--acc)" stroke-width="1.5"/>
+      <text x="60" y="86" text-anchor="middle" fill="currentColor" font-size="11">Cliente</text>
+      <rect x="210" y="10" width="90" height="30" rx="6" fill="none" stroke="currentColor"/>
+      <text x="255" y="29" text-anchor="middle" fill="currentColor" font-size="11">Partición 1</text>
+      <rect x="210" y="65" width="90" height="30" rx="6" fill="none" stroke="currentColor"/>
+      <text x="255" y="84" text-anchor="middle" fill="currentColor" font-size="11">Partición 2</text>
+      <rect x="210" y="120" width="90" height="30" rx="6" fill="none" stroke="currentColor"/>
+      <text x="255" y="139" text-anchor="middle" fill="currentColor" font-size="11">Partición 3</text>
+      <line x1="105" y1="70" x2="208" y2="27" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="208,27 197,26 202,36" fill="var(--linea)"/>
+      <text x="155" y="42" text-anchor="middle" fill="currentColor" font-size="10">Get Data</text>
+      <line x1="310" y1="27" x2="310" y2="133" stroke="var(--linea)" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <polygon points="310,135 302,125 318,125" fill="var(--linea)"/>
+      <text x="0" y="0" fill="currentColor" font-size="9" transform="translate(326,80) rotate(-90)" text-anchor="middle">Route to Part 3</text>
+      <line x1="255" y1="150" x2="255" y2="178" stroke="var(--linea)" stroke-width="1.5"/>
+      <line x1="255" y1="178" x2="60" y2="178" stroke="var(--linea)" stroke-width="1.5"/>
+      <line x1="60" y1="178" x2="60" y2="101" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="60,101 53,111 67,111" fill="var(--linea)"/>
+      <text x="155" y="192" text-anchor="middle" fill="currentColor" font-size="10">respuesta</text>
+
+      <text x="385" y="10" fill="currentColor" font-size="10">(2) Router centinela</text>
+      <rect x="385" y="20" width="90" height="34" rx="6" fill="none" stroke="var(--acc)" stroke-width="1.5"/>
+      <text x="430" y="41" text-anchor="middle" fill="currentColor" font-size="11">Cliente</text>
+      <rect x="570" y="20" width="90" height="34" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="615" y="41" text-anchor="middle" fill="currentColor" font-size="11">Router</text>
+      <rect x="730" y="10" width="120" height="30" rx="6" fill="none" stroke="currentColor"/>
+      <text x="790" y="29" text-anchor="middle" fill="currentColor" font-size="11">Partición 1</text>
+      <rect x="730" y="65" width="120" height="30" rx="6" fill="none" stroke="currentColor"/>
+      <text x="790" y="84" text-anchor="middle" fill="currentColor" font-size="11">Partición 2</text>
+      <rect x="730" y="120" width="120" height="30" rx="6" fill="none" stroke="currentColor"/>
+      <text x="790" y="139" text-anchor="middle" fill="currentColor" font-size="11">Partición 3</text>
+      <line x1="475" y1="37" x2="568" y2="37" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="568,37 558,32 558,42" fill="var(--linea)"/>
+      <line x1="660" y1="30" x2="728" y2="25" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="728,25 717,22 718,31" fill="var(--linea)"/>
+      <text x="520" y="28" text-anchor="middle" fill="currentColor" font-size="10">get data</text>
+      <text x="615" y="10" fill="currentColor" font-size="10">(3) Cliente con conocimiento total</text>
+      <line x1="430" y1="54" x2="430" y2="135" stroke="var(--linea)" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <line x1="430" y1="135" x2="728" y2="135" stroke="var(--linea)" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <polygon points="728,135 718,130 718,140" fill="var(--linea)"/>
+      <text x="570" y="152" text-anchor="middle" fill="currentColor" font-size="10">cliente con función de partición: acceso directo</text>
+    </svg>
+    <figcaption>Las tres alternativas: consultar cualquier partición y redirigir (izquierda), vía router centinela (centro) y acceso directo del cliente que conoce la función de partición (línea punteada, derecha).</figcaption>
+  </figure>
+  <div class="examen">Preguntado en finales: "Considerando un escenario de particionamiento de datos en un sistema distribuido, explique al menos 2 alternativas de enrutamiento de una consulta para poder ubicar la información deseada" (2025-02, 2025-07). Conviene dar dos de las tres alternativas con su trade-off: centinela/router (simple para el cliente, punto único de falla y cuello de botella) vs cliente con conocimiento total (sin cuello de botella, pero cliente complejo y menos transparencia).</div>
+
+  <h3 id="u13-dsm">Distributed Shared Memory (DSM)</h3>
+  <div class="def"><b>DSM.</b> Patrón que brinda la ilusión de una memoria compartida centralizada entre procesos que pueden estar en máquinas distintas. Ventajas: es muy intuitivo (los algoritmos no distribuidos se traducen casi directo) y los nodos comparten información sin conocerse entre si. Desventajas: desalienta la distribución, genera latencia, cuello de botella y punto único de falla (en el fondo es una arquitectura cliente-servidor).</div>
+  <div class="warn">La cátedra desalienta usar DSM en escenarios multicomputing: da la ilusión de sistema centralizado sin serlo, los algoritmos "se pegan" a esa idea y la carga de procesamiento termina pésimamente distribuida. Se estudia como patrón y por sus variantes de implementación, que son pregunta clásica de final.</div>
+
+  <h4 id="u13-dsm-naive">Enfoque naive</h4>
+  <p>Toda la memoria (las memory pages) vive en un servidor; los clientes leen y escriben mediante requests. Para escribir se pide un lock: mientras un cliente lo tiene, el resto queda con lock denegado esperando la sección crítica. El servidor garantiza consistencia trivialmente serializando los requests, pero la performance para los clientes es muy baja: cada acceso a memoria es un viaje por la red. Si hay varias pages, el servidor puede particionarlas por dirección de memoria.</p>
+
+  <h4 id="u13-dsm-migracion">Migración de memory pages</h4>
+  <p>La información sigue perteneciendo al servidor pero se delega: un cliente pide prestada una page completa (page request + page migration), la trabaja localmente optimizando la localidad de acceso, y en algun momento la retorna. Si otro cliente pide la misma page, queda bloqueado, salvo que se permita una subdelegación: el servidor sabe donde está cada page prestada y puede indicar al segundo cliente que le pida la migración al que la tiene. Garantiza consistencia porque nunca hay acceso concurrente a una page, pero los clientes no se hablan entre si para ejecutar operaciones: solo migran pages.</p>
+
+  <h4 id="u13-dsm-replicacion-ro">Replicación de pages (solo lectura)</h4>
+  <p>Optimización para escenarios con muchas lecturas y pocas escrituras. Las lecturas replican la page en el cliente en modo read-only (mirror); las escrituras se aplican siempre en el servidor, que actúa como leader. Cuando una page cambia, el servidor <b>invalida</b> las réplicas que presto para lectura, y los clientes la vuelven a pedir.</p>
+
+  <h4 id="u13-dsm-replicacion-rw">Replicación de pages (lectura-escritura)</h4>
+  <p>Los clientes toman control total de las réplicas y el servidor se transforma en un <b>secuenciador de escrituras</b>: como una misma page puede estar replicada en varios clientes a la vez, cada write se informa al secuenciador y el se encarga de despachar la actualización a todas las réplicas (page update), igual que un leader despacha cambios en replicación leader based. Ante caídas de clientes, el servidor también aplica los cambios pendientes.</p>
+  <div class="idea">Todo el patrón DSM es replicación aplicada a memoria: naive = servidor único serializando; migración = la page vive en un solo lugar por vez (sin réplicas, sin conflictos); solo lectura = réplicas read-only con invalidación; lectura-escritura = réplicas read-write con secuenciador central. Cada variante mueve el trade-off entre performance y complejidad de coherencia.</div>
+  <div class="examen">Preguntado en finales, repetidas veces: "Explique un algoritmo de Distributed Shared Memory (DSM) donde se utilice replicación de páginas. Indique un caso de uso donde el algoritmo elegido sería ventajoso y otro donde sería perjudicial" (2024-07, 2025-12) y "Explique DSM desarrollando al menos una alternativa de implementación, ventajas y desventajas" (2022-08). Respuesta tipo con replicación solo lectura: ventajoso con muchas lecturas y pocas escrituras (las lecturas son locales, casi sin tráfico); perjudicial con escrituras frecuentes (cada write invalida todas las réplicas y dispara una tormenta de re-pedidos, el servidor se vuelve cuello de botella).</div>
+
+  <h3 id="u13-dfs">Distributed File Systems (DFS)</h3>
+  <p>Un DFS permite montar grandes aplicaciones sobre un esquema de archivos compartidos en red. Motivaciones historicas y actuales:</p>
+  <ul>
+    <li>Compartir archivos en redes locales e intranets.</li>
+    <li>Esquema centralizado de información persistente: control de backups, control de acceso y monitoreo (seguridad).</li>
+    <li>Optimización de recursos por concentración: discos grandes economizan y el costo de administración se reduce (lo centralizado es más fácil de administrar). Un rack con blades de 16 discos puede verse como un único file system gigante gracias al DFS que corre encima.</li>
+  </ul>
+  <p><b>Factores de diseño</b> de una plataforma DFS:</p>
+  <ul>
+    <li><b>Transparencia a los clientes:</b> de <b>acceso</b> (recursos con las credenciales usuales), de <b>localización</b> (operar archivos como si fueran locales), de <b>movilidad</b> (mover archivos internamente sin que se perciba: separar el naming del addressing, como referencio vs como accedo) y de <b>performance y escala</b> (las optimizaciones no deben afectar al cliente; performance constante o a lo sumo lineal con el volumen).</li>
+    <li><b>Concurrencia:</b> el acceso concurrente no debe requerir operaciones particulares del cliente.</li>
+    <li><b>Heterogeneidad de hardware:</b> adaptación automática a hardware distinto (discos de distinta capacidad y marca, computadoras distintas); desligarse de un único vendor. Aca el DFS gana mucho peso en multicomputing.</li>
+    <li><b>Tolerancia a fallos:</b> ocultar o minimizar los fallos, permitiendo semánticas como at-least-once o at-most-once en las operaciones.</li>
+  </ul>
+
+  <h3 id="u13-nfs">Caso de estudio: NFS (Network File System)</h3>
+  <p>Primera versión en 1984 por Sun Microsystems. Diseñado para ser independiente de plataformas aunque desarrollado sobre UNIX, y pensado desde el inicio para soportar operaciones <b>POSIX</b>: los servidores proveen operaciones identicas a las requeridas por POSIX y el share se monta como una unidad virtual más.</p>
+  <p>La pieza conceptual clave es el <b>Virtual File System (VFS)</b>, una nueva abstracción en el kernel: las aplicaciones dejan de acceder directo al file system físico y pasan por el VFS, que decide si la operación va al FS local o se deriva al <b>NFS client</b>, que invoca por <b>RPC</b> (sobre TCP o UDP) al <b>NFS server</b> remoto, el cual opera sobre su propio FS y devuelve la respuesta. Esa capa extra alentece las operaciones locales, pero da el control necesario para hacer el switch local/remoto de forma transparente. Puede haber muchos clientes montando el mismo servidor a la vez, y el servidor puede además correr sus propias aplicaciones sobre el mismo FS.</p>
+  <p>Del lado del servidor, el pedido RPC primero resuelve el puerto del servicio NFS a través de un <b>RPC Bind</b> (portmapper): un registro de servicios RPC disponibles en esa máquina que le indica al cliente a que puerto conectarse para hablar con el NFS server. El servidor también expone su propio Virtual File System hacia el FS local, con la misma estructura en capas que el cliente: eso es lo que le permite atender pedidos NFS y correr sus propias aplicaciones sobre el mismo file system sin tratamiento especial.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 620 235" role="img" aria-label="Arquitectura NFS con RPC Bind y VFS simetrico">
+      <text x="135" y="15" text-anchor="middle" fill="currentColor" font-size="12">Client</text>
+      <text x="465" y="15" text-anchor="middle" fill="currentColor" font-size="12">Server</text>
+      <rect x="15" y="70" width="230" height="150" rx="6" fill="none" stroke="var(--linea)" stroke-dasharray="4 3"/>
+      <text x="26" y="85" fill="currentColor" font-size="10">Kernel</text>
+      <rect x="325" y="70" width="270" height="150" rx="6" fill="none" stroke="var(--linea)" stroke-dasharray="4 3"/>
+      <text x="336" y="85" fill="currentColor" font-size="10">Kernel</text>
+      <rect x="25" y="25" width="80" height="28" rx="6" fill="none" stroke="currentColor"/>
+      <text x="65" y="44" text-anchor="middle" fill="currentColor" font-size="11">App1</text>
+      <rect x="155" y="25" width="80" height="28" rx="6" fill="none" stroke="currentColor"/>
+      <text x="195" y="44" text-anchor="middle" fill="currentColor" font-size="11">App2</text>
+      <rect x="50" y="100" width="160" height="30" rx="6" fill="none" stroke="var(--acc)" stroke-width="1.5"/>
+      <text x="130" y="119" text-anchor="middle" fill="currentColor" font-size="11">Virtual FS</text>
+      <rect x="50" y="160" width="70" height="30" rx="6" fill="none" stroke="currentColor"/>
+      <text x="85" y="179" text-anchor="middle" fill="currentColor" font-size="10">Unix FS</text>
+      <rect x="140" y="160" width="70" height="30" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="175" y="179" text-anchor="middle" fill="currentColor" font-size="10">NFS Client</text>
+      <line x1="65" y1="53" x2="112" y2="98" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="112,99 100,96 106,88" fill="var(--linea)"/>
+      <line x1="195" y1="53" x2="150" y2="98" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="150,99 154,88 160,96" fill="var(--linea)"/>
+      <line x1="112" y1="130" x2="85" y2="158" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="85,159 87,148 94,155" fill="var(--linea)"/>
+      <line x1="150" y1="130" x2="175" y2="158" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="175,159 168,150 177,146" fill="var(--linea)"/>
+      <rect x="380" y="100" width="160" height="30" rx="6" fill="none" stroke="var(--acc)" stroke-width="1.5"/>
+      <text x="460" y="119" text-anchor="middle" fill="currentColor" font-size="11">Virtual FS</text>
+      <rect x="335" y="160" width="80" height="30" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="375" y="179" text-anchor="middle" fill="currentColor" font-size="10">RPC Bind</text>
+      <rect x="430" y="160" width="90" height="30" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="475" y="179" text-anchor="middle" fill="currentColor" font-size="10">NFS Server</text>
+      <rect x="535" y="160" width="70" height="30" rx="6" fill="none" stroke="currentColor"/>
+      <text x="570" y="179" text-anchor="middle" fill="currentColor" font-size="10">Unix FS</text>
+      <line x1="460" y1="130" x2="475" y2="158" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="475,159 469,149 478,147" fill="var(--linea)"/>
+      <line x1="490" y1="130" x2="555" y2="158" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="555,159 545,153 550,145" fill="var(--linea)"/>
+      <text x="285" y="145" text-anchor="middle" fill="currentColor" font-size="10">NFS Protocol / RPC</text>
+      <line x1="210" y1="175" x2="428" y2="175" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="430,175 420,170 420,180" fill="var(--linea)"/>
+    </svg>
+    <figcaption>Arquitectura NFS: el servidor tiene un Virtual FS simétrico al del cliente, y el pedido RPC pasa por el RPC Bind (portmapper) antes de llegar al NFS Server.</figcaption>
+  </figure>
+  <p>Montarlo es trivial: en el servidor se instala <code>nfs-kernel-server</code> y se declara el directorio exportado y la subred en <code>/etc/exports</code>; en el cliente, <code>nfs-common</code> y algo como:</p>
+  <pre><code>mount -t nfs -o proto=tcp,port=2049 &lt;ip-servidor&gt;:/ /mnt</code></pre>
+  <details class="mas"><summary>NFS stateless e idempotencia</summary>
+    <p>El diseño clásico de NFS (v3) usa servidores sin estado (stateless) y operaciones idempotentes (por ejemplo, leer o escribir en una posición absoluta del archivo en lugar de "agregar al final"). Así, si el servidor cae y se reinicia, el cliente reintenta la operación por RPC y no percibe el fallo más alla de un retraso. Esto conecta con las semánticas at-least-once de la unidad de tolerancia a fallos.</p>
+  </details>
+  <div class="examen">Preguntado en finales: "Explique una arquitectura de Distributed File System (DFS) que conozca. Indique un caso de uso donde elegir dicho mecanismo sería ventajoso y otro donde sería perjudicial". Respuesta tipo con NFS: arquitectura cliente-servidor con VFS en el kernel del cliente y RPC hacia el servidor. Ventajoso: compartir directorios (/home, binarios) en una LAN de oficina o desarrollo, con semántica POSIX y caching. Perjudicial: Big Data o WAN, porque la latencia castiga la charla del protocolo RPC y el servidor central es cuello de botella; ahí conviene HDFS, que distribuye los datos y mueve el cómputo hacia ellos. NFS también aparece como ejemplo pedido en preguntas de RPC (que pasa al ejecutar <code>ls</code> sobre un directorio montado).</div>
+
+  <h3 id="u13-hdfs">Caso de estudio: HDFS (Hadoop Distributed File System)</h3>
+  <p>Sistema de archivos distribuido de Apache basado en el diseño del <b>Google File System (GFS)</b>, pensado para hardware de bajo costo (commodity). <b>No soporta POSIX</b> (no hay <code>ls</code>, <code>cp</code> ni atributos clásicos), por lo que se lo considera un data storage más que un file system: sus elementos son objetos o blobs con metadata. Es la base del ecosistema Hadoop para procesamiento distribuido (MapReduce, operaciones SQL-like).</p>
+  <p><b>Factores de diseño:</b></p>
+  <ul>
+    <li><b>Tolerancia a fallos:</b> los fallos de hardware son normales, no la excepción; es más económico adaptarse que defenderse. Se quema un disco, se lo cambia, y la información se re-réplica sola.</li>
+    <li><b>Volumen y latencia:</b> favorece operaciones de streaming y archivos volumetricos por sobre operaciones de baja latencia de usuarios finales (el mismo contraste OLAP vs OLTP).</li>
+    <li><b>Portabilidad:</b> hardware heterogéneo y barato; TCP entre servidores, RPC con los clientes.</li>
+    <li><b>Performance:</b> favorece lecturas, con política <b>write-once-read-many</b>: el archivo se escribe una vez y se lee muchas; modificar cuesta tan caro como escribir uno nuevo.</li>
+  </ul>
+  <div class="idea">El eslogan del proyecto: "Moving Computation is Cheaper than Moving Data". Una vez que los datos quedaron en algun lugar, conviene mover los procesos cerca de los datos y no al reves.</div>
+  <p><b>Arquitectura maestro-esclavo:</b></p>
+  <ul>
+    <li><b>Namenode (maestro, único):</b> mantiene toda la metadata: el árbol del file system, atributos, y que bloques de que archivo están en que Datanodes. La metadata vive en memoria para optimizar el acceso, con un edit log (log de transacciones) para tracking. Coordina a los Datanodes pero no transfiere datos. Renombrar un archivo o moverlo de directorio se resuelve solo en el Namenode.</li>
+    <li><b>Datanodes (esclavos, muchos):</b> almacenan los bloques de archivo, sin saber siquiera que contienen. Cada servidor nuevo que se suma a la granja recibe un Datanode y discos.</li>
+    <li><b>Clientes:</b> consultan al Namenode por el file system y la ubicación de los datos, y luego se comunican directamente con los Datanodes para leer o escribir los bloques.</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 500 200" role="img" aria-label="Arquitectura HDFS">
+      <rect x="190" y="12" width="130" height="40" rx="6" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="255" y="30" text-anchor="middle" fill="currentColor" font-size="12">Namenode</text>
+      <text x="255" y="45" text-anchor="middle" fill="currentColor" font-size="10">metadata + edit log</text>
+      <rect x="30" y="130" width="120" height="40" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="90" y="148" text-anchor="middle" fill="currentColor" font-size="11">Datanode</text>
+      <text x="90" y="162" text-anchor="middle" fill="currentColor" font-size="10">file blocks</text>
+      <rect x="190" y="130" width="120" height="40" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="250" y="148" text-anchor="middle" fill="currentColor" font-size="11">Datanode</text>
+      <text x="250" y="162" text-anchor="middle" fill="currentColor" font-size="10">file blocks</text>
+      <rect x="350" y="130" width="120" height="40" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="410" y="148" text-anchor="middle" fill="currentColor" font-size="11">Datanode</text>
+      <text x="410" y="162" text-anchor="middle" fill="currentColor" font-size="10">file blocks</text>
+      <line x1="220" y1="52" x2="100" y2="128" stroke="var(--linea)" stroke-width="1.5"/>
+      <line x1="255" y1="52" x2="252" y2="128" stroke="var(--linea)" stroke-width="1.5"/>
+      <line x1="295" y1="52" x2="400" y2="128" stroke="var(--linea)" stroke-width="1.5"/>
+      <rect x="15" y="12" width="100" height="40" rx="6" fill="none" stroke="currentColor"/>
+      <text x="65" y="36" text-anchor="middle" fill="currentColor" font-size="11">Cliente</text>
+      <line x1="115" y1="28" x2="188" y2="28" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="188,28 178,23 178,33" fill="var(--linea)"/>
+      <text x="150" y="20" text-anchor="middle" fill="currentColor" font-size="9">1. metadata</text>
+      <line x1="65" y1="52" x2="85" y2="128" stroke="var(--linea)" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <polygon points="85,128 78,120 87,118" fill="var(--linea)"/>
+      <text x="38" y="95" text-anchor="middle" fill="currentColor" font-size="9">2. datos</text>
+    </svg>
+    <figcaption>HDFS: el cliente pide la ubicación al Namenode y transfiere los datos directamente con los Datanodes.</figcaption>
+  </figure>
+  <p><b>Almacenamiento:</b> los archivos se particionan en bloques de <b>128 MB</b> (configurable). Un archivo de 512 MB se fracciona en 4 bloques repartidos entre Datanodes; un archivo de pocos KB no tiene sentido en HDFS. Cada bloque se réplica en distintos Datanodes según un <b>factor de replicación</b> configurable (por archivo): con factor 2 se tolera la caída de un nodo, con factor 3 la de dos, y además los clientes pueden repartirse entre réplicas (round robin) ganando performance. El cluster permite re-balanceo de bloques. Así se logra tolerancia a fallos y durabilidad de forma barata.</p>
+  <p><b>Acceso a datos y localidad:</b> el Namenode favorece el principio de localidad: el cliente recibe el listado de Datanodes de cada bloque y sus réplicas, y se intenta que lea del mismo rack; si no es posible, del mismo data center. Combinado con el eslogan de mover cómputo y no datos: los procesos de un gran procesamiento se ubican cerca de los Datanodes que tienen los bloques (affinity), consultan metadata al Namenode y después operan de forma local o casi local. La contracara: las réplicas conviene distribuirlas entre racks, porque si todo un rack se pierde (se inunda el sotano), un bloque replicado solo dentro de ese rack se pierde por completo.</p>
+  <div class="examen">Preguntado en finales, uno de los más repetidos: "Explique HDFS (Hadoop Distributed File System) y desarrolle los conceptos clave utilizados como factores de diseño" (2023-07, 2024-07, 2025-02). La respuesta fuerte incluye: data storage no POSIX basado en GFS, commodity hardware con fallos como norma, arquitectura Namenode/Datanodes (metadata en memoria + edit log, datos en bloques de 128 MB), replicación de bloques configurable, write-once-read-many, principio de localidad y "mover el cómputo a los datos".</div>
+</section>

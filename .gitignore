@@ -1,0 +1,14 @@
+# Material de terceros usado como fuente, no se republica:
+# diapositivas de la catedra, bibliografia, finales transcriptos y la clase en
+# Notion. El apunte cita y sintetiza ese material, pero no lo redistribuye.
+fuentes/bibliografia/
+fuentes/diapositivas/
+fuentes/repo/
+fuentes/notion/
+
+# Intermedios y respaldos de trabajo
+fuentes/backup_sin_tildes/
+fuentes/viejo/
+fuentes/anclas.txt
+fuentes/sintesis/autoevaluacion.html
+fuentes/sintesis/glosario.html

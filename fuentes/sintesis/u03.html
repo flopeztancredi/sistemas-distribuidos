@@ -1,0 +1,1171 @@
+<section class="unidad" id="u03" data-titulo="Paralelizacion, multiprocessors y nombres; diagramas">
+  <h2>U03. Paralelización, multiprocessors y nombres; diagramas y documentación técnica</h2>
+  <p class="intro">Esta unidad responde dos preguntas complementarias. Primero, cuánto se puede acelerar una tarea agregando unidades de cómputo: leyes de Amdahl y Gustafson, modelo Work-Span, estrategias de particionamiento y la clasificación del hardware que ejecuta ese paralelismo (taxonomía de Flynn, multiprocessors y multicomputers), más el problema de nombrar y ubicar entidades en un sistema distribuido. Segundo, cómo comunicar un diseño: modelos de documentación (4+1 y C4) y el catálogo de diagramas que la materia exige en los informes de los TPs, con el diagrama de robustez como protagonista.</p>
+
+  <h3 id="u03-paralelizacion">Paralelización de tareas: objetivos y camino crítico</h3>
+  <p>Paralelizar es repartir trabajo entre varias unidades de cómputo. Se persiguen tres objetivos, que no siempre se logran a la vez:</p>
+  <ul>
+    <li><b>Latencia:</b> reducir el tiempo de cómputo de una tarea individual.</li>
+    <li><b>Throughput:</b> incrementar la cantidad de tareas que se realizan en paralelo por unidad de tiempo.</li>
+    <li><b>Energía:</b> reducir el consumo total al realizar el conjunto de tareas.</li>
+  </ul>
+  <div class="def"><b>Camino crítico.</b> La máxima longitud de tareas secuenciales (interdependientes) a computar: la cadena más larga de tareas donde cada una necesita el resultado de la anterior. Define el mejor rendimiento posible al ejecutar un conjunto de tareas: por más procesadores que se agreguen, nunca se termina antes que el tiempo del camino crítico.</div>
+  <div class="idea">Interdependiente significa: para realizar la tarea A primero tengo que terminar la tarea B. Todo lo que forma una cadena de dependencias no se puede paralelizar entre sí, solo se puede paralelizar lo que queda "a los costados" de esa cadena.</div>
+
+  <h3 id="u03-amdahl">Ley de Amdahl</h3>
+  <p>Amdahl observó que el esfuerzo invertido en lograr altas tasas de procesamiento paralelo se desperdicia si no viene acompañado de mejoras de magnitud similar en el procesamiento secuencial. La formalización parte de dividir todo trabajo de cómputo en una fracción secuencial y una paralela:</p>
+  <ul>
+    <li><code>Wser = f</code> (fracción del trabajo que es inherentemente secuencial)</li>
+    <li><code>Wpar = 1 - f</code> (fracción paralelizable)</li>
+    <li><code>T1 = Wser + Wpar</code> (tiempo con 1 procesador)</li>
+    <li><code>TP = Wser + Wpar / P</code> (tiempo con P procesadores: solo la parte paralela se reparte)</li>
+  </ul>
+  <div class="def"><b>Speedup.</b> Ratio de optimización de una operación: <code>S<sub>P</sub> = T1 / T<sub>P</sub></code>. Es cuánto más rápido corre el programa gracias a la paralelización. Reemplazando: <code>S<sub>P</sub> ≤ 1 / (f + (1 - f) / P)</code>. Con <code>P → ∞</code> queda <code>S<sub>∞</sub> ≤ 1 / f</code>.</div>
+  <p>La conclusión es la parte importante: <b>el speedup máximo está acotado por la fracción no paralelizable</b>. No importa cuántos procesadores se agreguen, el techo lo pone <code>f</code>. Ejemplo con <code>f = 0.01</code> (apenas 1% secuencial):</p>
+  <table>
+    <thead><tr><th>f</th><th>Procesadores</th><th>S<sub>P</sub></th></tr></thead>
+    <tbody>
+      <tr><td>0.01</td><td>100</td><td>50</td></tr>
+      <tr><td>0.01</td><td>1000</td><td>90</td></tr>
+      <tr><td>0.01</td><td>10000</td><td>99</td></tr>
+      <tr><td>0.01</td><td>∞</td><td>100</td></tr>
+    </tbody>
+  </table>
+  <p>Con 100 procesadores se logra speedup 50 (eficiencia 50%), y ni con infinitos procesadores se pasa de 100. De acá salen las dos palancas: para bajar <code>f</code> hay que reprogramar para que el algoritmo sea más paralelizable; agregar procesadores solo mejora <code>T<sub>P</sub></code> hasta ese techo.</p>
+  <p>El techo <code>S<sub>∞</sub> = 1/f</code> cambia de orden de magnitud según cuánto valga <code>f</code>:</p>
+  <table>
+    <thead><tr><th>f (fracción serial)</th><th>S<sub>∞</sub> = 1/f</th></tr></thead>
+    <tbody>
+      <tr><td>0.001 (0.1%)</td><td>1000</td></tr>
+      <tr><td>0.01 (1%)</td><td>100</td></tr>
+      <tr><td>0.1 (10%)</td><td>10</td></tr>
+      <tr><td>0.3 (30%)</td><td>3.33</td></tr>
+      <tr><td>0.5 (50%)</td><td>2</td></tr>
+    </tbody>
+  </table>
+  <p>Con la mitad del trabajo serial no se pasa nunca de speedup 2, por más procesadores que se agreguen. Además, las curvas de speedup crecen casi linealmente al principio y se aplanan mucho antes de llegar al techo: con <code>f = 0.001</code> y 2048 procesadores se obtienen 672 de los 1000 posibles.</p>
+  <div class="warn">Amdahl asume que la fracción paralelizable se distribuye de forma uniforme y perfecta entre los procesadores. Eso lo vuelve optimista: ignora dependencias internas de la parte "paralela", el costo de acceso a memoria y la comunicación. Por eso existen Gustafson y Work-Span como refinamientos.</div>
+
+  <h3 id="u03-gustafson">Ley de Gustafson</h3>
+  <p>Gustafson invierte el planteo: el speedup debería medirse escalando el problema a la cantidad de procesadores, no fijando el tamaño del problema. Amdahl pregunta "¿cuánto más rápido resuelvo este mismo problema?"; Gustafson pregunta "¿cuánto más problema puedo resolver en el mismo tiempo?".</p>
+  <p>Corolario: aumentar el paralelismo puede permitir modificar el problema original para ejecutar más trabajo. Si el problema crece, hay dos efectos y ambos mejoran el speedup:</p>
+  <ul>
+    <li>La parte serial se vuelve proporcionalmente más chica: el speedup aumenta.</li>
+    <li>El paralelismo disponible aumenta: el speedup aumenta.</li>
+  </ul>
+  <div class="idea">En la práctica esto describe bien a los sistemas de datos: cuando hay más máquinas no se resuelve el mismo dataset más rápido y listo, se procesan datasets más grandes. La fracción serial (levantar el proceso, coordinar, agregar resultados) queda diluida frente al volumen de trabajo paralelo.</div>
+
+  <h3 id="u03-work-span">Modelo Work-Span</h3>
+  <p>Es el modelo más cercano a la realidad para estimar optimizaciones: en vez de suponer una fracción paralela perfecta, modela la operación como un grafo de tareas con dependencias (un DAG) y provee una cota inferior y una superior para el speedup.</p>
+  <p>Hipótesis del modelo:</p>
+  <ul>
+    <li><b>Paralelismo imperfecto:</b> no todo el trabajo paralelizable se puede ejecutar al mismo tiempo (hay dependencias).</li>
+    <li><b>Greedy scheduling:</b> si hay un proceso disponible, se le asigna una tarea (el scheduler nunca deja capacidad ociosa pudiendo usarla).</li>
+    <li>Tiempo de acceso a memoria despreciable.</li>
+    <li>Tiempo de comunicación entre procesos despreciable.</li>
+    <li>Se puede analizar la operación en caja blanca (conocemos su grafo de tareas).</li>
+  </ul>
+  <div class="def"><b>Work y Span.</b> <code>T1</code> (work) es el tiempo de ejecutar el algoritmo con un solo proceso: el trabajo total. <code>T<sub>∞</sub></code> (span) es el tiempo de ejecutar el <a href="#u03-paralelizacion">camino crítico</a>: lo que tardaría con infinitos procesadores.</div>
+  <table>
+    <thead><tr><th>Cota del speedup</th><th>Fórmula</th><th>Consideraciones</th></tr></thead>
+    <tbody>
+      <tr><td>Superior</td><td><code>S<sub>P</sub> ≤ min(P, T1 / T<sub>∞</sub>)</code></td><td>Nunca se supera la cantidad de procesadores ni el paralelismo que permite el camino crítico. Se alcanza P en escenarios de speedup lineal.</td></tr>
+      <tr><td>Inferior (tiempo)</td><td><code>T<sub>P</sub> ≤ (T1 - T<sub>∞</sub>) / P + T<sub>∞</sub></code></td><td>El trabajo se divide en perfecta e imperfectamente paralelizable: lo que no es camino crítico se reparte entre P, el camino crítico se paga entero.</td></tr>
+    </tbody>
+  </table>
+  <figure class="diag">
+    <svg viewBox="0 0 640 230" role="img" aria-label="DAG de tareas con camino critico resaltado">
+      <rect x="30" y="98" width="46" height="30" rx="4" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="53" y="118" text-anchor="middle" font-size="13" fill="currentColor">1</text>
+      <g stroke="var(--linea)" stroke-width="1.5">
+        <line x1="76" y1="106" x2="170" y2="32"/>
+        <line x1="76" y1="112" x2="170" y2="86"/>
+        <line x1="76" y1="120" x2="170" y2="144"/>
+        <line x1="76" y1="126" x2="170" y2="198"/>
+        <line x1="510" y1="32" x2="564" y2="106"/>
+        <line x1="510" y1="86" x2="564" y2="112"/>
+        <line x1="510" y1="144" x2="564" y2="120"/>
+        <line x1="510" y1="198" x2="564" y2="126"/>
+      </g>
+      <g>
+        <g stroke="var(--acc)" stroke-width="2" fill="none">
+          <rect x="170" y="18" width="46" height="28" rx="4"/><rect x="256" y="18" width="46" height="28" rx="4"/><rect x="342" y="18" width="46" height="28" rx="4"/><rect x="428" y="18" width="46" height="28" rx="4"/>
+          <line x1="216" y1="32" x2="256" y2="32"/><line x1="302" y1="32" x2="342" y2="32"/><line x1="388" y1="32" x2="428" y2="32"/><line x1="474" y1="32" x2="510" y2="32"/>
+        </g>
+        <g stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.75">
+          <rect x="170" y="72" width="46" height="28" rx="4"/><rect x="256" y="72" width="46" height="28" rx="4"/><rect x="342" y="72" width="46" height="28" rx="4"/><rect x="428" y="72" width="46" height="28" rx="4"/>
+          <line x1="216" y1="86" x2="256" y2="86"/><line x1="302" y1="86" x2="342" y2="86"/><line x1="388" y1="86" x2="428" y2="86"/><line x1="474" y1="86" x2="510" y2="86"/>
+          <rect x="170" y="130" width="46" height="28" rx="4"/><rect x="256" y="130" width="46" height="28" rx="4"/><rect x="342" y="130" width="46" height="28" rx="4"/><rect x="428" y="130" width="46" height="28" rx="4"/>
+          <line x1="216" y1="144" x2="256" y2="144"/><line x1="302" y1="144" x2="342" y2="144"/><line x1="388" y1="144" x2="428" y2="144"/><line x1="474" y1="144" x2="510" y2="144"/>
+          <rect x="170" y="184" width="46" height="28" rx="4"/><rect x="256" y="184" width="46" height="28" rx="4"/><rect x="342" y="184" width="46" height="28" rx="4"/><rect x="428" y="184" width="46" height="28" rx="4"/>
+          <line x1="216" y1="198" x2="256" y2="198"/><line x1="302" y1="198" x2="342" y2="198"/><line x1="388" y1="198" x2="428" y2="198"/><line x1="474" y1="198" x2="510" y2="198"/>
+        </g>
+      </g>
+      <rect x="564" y="98" width="46" height="30" rx="4" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="587" y="118" text-anchor="middle" font-size="13" fill="currentColor">1</text>
+      <text x="320" y="226" text-anchor="middle" font-size="12" fill="var(--acc2)">camino crítico resaltado: 1 + 4 + 1 = 6</text>
+    </svg>
+    <figcaption>Ejemplo de la cátedra: una tarea serial inicial, 16 tareas repartidas en 4 cadenas paralelas de 4, y una tarea serial final. <code>T1 = 18</code> (work), <code>T<sub>∞</sub> = 6</code> (span), speedup máximo <code>T1/T<sub>∞</sub> = 3</code>. Amdahl, mirando solo la fracción serial <code>f = 2/18</code>, prometería <code>S<sub>∞</sub> = 9</code>: sobreestima porque ignora las dependencias dentro de la parte paralela.</figcaption>
+  </figure>
+  <figure class="diag">
+    <svg viewBox="0 0 640 300" role="img" aria-label="Grafico de cotas de speedup: envolvente min(P, T1 sobre T infinito), cota inferior y curva de Amdahl">
+      <g stroke="var(--linea)" stroke-width="1" opacity="0.45">
+        <line x1="70" y1="30" x2="610" y2="30"/>
+        <line x1="70" y1="74" x2="610" y2="74"/>
+        <line x1="70" y1="118" x2="610" y2="118"/>
+        <line x1="70" y1="162" x2="610" y2="162"/>
+        <line x1="70" y1="206" x2="610" y2="206"/>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5">
+        <line x1="70" y1="30" x2="70" y2="250"/>
+        <line x1="70" y1="250" x2="610" y2="250"/>
+      </g>
+      <g font-size="11" fill="currentColor" text-anchor="end">
+        <text x="62" y="254">1</text><text x="62" y="210">2</text><text x="62" y="166">3</text><text x="62" y="122">4</text><text x="62" y="78">5</text><text x="62" y="34">6</text>
+      </g>
+      <g font-size="11" fill="currentColor" text-anchor="middle">
+        <text x="70" y="268">0</text><text x="205" y="268">4</text><text x="340" y="268">8</text><text x="475" y="268">12</text><text x="610" y="268">16</text>
+        <text x="340" y="290">P (cantidad de workers)</text>
+      </g>
+      <text x="22" y="140" text-anchor="middle" font-size="11" fill="currentColor" transform="rotate(-90 22 140)">Speedup</text>
+
+      <polyline points="104,250 138,215 171,186 205,162 239,142 273,124 340,96 408,74 475,56 543,42 610,30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="6 4"/>
+      <polyline points="104,250 171,162 610,162" fill="none" stroke="var(--acc)" stroke-width="2.5"/>
+      <polyline points="104,250 138,228 171,215 205,206 239,200 273,195 340,188 408,184 475,181 610,176" fill="none" stroke="var(--acc2)" stroke-width="2"/>
+
+      <text x="330" y="86" text-anchor="end" font-size="11" fill="currentColor">Amdahl (f = 2/18 = 1/9): llega a 6</text>
+      <text x="400" y="152" font-size="11" fill="var(--acc)">cota superior: min(P, T1/T∞) = 3</text>
+      <text x="126" y="196" text-anchor="end" font-size="11" fill="var(--acc)">P</text>
+      <text x="330" y="228" font-size="11" fill="var(--acc2)">cota inferior: T1 / ((T1 - T∞)/P + T∞)</text>
+    </svg>
+    <figcaption>Cotas de speedup para el mismo ejemplo (<code>T1 = 18</code>, <code>T<sub>∞</sub> = 6</code>). La cota superior es la <b>envolvente</b> de la recta <code>P</code> (speedup lineal, mientras sobren tareas para repartir) y del techo <code>T1/T<sub>∞</sub> = 3</code>: se cortan en <code>P = 3</code> y a partir de ahí agregar workers no cambia nada. La cota inferior es la curva de abajo, que tiende a 3 sin alcanzarlo. La curva de Amdahl <b>atraviesa</b> el techo real y sigue subiendo hasta 6 con 16 workers: mirando solo la fracción serial promete un speedup que las dependencias del camino crítico hacen imposible.</figcaption>
+  </figure>
+  <div class="warn">Para aplicar Work-Span es condición que todas las tareas tengan un tiempo de ejecución similar (las unidades del grafo deben ser comparables). Y no confundir las cotas: la superior acota el speedup, la inferior acota el tiempo <code>T<sub>P</sub></code> (que es una forma de cota inferior del rendimiento).</div>
+  <div class="examen">Preguntado en finales: "¿En qué consiste el modelo de Work-Span para análisis de paralelización de tareas y camino crítico?" (2024-07-08, 2025-02-20). Respuesta completa: definir work y span, dar las dos cotas, y explicar que mejora a Amdahl porque contempla el paralelismo imperfecto por dependencias (camino crítico) en vez de asumir una fracción paralela perfecta.</div>
+
+  <h3 id="u03-particionamiento">Estrategias de particionamiento y patrones de procesamiento</h3>
+  <p>Dos estrategias básicas para partir un trabajo y habilitarlo a correr en paralelo:</p>
+  <h4 id="u03-descomposicion-funcional">Descomposición funcional</h4>
+  <p>Resolver en paralelo funciones distintas e independientes sobre los mismos datos. El paralelismo máximo queda acotado por la cantidad de funciones:</p>
+  <pre><code># secuencial: 1 proceso como maximo
+def foo(data):
+    return f(data) + g(data) + h(data)
+
+# funcional: 3 procesos como maximo (uno por funcion)
+def foo(data):
+    return spawn(f, data) + spawn(g, data) + spawn(h, data)</code></pre>
+  <h4 id="u03-particionamiento-datos">Particionamiento de datos</h4>
+  <p>Aplicar la misma función a porciones disjuntas de los datos. Escala con P (la cantidad de particiones), pero solo si <code>f</code> es particionable, es decir, si el resultado sobre el todo se puede componer a partir de los resultados sobre las partes:</p>
+  <pre><code># secuencial: 1 proceso como maximo
+def foo(data):
+    return f(data)
+
+# particionado: P procesos como maximo
+def foo(data):
+    return combinar(
+        spawn(f, data[0 : N//P]),
+        ...,
+        spawn(f, data[(P-1)*N//P : N])
+    )</code></pre>
+  <div class="idea">La descomposición funcional tiene techo fijo (la cantidad de funciones); el particionamiento de datos escala con los recursos disponibles. Por eso los sistemas de datos de gran escala se construyen casi siempre sobre particionamiento de datos, y la descomposición funcional aparece como etapas de un pipeline.</div>
+  <h4 id="u03-patrones-procesamiento">Patrones de procesamiento</h4>
+  <p>Sobre estas estrategias se construyen patrones de procesamiento: soluciones recurrentes basadas en algoritmos. Sus características:</p>
+  <ul>
+    <li>Menos abstractos que los patrones de diseño, pero sin detalles de implementación.</li>
+    <li>Agnósticos al lenguaje de programación.</li>
+    <li>Componibles: un patrón debe poder incluir otros patrones (nesting).</li>
+    <li>Son herramienta básica de trabajo también en multicomputing, no solo dentro de una máquina.</li>
+  </ul>
+  <p>El catálogo que da la cátedra son seis patrones, todos dibujables con el mismo alfabeto de cuatro símbolos (tarea, dato, fork, join):</p>
+  <table>
+    <thead><tr><th>Patrón</th><th>Qué hace</th><th>Forma</th></tr></thead>
+    <tbody>
+      <tr><td>Fork-join</td><td>Un flujo se abre en varias ramas paralelas (fork) y se espera a que todas terminen para continuar (join). Es el patrón componible por excelencia: dentro de una rama puede haber otro fork-join.</td><td>1 a N a 1</td></tr>
+      <tr><td>Map</td><td>Se aplica la misma tarea a cada elemento de una colección, de forma independiente. Es el <a href="#u03-particionamiento-datos">particionamiento de datos</a> en su forma más pura.</td><td>N a N</td></tr>
+      <tr><td>Reduction</td><td>Se combinan N elementos en uno solo con una operación asociativa, típicamente en árbol binario, con lo cual el <a href="#u03-work-span">span</a> es logarítmico en la cantidad de elementos en vez de lineal.</td><td>N a 1</td></tr>
+      <tr><td>Pipeline</td><td>Los datos atraviesan una cadena de etapas alternando dato y tarea; cada etapa transforma el dato y lo pasa a la siguiente. Habilita procesar un flujo sin fin.</td><td>cadena</td></tr>
+      <tr><td>Pack</td><td>Dado un bitmap de selección, se descartan los elementos no seleccionados y el resultado se <b>compacta</b> preservando el orden relativo.</td><td>N a M, con M ≤ N</td></tr>
+      <tr><td>Split</td><td>Igual que pack pero <b>no se descarta nada</b>: los seleccionados se agrupan al principio y los no seleccionados al final.</td><td>N a N reordenados</td></tr>
+    </tbody>
+  </table>
+  <figure class="diag">
+    <svg viewBox="0 0 720 290" role="img" aria-label="Notacion de patrones de procesamiento y diagramas de fork-join, map y reduction">
+      <defs>
+        <marker id="u03-pat-fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--linea)"/></marker>
+      </defs>
+      <g font-size="11" fill="currentColor">
+        <rect x="20" y="16" width="18" height="18" fill="none" stroke="var(--acc)" stroke-width="2"/>
+        <text x="44" y="30">Task (tarea)</text>
+        <rect x="170" y="16" width="26" height="18" rx="9" fill="none" stroke="var(--acc2)" stroke-width="2"/>
+        <text x="202" y="30">Data (dato)</text>
+        <circle cx="330" cy="25" r="5" fill="currentColor"/>
+        <text x="342" y="30">Fork</text>
+        <circle cx="400" cy="25" r="8" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="414" y="30">Join</text>
+        <line x1="480" y1="14" x2="480" y2="34" stroke="var(--linea)" stroke-width="1.5" marker-end="url(#u03-pat-fl)"/>
+        <text x="492" y="30">Dependency (dependencia)</text>
+      </g>
+      <line x1="20" y1="50" x2="700" y2="50" stroke="var(--linea)" stroke-width="1" stroke-dasharray="4 4"/>
+
+      <text x="110" y="76" text-anchor="middle" font-size="13" fill="var(--acc)">Fork-join</text>
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none">
+        <line x1="110" y1="88" x2="110" y2="100"/>
+        <line x1="110" y1="104" x2="56" y2="126"/>
+        <line x1="110" y1="104" x2="110" y2="126"/>
+        <line x1="110" y1="104" x2="164" y2="126"/>
+        <line x1="56" y1="150" x2="110" y2="174"/>
+        <line x1="110" y1="150" x2="110" y2="174"/>
+        <line x1="164" y1="150" x2="110" y2="174"/>
+        <line x1="110" y1="193" x2="110" y2="212" marker-end="url(#u03-pat-fl)"/>
+      </g>
+      <circle cx="110" cy="104" r="5" fill="currentColor"/>
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <rect x="44" y="126" width="24" height="24"/>
+        <rect x="98" y="126" width="24" height="24"/>
+        <rect x="152" y="126" width="24" height="24"/>
+      </g>
+      <circle cx="110" cy="184" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
+      <text x="126" y="102" font-size="10" fill="var(--acc2)">fork</text>
+      <text x="126" y="188" font-size="10" fill="var(--acc2)">join</text>
+      <text x="110" y="240" text-anchor="middle" font-size="11" fill="var(--acc2)">1 a N a 1: se espera</text>
+      <text x="110" y="254" text-anchor="middle" font-size="11" fill="var(--acc2)">a la rama más lenta</text>
+
+      <text x="350" y="76" text-anchor="middle" font-size="13" fill="var(--acc)">Map</text>
+      <g fill="none" stroke="var(--acc2)" stroke-width="2">
+        <rect x="242" y="92" width="24" height="18" rx="8"/><rect x="274" y="92" width="24" height="18" rx="8"/><rect x="306" y="92" width="24" height="18" rx="8"/><rect x="338" y="92" width="24" height="18" rx="8"/><rect x="370" y="92" width="24" height="18" rx="8"/><rect x="402" y="92" width="24" height="18" rx="8"/><rect x="434" y="92" width="24" height="18" rx="8"/>
+        <rect x="242" y="182" width="24" height="18" rx="8"/><rect x="274" y="182" width="24" height="18" rx="8"/><rect x="306" y="182" width="24" height="18" rx="8"/><rect x="338" y="182" width="24" height="18" rx="8"/><rect x="370" y="182" width="24" height="18" rx="8"/><rect x="402" y="182" width="24" height="18" rx="8"/><rect x="434" y="182" width="24" height="18" rx="8"/>
+      </g>
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <rect x="242" y="132" width="24" height="24"/><rect x="274" y="132" width="24" height="24"/><rect x="306" y="132" width="24" height="24"/><rect x="338" y="132" width="24" height="24"/><rect x="370" y="132" width="24" height="24"/><rect x="402" y="132" width="24" height="24"/><rect x="434" y="132" width="24" height="24"/>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5">
+        <line x1="254" y1="110" x2="254" y2="132"/><line x1="286" y1="110" x2="286" y2="132"/><line x1="318" y1="110" x2="318" y2="132"/><line x1="350" y1="110" x2="350" y2="132"/><line x1="382" y1="110" x2="382" y2="132"/><line x1="414" y1="110" x2="414" y2="132"/><line x1="446" y1="110" x2="446" y2="132"/>
+        <line x1="254" y1="156" x2="254" y2="182"/><line x1="286" y1="156" x2="286" y2="182"/><line x1="318" y1="156" x2="318" y2="182"/><line x1="350" y1="156" x2="350" y2="182"/><line x1="382" y1="156" x2="382" y2="182"/><line x1="414" y1="156" x2="414" y2="182"/><line x1="446" y1="156" x2="446" y2="182"/>
+      </g>
+      <text x="350" y="240" text-anchor="middle" font-size="11" fill="var(--acc2)">N datos, N tareas independientes,</text>
+      <text x="350" y="254" text-anchor="middle" font-size="11" fill="var(--acc2)">N resultados</text>
+
+      <text x="600" y="76" text-anchor="middle" font-size="13" fill="var(--acc)">Reduction</text>
+      <g fill="none" stroke="var(--acc2)" stroke-width="2">
+        <rect x="502" y="92" width="22" height="18" rx="8"/><rect x="530" y="92" width="22" height="18" rx="8"/><rect x="558" y="92" width="22" height="18" rx="8"/><rect x="586" y="92" width="22" height="18" rx="8"/><rect x="614" y="92" width="22" height="18" rx="8"/><rect x="642" y="92" width="22" height="18" rx="8"/><rect x="670" y="92" width="22" height="18" rx="8"/>
+        <rect x="596" y="226" width="22" height="18" rx="8"/>
+      </g>
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <rect x="517" y="124" width="20" height="20"/><rect x="573" y="124" width="20" height="20"/><rect x="629" y="124" width="20" height="20"/><rect x="671" y="124" width="20" height="20"/>
+        <rect x="545" y="158" width="20" height="20"/><rect x="650" y="158" width="20" height="20"/>
+        <rect x="597" y="192" width="20" height="20"/>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none">
+        <line x1="513" y1="110" x2="527" y2="124"/><line x1="541" y1="110" x2="527" y2="124"/>
+        <line x1="569" y1="110" x2="583" y2="124"/><line x1="597" y1="110" x2="583" y2="124"/>
+        <line x1="625" y1="110" x2="639" y2="124"/><line x1="653" y1="110" x2="639" y2="124"/>
+        <line x1="681" y1="110" x2="681" y2="124"/>
+        <line x1="527" y1="144" x2="555" y2="158"/><line x1="583" y1="144" x2="555" y2="158"/>
+        <line x1="639" y1="144" x2="660" y2="158"/><line x1="681" y1="144" x2="660" y2="158"/>
+        <line x1="555" y1="178" x2="607" y2="192"/><line x1="660" y1="178" x2="607" y2="192"/>
+        <line x1="607" y1="212" x2="607" y2="226" marker-end="url(#u03-pat-fl)"/>
+      </g>
+      <text x="600" y="268" text-anchor="middle" font-size="11" fill="var(--acc2)">N a 1 en árbol: span log(N), no N</text>
+    </svg>
+    <figcaption>Notación de la cátedra para patrones de procesamiento (cuadrado = tarea, rectángulo redondeado = dato, punto lleno = fork, círculo = join, flecha = dependencia) y tres de los seis patrones. Los tres se dibujan con los mismos cuatro símbolos, y eso es justamente lo que los hace componibles: cualquier tarea de un patrón puede ser, adentro, otro patrón completo.</figcaption>
+  </figure>
+  <figure class="diag">
+    <svg viewBox="0 0 720 225" role="img" aria-label="Patrones pipeline, pack y split">
+      <defs>
+        <marker id="u03-ps-fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--linea)"/></marker>
+      </defs>
+      <text x="110" y="26" text-anchor="middle" font-size="13" fill="var(--acc)">Pipeline</text>
+      <g fill="none" stroke="var(--acc2)" stroke-width="2">
+        <rect x="98" y="40" width="24" height="18" rx="8"/>
+        <rect x="98" y="110" width="24" height="18" rx="8"/>
+        <rect x="98" y="180" width="24" height="18" rx="8"/>
+      </g>
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <rect x="98" y="74" width="24" height="24"/>
+        <rect x="98" y="144" width="24" height="24"/>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none">
+        <line x1="110" y1="58" x2="110" y2="74" marker-end="url(#u03-ps-fl)"/>
+        <line x1="110" y1="98" x2="110" y2="110" marker-end="url(#u03-ps-fl)"/>
+        <line x1="110" y1="128" x2="110" y2="144" marker-end="url(#u03-ps-fl)"/>
+        <line x1="110" y1="168" x2="110" y2="180" marker-end="url(#u03-ps-fl)"/>
+      </g>
+      <text x="110" y="216" text-anchor="middle" font-size="11" fill="var(--acc2)">cadena dato, etapa, dato</text>
+
+      <text x="350" y="26" text-anchor="middle" font-size="13" fill="var(--acc)">Pack</text>
+      <g fill="none" stroke="var(--linea)" stroke-width="1.5">
+        <rect x="242" y="38" width="26" height="18"/><rect x="269" y="38" width="26" height="18"/><rect x="296" y="38" width="26" height="18"/><rect x="323" y="38" width="26" height="18"/><rect x="350" y="38" width="26" height="18"/><rect x="377" y="38" width="26" height="18"/><rect x="404" y="38" width="26" height="18"/><rect x="431" y="38" width="26" height="18"/>
+      </g>
+      <g font-size="11" fill="currentColor" text-anchor="middle">
+        <text x="255" y="52">0</text><text x="282" y="52">1</text><text x="309" y="52">1</text><text x="336" y="52">0</text><text x="363" y="52">0</text><text x="390" y="52">1</text><text x="417" y="52">1</text><text x="444" y="52">1</text>
+      </g>
+      <g fill="none" stroke="var(--acc2)" stroke-width="2">
+        <rect x="242" y="64" width="26" height="20" rx="7"/><rect x="269" y="64" width="26" height="20" rx="7"/><rect x="296" y="64" width="26" height="20" rx="7"/><rect x="323" y="64" width="26" height="20" rx="7"/><rect x="350" y="64" width="26" height="20" rx="7"/><rect x="377" y="64" width="26" height="20" rx="7"/><rect x="404" y="64" width="26" height="20" rx="7"/><rect x="431" y="64" width="26" height="20" rx="7"/>
+      </g>
+      <g font-size="11" fill="currentColor" text-anchor="middle">
+        <text x="255" y="79">A</text><text x="282" y="79">B</text><text x="309" y="79">C</text><text x="336" y="79">D</text><text x="363" y="79">E</text><text x="390" y="79">F</text><text x="417" y="79">G</text><text x="444" y="79">H</text>
+      </g>
+      <g font-size="12" fill="var(--acc2)" text-anchor="middle">
+        <text x="255" y="104">×</text><text x="336" y="104">×</text><text x="363" y="104">×</text>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none">
+        <line x1="282" y1="84" x2="255" y2="118"/><line x1="309" y1="84" x2="282" y2="118"/><line x1="390" y1="84" x2="309" y2="118"/><line x1="417" y1="84" x2="336" y2="118"/><line x1="444" y1="84" x2="363" y2="118"/>
+      </g>
+      <g fill="none" stroke="var(--acc2)" stroke-width="2">
+        <rect x="242" y="118" width="26" height="20" rx="7"/><rect x="269" y="118" width="26" height="20" rx="7"/><rect x="296" y="118" width="26" height="20" rx="7"/><rect x="323" y="118" width="26" height="20" rx="7"/><rect x="350" y="118" width="26" height="20" rx="7"/>
+      </g>
+      <g font-size="11" fill="currentColor" text-anchor="middle">
+        <text x="255" y="133">B</text><text x="282" y="133">C</text><text x="309" y="133">F</text><text x="336" y="133">G</text><text x="363" y="133">H</text>
+      </g>
+      <text x="350" y="164" text-anchor="middle" font-size="11" fill="var(--acc2)">se descartan los no seleccionados</text>
+      <text x="350" y="178" text-anchor="middle" font-size="11" fill="var(--acc2)">y el resultado se compacta</text>
+
+      <text x="588" y="26" text-anchor="middle" font-size="13" fill="var(--acc)">Split</text>
+      <g fill="none" stroke="var(--linea)" stroke-width="1.5">
+        <rect x="482" y="38" width="26" height="18"/><rect x="509" y="38" width="26" height="18"/><rect x="536" y="38" width="26" height="18"/><rect x="563" y="38" width="26" height="18"/><rect x="590" y="38" width="26" height="18"/><rect x="617" y="38" width="26" height="18"/><rect x="644" y="38" width="26" height="18"/><rect x="671" y="38" width="26" height="18"/>
+      </g>
+      <g font-size="11" fill="currentColor" text-anchor="middle">
+        <text x="495" y="52">0</text><text x="522" y="52">1</text><text x="549" y="52">1</text><text x="576" y="52">0</text><text x="603" y="52">0</text><text x="630" y="52">1</text><text x="657" y="52">1</text><text x="684" y="52">1</text>
+      </g>
+      <g fill="none" stroke="var(--acc2)" stroke-width="2">
+        <rect x="482" y="64" width="26" height="20" rx="7"/><rect x="509" y="64" width="26" height="20" rx="7"/><rect x="536" y="64" width="26" height="20" rx="7"/><rect x="563" y="64" width="26" height="20" rx="7"/><rect x="590" y="64" width="26" height="20" rx="7"/><rect x="617" y="64" width="26" height="20" rx="7"/><rect x="644" y="64" width="26" height="20" rx="7"/><rect x="671" y="64" width="26" height="20" rx="7"/>
+      </g>
+      <g font-size="11" fill="currentColor" text-anchor="middle">
+        <text x="495" y="79">A</text><text x="522" y="79">B</text><text x="549" y="79">C</text><text x="576" y="79">D</text><text x="603" y="79">E</text><text x="630" y="79">F</text><text x="657" y="79">G</text><text x="684" y="79">H</text>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none">
+        <line x1="522" y1="84" x2="495" y2="118"/><line x1="549" y1="84" x2="522" y2="118"/><line x1="630" y1="84" x2="549" y2="118"/><line x1="657" y1="84" x2="576" y2="118"/><line x1="684" y1="84" x2="603" y2="118"/>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none" stroke-dasharray="4 3">
+        <line x1="495" y1="84" x2="630" y2="118"/><line x1="576" y1="84" x2="657" y2="118"/><line x1="603" y1="84" x2="684" y2="118"/>
+      </g>
+      <g fill="none" stroke="var(--acc2)" stroke-width="2">
+        <rect x="482" y="118" width="26" height="20" rx="7"/><rect x="509" y="118" width="26" height="20" rx="7"/><rect x="536" y="118" width="26" height="20" rx="7"/><rect x="563" y="118" width="26" height="20" rx="7"/><rect x="590" y="118" width="26" height="20" rx="7"/><rect x="617" y="118" width="26" height="20" rx="7"/><rect x="644" y="118" width="26" height="20" rx="7"/><rect x="671" y="118" width="26" height="20" rx="7"/>
+      </g>
+      <g font-size="11" fill="currentColor" text-anchor="middle">
+        <text x="495" y="133">B</text><text x="522" y="133">C</text><text x="549" y="133">F</text><text x="576" y="133">G</text><text x="603" y="133">H</text><text x="630" y="133">A</text><text x="657" y="133">D</text><text x="684" y="133">E</text>
+      </g>
+      <text x="588" y="164" text-anchor="middle" font-size="11" fill="var(--acc2)">nada se descarta: los no seleccionados</text>
+      <text x="588" y="178" text-anchor="middle" font-size="11" fill="var(--acc2)">(punteado) se reubican al final</text>
+    </svg>
+    <figcaption>Pipeline, pack y split. Pack y split parten del mismo bitmap de selección <code>0 1 1 0 0 1 1 1</code> sobre los datos <code>A..H</code>: pack devuelve solo los seleccionados compactados (<code>B C F G H</code>) y split devuelve los ocho, con los seleccionados primero y el resto atrás (<code>B C F G H A D E</code>). Es la diferencia entre filtrar y reparticionar.</figcaption>
+  </figure>
+  <p>La cátedra los retoma con nombre propio al ver patrones de comunicación y pipelines sobre middlewares (unidades posteriores); acá lo importante es la idea: el diseño paralelo se expresa combinando patrones, no inventando esquemas ad hoc.</p>
+
+  <h3 id="u03-multiprogramacion">Modelos de multiprogramación y modelo físico</h3>
+  <p>Tres modelos según qué comparten las unidades de ejecución:</p>
+  <table>
+    <thead><tr><th>Modelo</th><th>Unidad</th><th>Memoria</th><th>Comunicación típica</th></tr></thead>
+    <tbody>
+      <tr><td>Multithreading</td><td>Threads dentro de un proceso</td><td>Compartida entre threads</td><td>Variables compartidas + sincronización</td></tr>
+      <tr><td>Multiprocessing</td><td>Procesos en una máquina</td><td>Cada proceso tiene la suya</td><td>IPC (pipes, colas, sockets locales)</td></tr>
+      <tr><td>Multicomputing</td><td>Computadoras en red</td><td>Cada máquina tiene la suya</td><td>Mensajes por red</td></tr>
+    </tbody>
+  </table>
+  <p>Físicamente, una CPU moderna ya es una máquina paralela: varios cores, cada uno con sus registros y cache L1, caches L2 compartidas por pares de cores, L3 compartida por todo el chip, y de ahí a la memoria principal, con la GPU, la placa de red (NIC) y el controlador de disco colgando del mismo sistema. Con varias CPUs en el mismo motherboard, cada socket tiene su propia jerarquía de caches y todos acceden a la memoria principal: ese es el escenario donde aparece la distinción <a href="#u03-multiprocessors">UMA/NUMA</a>.</p>
+  <div class="warn">No confundir <b>multiprocessors</b> con <b>multiprocessing</b>. Multiprocessing es un modelo de multiprogramación del sistema operativo (varios procesos). Multiprocessors es hardware: más de una CPU en el mismo motherboard compartiendo bus y RAM.</div>
+
+  <h3 id="u03-flynn">Taxonomía de Flynn</h3>
+  <p>Clasifica los sistemas según la cardinalidad de los flujos de instrucciones (procesadores) y de los flujos de datos (memoria):</p>
+  <table>
+    <thead><tr><th>Clase</th><th>Instrucciones</th><th>Datos</th><th>Descripción</th></tr></thead>
+    <tbody>
+      <tr><td>SISD</td><td>1</td><td>1</td><td>Modelo estándar de un procesador sin paralelismo.</td></tr>
+      <tr><td>SIMD</td><td>1</td><td>N</td><td>Array processors: la misma instrucción sobre muchos datos. Ejemplo: GPU.</td></tr>
+      <tr><td>MISD</td><td>N</td><td>1</td><td>No son usuales: cómputo redundante, data-pipelines. Solo tendría sentido si el cálculo no es determinístico o las ALUs no son confiables.</td></tr>
+      <tr><td>MIMD</td><td>N</td><td>N</td><td>Múltiples procesadores sobre múltiples datos. Es la clase que nos interesa y se divide en dos.</td></tr>
+    </tbody>
+  </table>
+  <div class="def"><b>MIMD: multiprocessors vs multicomputers.</b> Los <b>multiprocessors</b> tienen memoria y/o clock compartidos. Los <b>multicomputers</b> no comparten ni memoria ni clock: cada nodo es una computadora completa y se comunican por red. Un sistema distribuido es, en esta taxonomía, un multicomputer.</div>
+
+  <h3 id="u03-multiprocessors">Multiprocessors: SMP, AMP, UMA y NUMA</h3>
+  <p>Varias CPUs compartiendo memoria. Dos ejes de clasificación:</p>
+  <h4 id="u03-smp-amp">Simétrico vs asimétrico</h4>
+  <ul>
+    <li><b>Symmetric Multiprocessing (SMP):</b> todos los procesadores son pares y acceden a la misma memoria por el mismo bus.</li>
+    <li><b>Asymmetric Multiprocessing (AMP):</b> los procesadores tienen roles distintos, con memoria y dispositivos de I/O conectados a través de un bridge; algunos procesadores atienden I/O u otras funciones dedicadas.</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 680 300" role="img" aria-label="Topologia de buses en SMP y AMP: un bus unico contra dos dominios de bus unidos por un bridge">
+      <line x1="340" y1="20" x2="340" y2="284" stroke="var(--linea)" stroke-width="1.5" stroke-dasharray="5 5"/>
+      <text x="160" y="30" text-anchor="middle" font-size="13" fill="var(--acc)">SMP</text>
+      <g fill="none" stroke="var(--linea)" stroke-width="1.5">
+        <rect x="20" y="60" width="62" height="34" rx="4"/>
+        <rect x="92" y="60" width="62" height="34" rx="4"/>
+        <rect x="164" y="60" width="62" height="34" rx="4"/>
+        <rect x="236" y="60" width="62" height="34" rx="4"/>
+      </g>
+      <g font-size="10" fill="currentColor" text-anchor="middle">
+        <text x="51" y="81">Memory</text><text x="123" y="81">Memory</text><text x="195" y="81">Memory</text>
+        <text x="267" y="77">Other</text><text x="267" y="88">I/O</text>
+      </g>
+      <rect x="16" y="120" width="290" height="8" fill="var(--acc)"/>
+      <text x="160" y="146" text-anchor="middle" font-size="10" fill="var(--acc2)">un solo bus: todos a la misma distancia</text>
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <rect x="20" y="160" width="62" height="38" rx="4"/>
+        <rect x="92" y="160" width="62" height="38" rx="4"/>
+        <rect x="164" y="160" width="62" height="38" rx="4"/>
+        <rect x="236" y="160" width="62" height="38" rx="4"/>
+      </g>
+      <g font-size="10" fill="currentColor" text-anchor="middle">
+        <text x="51" y="177">Processor</text><text x="51" y="190">1</text>
+        <text x="123" y="177">Processor</text><text x="123" y="190">2</text>
+        <text x="195" y="177">Processor</text><text x="195" y="190">3</text>
+        <text x="267" y="177">Processor</text><text x="267" y="190">4</text>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5">
+        <line x1="51" y1="94" x2="51" y2="120"/><line x1="123" y1="94" x2="123" y2="120"/><line x1="195" y1="94" x2="195" y2="120"/><line x1="267" y1="94" x2="267" y2="120"/>
+        <line x1="51" y1="128" x2="51" y2="160"/><line x1="123" y1="128" x2="123" y2="160"/><line x1="195" y1="128" x2="195" y2="160"/><line x1="267" y1="128" x2="267" y2="160"/>
+      </g>
+      <text x="160" y="226" text-anchor="middle" font-size="10" fill="var(--acc2)">todos los procesadores son pares</text>
+      <text x="160" y="240" text-anchor="middle" font-size="10" fill="var(--acc2)">y comparten el ancho de banda</text>
+
+      <text x="510" y="30" text-anchor="middle" font-size="13" fill="var(--acc)">AMP</text>
+      <g fill="none" stroke="var(--linea)" stroke-width="1.5">
+        <rect x="430" y="48" width="62" height="34" rx="4"/>
+        <rect x="502" y="48" width="62" height="34" rx="4"/>
+        <rect x="380" y="150" width="62" height="34" rx="4"/>
+      </g>
+      <g font-size="10" fill="currentColor" text-anchor="middle">
+        <text x="461" y="69">Memory</text>
+        <text x="533" y="65">Other</text><text x="533" y="76">I/O</text>
+        <text x="411" y="171">Memory</text>
+      </g>
+      <rect x="376" y="104" width="266" height="8" fill="var(--acc)"/>
+      <rect x="366" y="214" width="230" height="8" fill="var(--acc)"/>
+      <text x="652" y="112" font-size="10" fill="var(--acc2)">bus A</text>
+      <text x="602" y="222" font-size="10" fill="var(--acc2)">bus B</text>
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <rect x="580" y="140" width="62" height="38" rx="4"/>
+        <rect x="376" y="250" width="62" height="38" rx="4"/>
+        <rect x="450" y="250" width="62" height="38" rx="4"/>
+      </g>
+      <g font-size="10" fill="currentColor" text-anchor="middle">
+        <text x="611" y="157">Processor</text><text x="611" y="170">3</text>
+        <text x="407" y="267">Processor</text><text x="407" y="280">1</text>
+        <text x="481" y="267">Processor</text><text x="481" y="280">2</text>
+      </g>
+      <rect x="492" y="140" width="62" height="38" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="523" y="164" text-anchor="middle" font-size="10" fill="currentColor">Bridge</text>
+      <g stroke="var(--linea)" stroke-width="1.5">
+        <line x1="461" y1="82" x2="461" y2="104"/>
+        <line x1="533" y1="82" x2="533" y2="104"/>
+        <line x1="611" y1="112" x2="611" y2="140"/>
+        <line x1="523" y1="112" x2="523" y2="140"/>
+        <line x1="523" y1="178" x2="523" y2="214"/>
+        <line x1="411" y1="184" x2="411" y2="214"/>
+        <line x1="407" y1="222" x2="407" y2="250"/>
+        <line x1="481" y1="222" x2="481" y2="250"/>
+      </g>
+    </svg>
+    <figcaption>La topología es la diferencia. En SMP todos los procesadores cuelgan del mismo bus junto con la memoria y el I/O: son pares, están a la misma distancia de todo y por eso comparten el ancho de banda de memoria. En AMP hay dos dominios de bus unidos por un <b>bridge</b>: cada procesador tiene su memoria y sus dispositivos cerca, y para llegar a los del otro dominio hay que cruzar el bridge. Eso es exactamente lo que rompe la simetría.</figcaption>
+  </figure>
+  <h4 id="u03-uma-numa">UMA vs NUMA</h4>
+  <ul>
+    <li><b>UMA (Uniform Memory Access, o non-NUMA):</b> el tiempo de acceso a memoria es idéntico para todos los procesadores, con ancho de banda compartido por todos. Performance balanceada para aplicaciones de uso general.</li>
+    <li><b>NUMA (Non Uniform Memory Access):</b> cada CPU controla un bloque de memoria local como su "home agent". Acceder a la memoria local es más rápido y con más ancho de banda que acceder a la memoria de otra CPU. Ideado en SGI, presente en el kernel de Linux y en Windows Server; tras años en desuso volvió a ofrecerse en instancias cloud.</li>
+  </ul>
+  <p>El acceso remoto no es un camino alternativo hacia la misma memoria física: para leer un bloque que pertenece a otra CPU hay que pasar <b>por esa CPU</b>, a través de la interconexión que une a todos los sockets entre sí. Cada CPU cuelga su propio slot de memoria y mantiene links directos hacia las demás (vecinas y en diagonal); el sobrecosto del acceso "no uniforme" es exactamente el salto extra por esa interconexión.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 420 220" role="img" aria-label="Topologia NUMA: cuatro CPU con su memoria local, interconectadas entre si">
+      <defs>
+        <marker id="u03-numa-fl" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--linea)"/></marker>
+      </defs>
+      <g stroke="var(--linea)" stroke-width="1.5" marker-start="url(#u03-numa-fl)" marker-end="url(#u03-numa-fl)">
+        <line x1="128" y1="60" x2="292" y2="60"/>
+        <line x1="128" y1="160" x2="292" y2="160"/>
+        <line x1="90" y1="80" x2="90" y2="140"/>
+        <line x1="330" y1="80" x2="330" y2="140"/>
+        <line x1="128" y1="78" x2="292" y2="142"/>
+        <line x1="292" y1="78" x2="128" y2="142"/>
+      </g>
+      <g fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="60" y="40" width="60" height="40" rx="4"/>
+        <rect x="300" y="40" width="60" height="40" rx="4"/>
+        <rect x="60" y="140" width="60" height="40" rx="4"/>
+        <rect x="300" y="140" width="60" height="40" rx="4"/>
+      </g>
+      <g font-size="11" text-anchor="middle" fill="currentColor">
+        <text x="90" y="64">CPU 1</text>
+        <text x="330" y="64">CPU 3</text>
+        <text x="90" y="164">CPU 2</text>
+        <text x="330" y="164">CPU 4</text>
+      </g>
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <rect x="2" y="42" width="46" height="36" rx="4"/>
+        <rect x="372" y="42" width="46" height="36" rx="4"/>
+        <rect x="2" y="142" width="46" height="36" rx="4"/>
+        <rect x="372" y="142" width="46" height="36" rx="4"/>
+      </g>
+      <g font-size="9" text-anchor="middle" fill="currentColor">
+        <text x="25" y="57">Mem</text><text x="25" y="68">Slot 1</text>
+        <text x="395" y="57">Mem</text><text x="395" y="68">Slot 3</text>
+        <text x="25" y="157">Mem</text><text x="25" y="168">Slot 2</text>
+        <text x="395" y="157">Mem</text><text x="395" y="168">Slot 4</text>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5" marker-start="url(#u03-numa-fl)" marker-end="url(#u03-numa-fl)">
+        <line x1="48" y1="60" x2="60" y2="60"/>
+        <line x1="418" y1="60" x2="360" y2="60"/>
+        <line x1="48" y1="160" x2="60" y2="160"/>
+        <line x1="418" y1="160" x2="360" y2="160"/>
+      </g>
+      <text x="210" y="206" text-anchor="middle" font-size="10" fill="var(--acc2)">llegar a la memoria de otra CPU pasa por esa CPU</text>
+    </svg>
+    <figcaption>Cada CPU tiene su slot de memoria local (acceso directo) y está interconectada con las demás (vecinas y en diagonal). Para leer el slot 3 desde la CPU 1 el pedido viaja por la interconexión hasta la CPU 3, que es la dueña de ese bloque: ese salto extra es el costo del acceso "no uniforme".</figcaption>
+  </figure>
+  <div class="idea">NUMA rinde si el software respeta la localidad: un proceso que corre en la CPU 2 debería usar memoria del slot 2. Si el scheduler mueve procesos entre sockets sin mover sus datos, el "acceso no uniforme" se paga en cada lectura. Es el mismo principio de localidad que después reaparece a escala de red en los sistemas distribuidos.</div>
+
+  <h3 id="u03-multicomputers">Multicomputers</h3>
+  <p>El modelo sobre el que se construye toda la materia: computadoras sin memoria ni reloj compartidos.</p>
+  <ul>
+    <li>Cada computadora tiene su propia memoria local.</li>
+    <li>Cada computadora puede fallar de forma independiente.</li>
+    <li>No hay un reloj central de ejecución de instrucciones.</li>
+    <li>Requieren comunicación por red (LAN, MAN, WAN).</li>
+  </ul>
+  <p>Consecuencias directas: no comparten ningún recurso, así que la sincronización se hace con mensajes ad hoc entre computadoras y hay que implementar mecanismos de sincronización explícitos. La comunicación por red trae limitaciones de ancho de banda, latencia y pérdida de mensajes, y la comunicación entre procesos pasa a ser compleja y central al diseño del sistema. A cambio: alta escalabilidad y tolerancia a fallos (los nodos fallan de forma independiente).</p>
+  <div class="examen">Preguntado en finales: "Compare los modelos de Multiprocessing y Multicomputing. ¿Cuál es la diferencia fundamental respecto al acceso a la memoria?" y la variante "¿En qué situaciones se prefiere una arquitectura Multiprocessing frente a una Multicomputing? Brinde un ejemplo concreto" (2025-03-06). La clave: en multiprocessing hay un espacio de memoria compartida (UMA o NUMA) y se comunica leyendo y escribiendo variables; en multicomputing cada nodo tiene memoria privada y la comunicación es por paso de mensajes en red. Multiprocessing se prefiere cuando el problema entra en una máquina y las tareas comparten mucho estado con baja latencia (ej: cómputo numérico multithread en un servidor multicore); multicomputing cuando se necesita escalar más allá de una máquina o tolerar fallos de nodos.</div>
+
+  <h3 id="u03-nombres">Nombres y direccionamiento</h3>
+  <div class="def"><b>Nombre.</b> Identifica unívocamente a una entidad dentro de un sistema. Debe describir a la entidad y abstraerla de las propiedades que la atan al sistema (ubicación geográfica, direcciones de red). Ejemplo: <code>campus.fi.uba.ar</code>.</div>
+  <div class="def"><b>Direccionamiento (addressing).</b> El mapeo entre un nombre y una dirección. La dirección de una entidad puede cambiar y puede reutilizarse; el nombre, en principio, no cambia. Ejemplo: <code>192.168.0.1</code>.</div>
+  <div class="idea">La gracia del par nombre/dirección es la indirección: el que usa el nombre no necesita enterarse cuando la entidad se muda. Todo el direccionamiento en sistemas distribuidos es alguna forma de resolver "nombre estable → dirección volátil".</div>
+  <p>El mismo patrón aparece en varios niveles:</p>
+  <table>
+    <thead><tr><th>Nombre</th><th>Dirección</th><th>Mecanismo de resolución</th></tr></thead>
+    <tbody>
+      <tr><td>Domain name</td><td>Dirección IP</td><td>Protocolo DNS</td></tr>
+      <tr><td>Dirección IP (identifica un nodo en una red)</td><td>Dirección Ethernet (identifica la NIC en la red local)</td><td>ARP en IPv4, ND (Neighbor Discovery) en IPv6</td></tr>
+      <tr><td>Nombre de servicio</td><td>Alguna instancia del servicio</td><td>Service Discovery (Zookeeper, Istio, Linkerd)</td></tr>
+    </tbody>
+  </table>
+  <h4 id="u03-dns">Ejemplo: DNS</h4>
+  <p>La resolución de <code>fi.uba.ar.</code> se puede observar con <code>dig fi.uba.ar. @8.8.8.8 +trace</code>: el trace muestra la delegación jerárquica, desde los root servers hacia los servidores de la zona <code>.ar</code>, luego <code>uba.ar</code> y finalmente el registro de <code>fi.uba.ar</code>. Cada nivel solo conoce a quién delega el siguiente, nadie tiene la tabla completa: es un sistema de nombres distribuido y jerárquico.</p>
+  <p>El espacio de nombres DNS es un <b>árbol</b> y el nombre completo de una entidad es el camino desde la raíz hacia abajo, leído de derecha a izquierda (<code>campus.fi.uba.ar.</code>, donde el punto final es la raíz). Ese árbol se corta en <b>zonas</b>: una zona es el pedazo del árbol que administra una organización con sus propios servidores autoritativos, y el borde entre dos zonas es una delegación. De ahí que un mismo label pueda repetirse en ramas distintas sin ambigüedad: lo que identifica no es el label sino el camino completo.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 620 310" role="img" aria-label="Arbol de nombres DNS desde la raiz hasta campus.fi.uba.ar, con las zonas administrativas marcadas con linea punteada">
+      <g fill="none" stroke="var(--acc2)" stroke-width="1.5" stroke-dasharray="5 4">
+        <rect x="282" y="12" width="116" height="48" rx="8"/>
+        <rect x="12" y="72" width="200" height="106" rx="8"/>
+        <rect x="4" y="190" width="228" height="48" rx="8"/>
+        <rect x="4" y="248" width="152" height="48" rx="8"/>
+      </g>
+      <g font-size="10" fill="var(--acc2)">
+        <text x="406" y="40">zona "." (root servers)</text>
+        <text x="220" y="162">zona ar</text>
+        <text x="242" y="216">zona uba.ar</text>
+        <text x="166" y="276">zona fi.uba.ar</text>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5">
+        <line x1="340" y1="52" x2="92" y2="80"/>
+        <line x1="340" y1="52" x2="255" y2="80"/>
+        <line x1="340" y1="52" x2="355" y2="80"/>
+        <line x1="340" y1="52" x2="455" y2="80"/>
+        <line x1="340" y1="52" x2="545" y2="80"/>
+        <line x1="92" y1="110" x2="60" y2="140"/>
+        <line x1="92" y1="110" x2="160" y2="140"/>
+        <line x1="60" y1="170" x2="54" y2="200"/>
+        <line x1="60" y1="170" x2="166" y2="200"/>
+        <line x1="54" y1="230" x2="80" y2="258"/>
+      </g>
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <rect x="290" y="20" width="100" height="32" rx="4"/>
+        <rect x="60" y="80" width="64" height="30" rx="4"/>
+        <rect x="20" y="140" width="80" height="30" rx="4"/>
+        <rect x="10" y="200" width="88" height="30" rx="4"/>
+        <rect x="10" y="258" width="140" height="30" rx="4"/>
+      </g>
+      <g fill="none" stroke="var(--linea)" stroke-width="1.5">
+        <rect x="220" y="80" width="70" height="30" rx="4"/>
+        <rect x="320" y="80" width="70" height="30" rx="4"/>
+        <rect x="420" y="80" width="70" height="30" rx="4"/>
+        <rect x="510" y="80" width="70" height="30" rx="4"/>
+        <rect x="120" y="140" width="80" height="30" rx="4"/>
+        <rect x="110" y="200" width="112" height="30" rx="4"/>
+      </g>
+      <g font-size="11" fill="currentColor" text-anchor="middle">
+        <text x="340" y="40">. (raíz)</text>
+        <text x="92" y="100">ar</text>
+        <text x="255" y="100">com</text><text x="355" y="100">edu</text><text x="455" y="100">org</text><text x="545" y="100">net</text>
+        <text x="60" y="160">uba.ar</text><text x="160" y="160">gob.ar</text>
+        <text x="54" y="220">fi.uba.ar</text><text x="166" y="220">exactas.uba.ar</text>
+        <text x="80" y="278">campus.fi.uba.ar</text>
+      </g>
+    </svg>
+    <figcaption>El árbol de nombres recorrido por <code>dig fi.uba.ar. @8.8.8.8 +trace</code>, con las zonas administrativas encerradas en punteado. Cada zona tiene sus propios servidores autoritativos y solo conoce a quién delega la siguiente: los root servers saben quién atiende <code>ar</code>, los de <code>ar</code> saben quién atiende <code>uba.ar</code>, y así hasta el registro final. Nadie tiene el árbol completo.</figcaption>
+  </figure>
+  <h4 id="u03-service-discovery">Ejemplo: Service Discovery</h4>
+  <p>En sistemas con instancias dinámicas (se crean, se destruyen, cambian de dirección) el mapeo servicio → instancia no puede ser estático. El patrón introduce un <b>service registry</b>: cada instancia se registra al levantarse (register), y el cliente consulta el registry (discover) para obtener la dirección de alguna instancia viva a la cual dirigir sus requests.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 560 210" role="img" aria-label="Patron service discovery con registry, instancias y cliente">
+      <rect x="215" y="16" width="140" height="40" rx="6" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="285" y="41" text-anchor="middle" font-size="13" fill="currentColor">Service Registry</text>
+      <g fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="330" y="140" width="120" height="36" rx="6"/>
+        <rect x="338" y="148" width="120" height="36" rx="6"/>
+        <rect x="346" y="156" width="120" height="36" rx="6"/>
+      </g>
+      <text x="406" y="179" text-anchor="middle" font-size="12" fill="currentColor">Instancias 1..3</text>
+      <rect x="40" y="140" width="110" height="40" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="95" y="165" text-anchor="middle" font-size="13" fill="currentColor">Cliente</text>
+      <line x1="390" y1="140" x2="320" y2="58" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="320,58 324,70 331,64" fill="var(--linea)"/>
+      <text x="392" y="94" font-size="12" fill="var(--acc2)">register</text>
+      <line x1="110" y1="140" x2="240" y2="58" stroke="var(--linea)" stroke-width="1.5"/>
+      <polygon points="240,58 228,62 234,69" fill="var(--linea)"/>
+      <text x="120" y="94" font-size="12" fill="var(--acc2)">discover</text>
+      <line x1="150" y1="162" x2="330" y2="162" stroke="var(--linea)" stroke-width="1.5" stroke-dasharray="5 4"/>
+      <polygon points="330,162 318,157 318,167" fill="var(--linea)"/>
+      <text x="240" y="154" text-anchor="middle" font-size="12" fill="var(--acc2)">request</text>
+    </svg>
+    <figcaption>Service Discovery: las instancias se registran, el cliente descubre una dirección vigente y recién entonces le habla a la instancia.</figcaption>
+  </figure>
+  <div class="examen">Preguntado en finales: "Asumiendo un esquema de nombres y direccionamiento en un contexto de sistemas distribuidos, indique para qué se utiliza el patrón de Service Discovery" (2025-07-03). Responder: resolver el nombre lógico de un servicio a la dirección de alguna instancia concreta en tiempo de ejecución, desacoplando a los clientes de la cantidad, ubicación y ciclo de vida de las instancias (que pueden escalar, fallar o migrar sin que el cliente cambie).</div>
+
+  <h3 id="u03-documentacion">Documentación de arquitectura</h3>
+  <p>"La arquitectura representa aquellas decisiones de importancia, medidas de acuerdo al costo de modificarlas" (Grady Booch). Lo que se documenta es el diseño general del sistema: no existe una única solución correcta para un problema; hay requerimientos funcionales (qué debe hacer el sistema) y no funcionales (performance, seguridad, escalabilidad), y son estos últimos los que suelen terminar modelando la arquitectura.</p>
+  <p>Principios de diseño y documentación que fija la cátedra:</p>
+  <ul>
+    <li><b>Evolutiva:</b> adaptarse rápido, tomar feedback y aportar valor iterativamente. No buscar el entendimiento del todo ni demorar la arquitectura esperando tenerlo. La documentación no es estática: ante cada cambio del sistema se actualiza para seguir siendo un reflejo fiel de cómo funciona.</li>
+    <li><b>Necesaria para coordinación, coherencia y cohesión:</b> sin un diseño preliminar, probablemente jamás haya diseño. Por eso los TPs piden traer diseños preliminares para debatirlos antes de codear.</li>
+    <li><b>Organizada en vistas:</b> cada vista hace foco en un aspecto distinto del sistema (el código en una, el despliegue en otra), y el lector busca cada cosa donde corresponde.</li>
+  </ul>
+  <div class="idea">El criterio de éxito de la documentación no es el formato: es que cualquier ingeniero que la lea entienda qué se quiso hacer, cómo funciona el sistema y por qué. Si eso se logra, no importa si los diagramas son UML, C4 u otra notación.</div>
+
+  <h3 id="u03-4mas1">Modelo de vistas 4+1</h3>
+  <p>Es el modelo de referencia de la materia para documentar arquitectura (Kruchten, 1995), basado en UML. Cuatro vistas más una vista central de escenarios que las conecta:</p>
+  <table>
+    <thead><tr><th>Vista</th><th>Qué muestra</th><th>Diagramas típicos</th></tr></thead>
+    <tbody>
+      <tr><td>Escenarios (la "+1")</td><td>Los requerimientos funcionales: qué necesita hacer el sistema, incluyendo los flujos alternativos (qué pasa cuando algo sale del camino feliz)</td><td>Casos de uso</td></tr>
+      <tr><td>Lógica</td><td>Estructura y funcionalidad, lo más cercano a la implementación: clases, sus relaciones y los eventos que provocan cambios de estado</td><td>Clases, Estados</td></tr>
+      <tr><td>Desarrollo (o de Implementación)</td><td>Artefactos que componen al sistema y sus dependencias, visto "desde más arriba"</td><td>Paquetes, Componentes</td></tr>
+      <tr><td>Procesos (o Dinámica)</td><td>Escenarios concurrentes, flujo de mensajes y su desarrollo temporal</td><td>Actividades, Secuencia, Colaboración</td></tr>
+      <tr><td>Física (o Despliegue)</td><td>Topología y conexiones entre componentes físicos; expone la arquitectura del sistema</td><td>Despliegue, Robustez</td></tr>
+    </tbody>
+  </table>
+  <p>La cátedra no exige seguir a rajatabla la estructura del paper: pide que la documentación sea una historia donde cada vista sea autoconcluyente y se entienda el sistema paso a paso según el nivel de zoom.</p>
+  <details class="mas"><summary>Tabla de contenidos de ejemplo (paper 4+1)</summary>
+    <ol>
+      <li>Scope</li>
+      <li>Architecture Overview</li>
+      <li>Architectural Goals &amp; Constraints</li>
+      <li>Scenarios</li>
+      <li>Logical View</li>
+      <li>Process View</li>
+      <li>Development View</li>
+      <li>Physical View</li>
+      <li>Size and Performance</li>
+      <li>Quality Appendices (Acronyms, Definitions, Design Principles)</li>
+    </ol>
+  </details>
+
+  <h3 id="u03-c4">Modelo C4</h3>
+  <p>Alternativa no basada en vistas de aspectos sino en niveles de zoom (Simon Brown). No busca abstraer aspectos distintos del sistema: va haciendo zoom in y explicando cada nivel con más detalle. Las cuatro C, de afuera hacia adentro:</p>
+  <ol>
+    <li><b>Contexto (Software System):</b> el sistema completo y cómo se relaciona con usuarios y sistemas externos.</li>
+    <li><b>Containers:</b> agrupaciones de componentes que cumplen un objetivo mayor. Ejemplo: un container de storage distribuido y otro de coordinación de servicios dentro de la misma plataforma.</li>
+    <li><b>Components:</b> los servicios del sistema; un conjunto de servicios que interactúan para un objetivo común se ve como un componente.</li>
+    <li><b>Code:</b> diagramas tipo clases y estados, lo más útil para el programador que entra al código (análogo a la vista lógica de 4+1).</li>
+  </ol>
+  <div class="idea">La analogía de la cátedra: es como partir de un mapa de Europa e ir haciendo zoom hasta ver una calle de un condado. Cada nivel es correcto y útil, pero para lectores y preguntas distintas.</div>
+  <p>Los cuatro niveles son de <b>contención</b>, no de aspecto: un sistema contiene varios containers, cada container contiene varios componentes y cada componente varias unidades de código. Y hacer zoom significa elegir <i>una</i> rama: en el nivel de componentes se está mirando adentro de un container, no de todos.</p>
+  <div class="warn">Un container de C4 no es un container de Docker. En la definición de Simon Brown es cualquier unidad ejecutable o de almacenamiento desplegable por separado: una web app del lado del cliente, una web app del lado del servidor, una aplicación de consola, una app mobile, un microservicio, un esquema de base de datos o incluso un file system. Es la confusión más común del modelo.</div>
+  <figure class="diag">
+    <svg viewBox="0 0 640 270" role="img" aria-label="Arbol de contencion del modelo C4: sistema, containers, componentes y codigo, con la rama del medio resaltada">
+      <g stroke="var(--acc2)" stroke-width="1.5" stroke-dasharray="3 4" fill="none">
+        <line x1="320" y1="52" x2="135" y2="80"/>
+        <line x1="320" y1="52" x2="320" y2="80"/>
+        <line x1="320" y1="52" x2="505" y2="80"/>
+        <line x1="320" y1="132" x2="235" y2="170"/>
+        <line x1="320" y1="132" x2="320" y2="170"/>
+        <line x1="320" y1="132" x2="405" y2="170"/>
+        <line x1="320" y1="204" x2="250" y2="225"/>
+        <line x1="320" y1="204" x2="320" y2="225"/>
+        <line x1="320" y1="204" x2="390" y2="225"/>
+      </g>
+      <rect x="60" y="16" width="520" height="36" rx="5" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="320" y="39" text-anchor="middle" font-size="13" fill="currentColor">Software System</text>
+      <g opacity="0.45">
+        <g fill="none" stroke="var(--linea)" stroke-width="1.5">
+          <rect x="60" y="80" width="150" height="52" rx="5"/>
+          <rect x="430" y="80" width="150" height="52" rx="5"/>
+          <rect x="90" y="170" width="90" height="34" rx="5"/>
+          <rect x="460" y="170" width="90" height="34" rx="5"/>
+        </g>
+        <g font-size="11" fill="currentColor" text-anchor="middle">
+          <text x="135" y="110">Container</text><text x="505" y="110">Container</text>
+          <text x="135" y="191">Component</text><text x="505" y="191">Component</text>
+        </g>
+      </g>
+      <rect x="245" y="80" width="150" height="52" rx="5" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="320" y="99" text-anchor="middle" font-size="12" fill="currentColor">Container</text>
+      <text x="320" y="112" text-anchor="middle" font-size="8.5" fill="var(--acc2)">web app cliente o servidor, consola,</text>
+      <text x="320" y="123" text-anchor="middle" font-size="8.5" fill="var(--acc2)">app mobile, microservicio, esquema de BD</text>
+      <g fill="none" stroke="var(--linea)" stroke-width="1.5">
+        <rect x="190" y="170" width="90" height="34" rx="5"/>
+        <rect x="360" y="170" width="90" height="34" rx="5"/>
+      </g>
+      <rect x="275" y="170" width="90" height="34" rx="5" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <g font-size="10" fill="currentColor" text-anchor="middle">
+        <text x="235" y="191">Component</text><text x="320" y="191">Component</text><text x="405" y="191">Component</text>
+      </g>
+      <g fill="none" stroke="var(--linea)" stroke-width="1.5">
+        <rect x="210" y="225" width="80" height="28" rx="5"/>
+        <rect x="350" y="225" width="80" height="28" rx="5"/>
+      </g>
+      <rect x="280" y="225" width="80" height="28" rx="5" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <g font-size="10" fill="currentColor" text-anchor="middle">
+        <text x="250" y="243">Code</text><text x="320" y="243">Code</text><text x="390" y="243">Code</text>
+      </g>
+    </svg>
+    <figcaption>El diagrama oficial de C4: cada nivel está <b>contenido</b> en el anterior. Las ramas atenuadas existen igual; están atenuadas porque bajar un nivel es elegir una rama y hacerle zoom. Por eso los diagramas de nivel 3 y 4 son varios, uno por container y por componente que valga la pena detallar.</figcaption>
+  </figure>
+
+  <h3 id="u03-buenos-diagramas">El arte de hacer buenos diagramas</h3>
+  <p>Un buen diagrama es una obra de arte: cuesta encontrarlos y, cuando aparecen, se nota el tiempo invertido. Hacer diagramas es un proceso iterativo, van mutando junto con la aplicación. Criterios de la cátedra:</p>
+  <ul>
+    <li><b>Balanceados, destacan lo importante, elegantes:</b> sin flechas cruzadas, colores que tengan sentido (no porque sí), tamaños de nodos, flechas y textos coherentes.</li>
+    <li><b>Con contexto:</b> un título que sintetice el escenario y un párrafo explicativo breve. Nunca entregar "vista física" y un diagrama pelado. Breve, porque el foco es el diagrama: documentación extensa es documentación que nadie lee.</li>
+    <li><b>Información relevante:</b> cada diagrama concentrado en una dimensión del problema, y los diagramas entre sí complementarios. Un diagrama redundante con otro no aporta nada y conviene sacarlo (mejor dos diagramas de secuencia y actividades con contenido que un diagrama de paquetes trivial).</li>
+    <li><b>Principio de Miller (7 ± 2):</b> por los límites de nuestra capacidad de procesar información, un diagrama con menos de 5 entidades suele ser trivial (no muestra nada) y con más de ~9 se vuelve complejo (conviene partirlo y hacer zoom por partes). Es un principio, no una regla tallada en piedra: se aplica con sentido común.</li>
+  </ul>
+
+  <h3 id="u03-diagramas">Catálogo de diagramas</h3>
+
+  <h4 id="u03-casos-de-uso">Casos de uso</h4>
+  <p>Muestra los requerimientos funcionales: actores y las operaciones que el sistema ofrece (por ejemplo, para un simulador: correr, parar, continuar la simulación y obtener resultados). Suele acompañarse con tablas de casos de uso que elaboran precondiciones, postcondiciones, actores y, muy importante, los <b>flujos alternativos</b>: cómo reacciona el sistema cuando la operación se sale del camino feliz (dato inválido, timeout, estado que no se pudo persistir).</p>
+  <p>La notación es mínima: monigote para el actor, elipse para el caso de uso, línea llena entre actor y caso de uso, y flecha punteada rotulada <code>&lt;&lt;includes&gt;&gt;</code> cuando un caso de uso incorpora a otro. Esas relaciones de inclusión son lo que hace útil al diagrama más allá del inventario de funciones: si dos casos de uso repiten un paso y ninguno incluye al otro, el diagrama delata que hay funcionalidad que se está duplicando en lugar de reutilizarse. Las notas adosadas (rectángulo con la esquina doblada, unido por línea punteada) se usan justamente para dejar asentada esa observación.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 730 380" role="img" aria-label="Diagrama de casos de uso con actores Professor y Student, elipses de casos de uso, relaciones includes y una nota adosada">
+      <defs>
+        <marker id="u03-cu-fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--linea)"/></marker>
+      </defs>
+      <circle cx="44" cy="90" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <g stroke="currentColor" stroke-width="1.5" fill="none">
+        <line x1="44" y1="100" x2="44" y2="132"/><line x1="28" y1="110" x2="60" y2="110"/>
+        <line x1="44" y1="132" x2="32" y2="152"/><line x1="44" y1="132" x2="56" y2="152"/>
+      </g>
+      <text x="44" y="170" text-anchor="middle" font-size="11" fill="currentColor">Professor</text>
+      <circle cx="44" cy="250" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <g stroke="currentColor" stroke-width="1.5" fill="none">
+        <line x1="44" y1="260" x2="44" y2="292"/><line x1="28" y1="270" x2="60" y2="270"/>
+        <line x1="44" y1="292" x2="32" y2="312"/><line x1="44" y1="292" x2="56" y2="312"/>
+      </g>
+      <text x="44" y="330" text-anchor="middle" font-size="11" fill="currentColor">Student</text>
+
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <ellipse cx="250" cy="60" rx="90" ry="32"/>
+        <ellipse cx="250" cy="150" rx="90" ry="32"/>
+        <ellipse cx="250" cy="240" rx="90" ry="32"/>
+        <ellipse cx="250" cy="330" rx="90" ry="32"/>
+        <ellipse cx="530" cy="60" rx="88" ry="32"/>
+        <ellipse cx="530" cy="330" rx="88" ry="32"/>
+      </g>
+      <g font-size="11" fill="currentColor" text-anchor="middle">
+        <text x="250" y="54">CU2</text><text x="250" y="70">Define Assignment</text>
+        <text x="250" y="140">CU3</text><text x="250" y="154">Simulate Assignment</text><text x="250" y="168">Resolution</text>
+        <text x="250" y="236">CU1</text><text x="250" y="252">Login</text>
+        <text x="250" y="318">CU4</text><text x="250" y="332">Upload Assignment</text><text x="250" y="346">Resolution</text>
+        <text x="530" y="54">CU2.1</text><text x="530" y="70">Upload Test Cases</text>
+        <text x="530" y="324">CU5</text><text x="530" y="340">Run Test Cases</text>
+      </g>
+
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none">
+        <line x1="60" y1="108" x2="166" y2="76" marker-end="url(#u03-cu-fl)"/>
+        <line x1="62" y1="120" x2="162" y2="145" marker-end="url(#u03-cu-fl)"/>
+        <line x1="58" y1="128" x2="162" y2="230" marker-end="url(#u03-cu-fl)"/>
+        <line x1="60" y1="256" x2="162" y2="248" marker-end="url(#u03-cu-fl)"/>
+        <line x1="60" y1="278" x2="164" y2="318" marker-end="url(#u03-cu-fl)"/>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none" stroke-dasharray="6 4">
+        <line x1="340" y1="60" x2="438" y2="60" marker-end="url(#u03-cu-fl)"/>
+        <line x1="340" y1="330" x2="438" y2="330" marker-end="url(#u03-cu-fl)"/>
+        <polyline points="340,150 530,150 530,294" marker-end="url(#u03-cu-fl)"/>
+      </g>
+      <g font-size="10" fill="var(--acc2)" text-anchor="middle">
+        <text x="389" y="52">&lt;&lt;includes&gt;&gt;</text>
+        <text x="389" y="322">&lt;&lt;includes&gt;&gt;</text>
+        <text x="432" y="142">&lt;&lt;includes&gt;&gt;</text>
+      </g>
+
+      <line x1="592" y1="84" x2="620" y2="168" stroke="var(--acc2)" stroke-width="1.5" stroke-dasharray="3 3"/>
+      <path d="M 600 172 L 700 172 L 715 187 L 715 252 L 600 252 Z" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <path d="M 700 172 L 700 187 L 715 187" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <g font-size="10" fill="currentColor">
+        <text x="608" y="198">Podría incorporarse</text>
+        <text x="608" y="212">al CU1. No se está</text>
+        <text x="608" y="226">reutilizando.</text>
+      </g>
+    </svg>
+    <figcaption>Casos de uso del sistema de corrección automática de entregas de la cátedra. <code>CU3</code> y <code>CU4</code> incluyen los dos al mismo <code>CU5 Run Test Cases</code>: ahí la inclusión evita duplicar. La nota adosada marca lo contrario: <code>CU2.1</code> repite algo que ya hace otro caso de uso y nadie lo está reutilizando. El diagrama sirve para detectar eso antes de escribir código.</figcaption>
+  </figure>
+
+  <h4 id="u03-paquetes">Paquetes</h4>
+  <p>Muestra cómo están distribuidos los componentes en el código y qué paquetes dependen de cuáles (vista de desarrollo). En los TPs se espera ver el paquete del <b>middleware separado del paquete de lógica de negocio</b>, reflejando la independencia entre ambos. Si el middleware es complejo puede descomponerse en subpaquetes, y el diagrama sirve para ver qué partes del negocio usan qué partes del middleware (por ejemplo, cuáles hablan HTTP y cuáles encolan mensajes).</p>
+  <div class="warn">Un diagrama de paquetes que solo muestra "core business → middleware" es trivial y no aporta: o se lo enriquece (subpaquetes, clases importantes dentro de cada paquete, aunque mezcle entidades de otros diagramas) o se lo omite. La regla siempre es aportar información.</div>
+  <p>Notación: el paquete es un rectángulo con una pestaña arriba a la izquierda donde va el nombre, los paquetes pueden anidarse, y la flecha de dependencia va del que usa hacia el que es usado. Poner las clases importantes dentro de cada paquete, aunque sean entidades que también aparecen en el diagrama de clases, es justamente lo que convierte un diagrama de paquetes trivial en uno informativo.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 700 310" role="img" aria-label="Diagrama de paquetes con dos paquetes que contienen clases, jerarquias de herencia y dependencias hacia paquetes auxiliares">
+      <defs>
+        <marker id="u03-pkg-fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--linea)"/></marker>
+      </defs>
+      <g fill="none" stroke="var(--linea)" stroke-width="1.5">
+        <rect x="30" y="20" width="70" height="20"/>
+        <rect x="30" y="40" width="230" height="140"/>
+        <rect x="380" y="20" width="110" height="20"/>
+        <rect x="380" y="40" width="290" height="170"/>
+        <rect x="60" y="232" width="60" height="18"/>
+        <rect x="60" y="250" width="100" height="40"/>
+        <rect x="190" y="232" width="110" height="18"/>
+        <rect x="190" y="250" width="130" height="40"/>
+        <rect x="400" y="232" width="90" height="18"/>
+        <rect x="400" y="250" width="120" height="40"/>
+        <rect x="560" y="232" width="60" height="18"/>
+        <rect x="560" y="250" width="100" height="40"/>
+      </g>
+      <g font-size="10" fill="var(--acc2)">
+        <text x="35" y="34">writer</text>
+        <text x="385" y="34">block_generator</text>
+        <text x="65" y="245">utils</text>
+        <text x="195" y="245">config_file_builder</text>
+        <text x="405" y="245">value_mapper</text>
+        <text x="565" y="245">parser</text>
+      </g>
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <rect x="90" y="58" width="120" height="36"/>
+        <rect x="90" y="120" width="120" height="36"/>
+        <rect x="480" y="58" width="120" height="36"/>
+        <rect x="395" y="140" width="125" height="36"/>
+        <rect x="530" y="140" width="130" height="36"/>
+      </g>
+      <g stroke="var(--acc)" stroke-width="1">
+        <line x1="90" y1="76" x2="210" y2="76"/>
+        <line x1="90" y1="138" x2="210" y2="138"/>
+        <line x1="480" y1="76" x2="600" y2="76"/>
+        <line x1="395" y1="158" x2="520" y2="158"/>
+        <line x1="530" y1="158" x2="660" y2="158"/>
+      </g>
+      <g font-size="10" fill="currentColor" text-anchor="middle">
+        <text x="150" y="72">MatrixWriter</text>
+        <text x="150" y="134">ArrayWriter</text>
+        <text x="540" y="72">BlockGenerator</text>
+      </g>
+      <g font-size="9" fill="currentColor" text-anchor="middle">
+        <text x="457" y="154">BlockValuesGenerator</text>
+        <text x="595" y="154">FileBlockValuesGenerator</text>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none">
+        <line x1="150" y1="120" x2="150" y2="98" marker-end="url(#u03-pkg-fl)"/>
+        <line x1="457" y1="140" x2="457" y2="118"/>
+        <line x1="595" y1="140" x2="595" y2="118"/>
+        <line x1="457" y1="118" x2="595" y2="118"/>
+        <line x1="540" y1="118" x2="540" y2="98" marker-end="url(#u03-pkg-fl)"/>
+        <line x1="260" y1="110" x2="374" y2="110" marker-end="url(#u03-pkg-fl)"/>
+        <line x1="110" y1="180" x2="110" y2="228" marker-end="url(#u03-pkg-fl)"/>
+        <line x1="245" y1="232" x2="245" y2="184" marker-end="url(#u03-pkg-fl)"/>
+        <line x1="460" y1="210" x2="460" y2="228" marker-end="url(#u03-pkg-fl)"/>
+        <line x1="610" y1="210" x2="610" y2="228" marker-end="url(#u03-pkg-fl)"/>
+      </g>
+      <text x="317" y="102" font-size="10" fill="var(--acc2)" text-anchor="middle">depende de</text>
+    </svg>
+    <figcaption>Diagrama de paquetes "enriquecido" de la cátedra: los dos paquetes principales muestran adentro sus clases y las jerarquías de herencia, y las flechas de dependencia dicen quién usa a quién. Los cuatro paquetes auxiliares de abajo van sin detalle porque ahí no hay nada que decidir. La misma figura sin las clases adentro sería un cuadro con seis cajas y flechas: trivial.</figcaption>
+  </figure>
+
+  <h4 id="u03-actividades">Actividades</h4>
+  <p>Flujos con decisiones, bifurcaciones y sincronizaciones, típicamente con swimlanes (una calle por proceso o entidad, cada una con comienzo y fin). Es el diagrama para mostrar las <b>ramas concurrentes</b> del sistema: qué procesos crean otros procesos, dónde se bifurca el trabajo (fork) y dónde se espera y se junta (join). Ejemplos de la cátedra: un cliente que envía un request a un JobHandler que lo acepta o rechaza según esté ocupado, con chequeo de timeout del lado del cliente; y una aplicación que levanta un engine, dispara updaters y workers en paralelo y los joinea al final.</p>
+  <p>La notación: cada calle es una columna rotulada con el proceso o entidad; el nodo inicial es un círculo lleno y el final un círculo lleno con un anillo alrededor (y cada calle puede tener los suyos); las acciones son rectángulos redondeados; y la <b>barra de sincronización</b>, una barra gruesa horizontal, es a la vez fork (una flecha entra, varias salen) y join (varias entran, una sale). Un loop se dibuja como una flecha que vuelve sobre una acción anterior.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 640 378" role="img" aria-label="Diagrama de actividades con swimlanes, loop de polling, barra de fork y barra de join">
+      <defs>
+        <marker id="u03-act-fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--linea)"/></marker>
+      </defs>
+      <rect x="20" y="20" width="600" height="340" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <g stroke="var(--linea)" stroke-width="1.5">
+        <line x1="20" y1="44" x2="620" y2="44"/>
+        <line x1="240" y1="20" x2="240" y2="360"/>
+        <line x1="440" y1="20" x2="440" y2="360"/>
+      </g>
+      <g font-size="10" fill="var(--acc2)" text-anchor="middle">
+        <text x="130" y="37">SerCom Backend</text><text x="340" y="37">SerCom Worker 1</text><text x="540" y="37">SerCom Worker N</text>
+      </g>
+
+      <circle cx="130" cy="60" r="7" fill="currentColor"/>
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <rect x="60" y="76" width="140" height="30" rx="11"/>
+        <rect x="60" y="124" width="140" height="30" rx="11"/>
+        <rect x="55" y="288" width="150" height="32" rx="11"/>
+        <rect x="270" y="204" width="140" height="30" rx="11"/>
+        <rect x="470" y="204" width="140" height="30" rx="11"/>
+      </g>
+      <g font-size="10" fill="currentColor" text-anchor="middle">
+        <text x="130" y="91">Poll new assignment</text><text x="130" y="102">resolutions</text>
+        <text x="130" y="139">Trigger resolution</text><text x="130" y="150">verification</text>
+        <text x="130" y="304">Consolidate results</text><text x="130" y="316">and store pass/fail</text>
+        <text x="340" y="219">Execute</text><text x="340" y="230">TestCase 1</text>
+        <text x="540" y="219">Execute</text><text x="540" y="230">TestCase N</text>
+      </g>
+      <g fill="var(--acc)">
+        <rect x="48" y="170" width="164" height="6"/>
+        <rect x="48" y="266" width="164" height="6"/>
+      </g>
+      <text x="42" y="177" text-anchor="end" font-size="10" fill="var(--acc2)">fork</text>
+      <text x="42" y="273" text-anchor="end" font-size="10" fill="var(--acc2)">join</text>
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none">
+        <line x1="130" y1="67" x2="130" y2="72" marker-end="url(#u03-act-fl)"/>
+        <polyline points="200,100 216,100 216,70 130,70 130,74" marker-end="url(#u03-act-fl)"/>
+        <line x1="130" y1="106" x2="130" y2="120" marker-end="url(#u03-act-fl)"/>
+        <line x1="130" y1="154" x2="130" y2="166" marker-end="url(#u03-act-fl)"/>
+        <line x1="180" y1="176" x2="180" y2="186"/>
+        <line x1="180" y1="186" x2="540" y2="186"/>
+        <line x1="340" y1="186" x2="340" y2="200" marker-end="url(#u03-act-fl)"/>
+        <line x1="540" y1="186" x2="540" y2="200" marker-end="url(#u03-act-fl)"/>
+        <line x1="340" y1="234" x2="340" y2="250"/>
+        <line x1="540" y1="234" x2="540" y2="250"/>
+        <line x1="540" y1="250" x2="180" y2="250"/>
+        <line x1="180" y1="250" x2="180" y2="262" marker-end="url(#u03-act-fl)"/>
+        <line x1="130" y1="272" x2="130" y2="284" marker-end="url(#u03-act-fl)"/>
+        <line x1="130" y1="320" x2="130" y2="332" marker-end="url(#u03-act-fl)"/>
+      </g>
+      <circle cx="130" cy="344" r="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <circle cx="130" cy="344" r="4" fill="currentColor"/>
+      <text x="226" y="110" font-size="10" fill="var(--acc2)" text-anchor="end">loop</text>
+    </svg>
+    <figcaption>Mitad de procesamiento del ejemplo de la cátedra (SerCom, corrección automática de entregas). El backend hace polling en un loop, la barra de fork dispara un test case por worker en su propia calle y la barra de join espera a todos antes de consolidar. Las barras son la única notación que expresa "esto pasa en paralelo y acá se espera".</figcaption>
+  </figure>
+  <details class="mas"><summary>El mismo diagrama en tres iteraciones: cómo se refina un diagrama de actividades</summary>
+    <p>Es la única parte del deck donde la cátedra muestra el <b>proceso</b> de hacer un diagrama y no un diagrama terminado. Aplica en concreto el <a href="#u03-buenos-diagramas">principio de Miller</a>.</p>
+    <ul>
+      <li><b>v1:</b> un único diagrama con seis calles (Student, Campus, SerCom Frontend, SerCom Backend, Worker 1, Worker N). El alumno entrega, el campus captura el commit, el backend hace polling de entregas nuevas, forkea la ejecución de los test cases en los workers y los joinea para consolidar. Está todo, pero con seis calles y dos vueltas del alumno consultando resultados queda al límite de lo legible.</li>
+      <li><b>v2:</b> se <b>parte en dos diagramas</b>, el recorrido del alumno por un lado y el procesamiento interno por otro, y se modelan las colas como <b>calles propias</b> (Tasks Queue, Results Queue) atravesadas por acciones Push Task, Pull Task, Push Result, Pull Result. Gana precisión sobre el middleware, pero el diagrama de procesamiento se llena de flechas cruzadas entre las calles de las colas y las de los workers.</li>
+      <li><b>v3:</b> se sacan las calles de las colas y el intercambio se describe con una acción por test case del lado del backend: "Push one Task per TestCase" y "Pull one Result per TestCase". Es la versión que la cátedra deja como buena: dice lo mismo con la mitad de las entidades.</li>
+    </ul>
+    <p class="nota">La moraleja es doble: modelar una cola como swimlane es una técnica válida y a veces la única forma de mostrar quién empuja y quién consume, pero si el resultado se vuelve ilegible conviene resumir el intercambio en una acción y dejar la cola para el <a href="#u03-robustez">diagrama de robustez</a>.</p>
+  </details>
+
+  <h4 id="u03-componentes">Componentes</h4>
+  <p>Similar en espíritu al de paquetes pero de más alto nivel: cómo interactúan los componentes o nodos del sistema a través de interfaces provistas y requeridas. La materia lo usa poco: prefiere paquetes para dependencias de código y robustez para arquitectura.</p>
+  <p>Notación: el componente es un rectángulo con el ícono de componente (un rectangulito con dos barras salientes) en la esquina superior derecha. Una interfaz <b>provista</b> se dibuja como una bolita al final de una línea que sale del componente que la implementa; una interfaz <b>requerida</b> se dibuja como un semicírculo abierto (socket) que encaja sobre esa bolita. El acoplamiento se lee de un vistazo: quien tiene el socket depende de quien tiene la bolita, y no al revés.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 660 240" role="img" aria-label="Diagrama de componentes con interfaces provistas en notacion bolita y requeridas en notacion socket">
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <rect x="60" y="20" width="130" height="40"/>
+        <rect x="250" y="20" width="130" height="40"/>
+        <rect x="60" y="160" width="320" height="44"/>
+        <rect x="520" y="160" width="130" height="44"/>
+      </g>
+      <g fill="none" stroke="currentColor" stroke-width="1.2">
+        <rect x="170" y="27" width="12" height="14"/><rect x="166" y="29" width="6" height="3"/><rect x="166" y="36" width="6" height="3"/>
+        <rect x="360" y="27" width="12" height="14"/><rect x="356" y="29" width="6" height="3"/><rect x="356" y="36" width="6" height="3"/>
+        <rect x="360" y="167" width="12" height="14"/><rect x="356" y="169" width="6" height="3"/><rect x="356" y="176" width="6" height="3"/>
+        <rect x="630" y="167" width="12" height="14"/><rect x="626" y="169" width="6" height="3"/><rect x="626" y="176" width="6" height="3"/>
+      </g>
+      <g font-size="12" fill="currentColor" text-anchor="middle">
+        <text x="112" y="45">Sensor</text>
+        <text x="302" y="45">Actuador</text>
+        <text x="200" y="187">MLC</text>
+        <text x="582" y="187">Simulink</text>
+      </g>
+      <g fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="119" y="55" width="10" height="10"/>
+        <rect x="309" y="55" width="10" height="10"/>
+        <rect x="515" y="177" width="10" height="10"/>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none">
+        <line x1="124" y1="65" x2="124" y2="92"/>
+        <line x1="314" y1="65" x2="314" y2="92"/>
+        <line x1="124" y1="108" x2="124" y2="160"/>
+        <line x1="314" y1="108" x2="314" y2="160"/>
+        <line x1="380" y1="182" x2="414" y2="182"/>
+        <line x1="459" y1="182" x2="515" y2="182"/>
+      </g>
+      <circle cx="124" cy="100" r="8" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <circle cx="314" cy="100" r="8" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <circle cx="450" cy="182" r="9" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <path d="M 428 168 A 15 15 0 0 0 428 196" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <g font-size="10" fill="currentColor" text-anchor="middle">
+        <text x="124" y="126">ISensar</text>
+        <text x="314" y="126">IActuar</text>
+        <text x="440" y="214">Evaluar</text>
+      </g>
+      <g font-size="10" fill="var(--acc2)">
+        <text x="140" y="98">bolita: interfaz provista por el componente</text>
+        <text x="414" y="158" text-anchor="middle">socket</text>
+        <text x="468" y="158" text-anchor="middle">bolita</text>
+        <text x="140" y="112">de arriba, consumida por el de abajo</text>
+      </g>
+    </svg>
+    <figcaption>Ejemplo de la cátedra: <code>Sensor</code> y <code>Actuador</code> proveen las interfaces <code>ISensar</code> e <code>IActuar</code>, que consume el componente <code>MLC</code>. Del otro lado, <code>MLC</code> requiere (socket) la interfaz <code>Evaluar</code> que provee (bolita) <code>Simulink</code>. La dirección del acoplamiento queda dibujada: el socket depende de la bolita.</figcaption>
+  </figure>
+
+  <h4 id="u03-secuencia">Secuencia</h4>
+  <p>Flujo temporal de mensajes entre participantes, con línea de vida por entidad. La diferencia con actividades: en actividades interesa cómo se desarrolla el paralelismo de un flujo; en secuencia interesa ver <b>en detalle un flujo particular</b> de mensajes, con su orden temporal. Ejemplo de la cátedra: la ejecución de un script en Slurm (cluster HPC), donde se ve la secuencia prolog → job → epilog. Puede representar concurrencia si hace falta (por ejemplo, un timer que refresca una página cada X segundos y dispara de nuevo el mismo flujo), pero hay que tener claro qué se quiere mostrar.</p>
+  <p>Es el diagrama con la notación más reglada del catálogo: cada participante es una caja arriba con una <b>línea de vida</b> punteada hacia abajo, el tiempo corre de arriba hacia abajo, la <b>flecha llena</b> es una llamada, la <b>flecha punteada</b> es el retorno, el rectángulo angosto sobre la línea de vida es la <b>barra de activación</b> (el participante está ejecutando en ese tramo) y una flecha que sale y vuelve al mismo participante es una <b>autollamada</b>.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 660 400" role="img" aria-label="Diagrama de secuencia del ejemplo Slurm con lineas de vida, barras de activacion, llamadas, retornos y autollamadas">
+      <defs>
+        <marker id="u03-seq-fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--linea)"/></marker>
+      </defs>
+      <circle cx="70" cy="22" r="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <g stroke="currentColor" stroke-width="1.5" fill="none">
+        <line x1="70" y1="30" x2="70" y2="50"/><line x1="58" y1="38" x2="82" y2="38"/>
+        <line x1="70" y1="50" x2="62" y2="62"/><line x1="70" y1="50" x2="78" y2="62"/>
+      </g>
+      <text x="70" y="78" text-anchor="middle" font-size="10" fill="currentColor">User</text>
+      <g fill="none" stroke="var(--acc)" stroke-width="2">
+        <rect x="160" y="20" width="100" height="30" rx="4"/>
+        <rect x="330" y="20" width="100" height="30" rx="4"/>
+        <rect x="500" y="20" width="100" height="30" rx="4"/>
+      </g>
+      <g font-size="10" fill="currentColor" text-anchor="middle">
+        <text x="210" y="40">SlurmCtld</text>
+        <text x="380" y="34">Slurmd</text><text x="380" y="46">cnodes</text>
+        <text x="550" y="40">PrologScript</text>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5" stroke-dasharray="5 5">
+        <line x1="70" y1="84" x2="70" y2="386"/>
+        <line x1="210" y1="50" x2="210" y2="386"/>
+        <line x1="380" y1="50" x2="380" y2="386"/>
+        <line x1="550" y1="50" x2="550" y2="386"/>
+      </g>
+      <g fill="none" stroke="var(--acc)" stroke-width="1.5">
+        <rect x="204" y="100" width="12" height="272"/>
+        <rect x="374" y="196" width="12" height="76"/>
+        <rect x="374" y="296" width="12" height="26"/>
+        <rect x="374" y="346" width="12" height="22"/>
+        <rect x="544" y="218" width="12" height="40"/>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none">
+        <line x1="70" y1="110" x2="200" y2="110" marker-end="url(#u03-seq-fl)"/>
+        <polyline points="216,126 248,126 248,144 220,144" marker-end="url(#u03-seq-fl)"/>
+        <line x1="380" y1="218" x2="540" y2="218" marker-end="url(#u03-seq-fl)"/>
+        <polyline points="556,232 584,232 584,250 560,250" marker-end="url(#u03-seq-fl)"/>
+        <line x1="216" y1="196" x2="370" y2="196" marker-end="url(#u03-seq-fl)"/>
+        <line x1="216" y1="296" x2="370" y2="296" marker-end="url(#u03-seq-fl)"/>
+        <line x1="216" y1="346" x2="370" y2="346" marker-end="url(#u03-seq-fl)"/>
+      </g>
+      <g stroke="var(--linea)" stroke-width="1.5" fill="none" stroke-dasharray="6 4">
+        <line x1="204" y1="164" x2="74" y2="164" marker-end="url(#u03-seq-fl)"/>
+        <line x1="544" y1="258" x2="390" y2="258" marker-end="url(#u03-seq-fl)"/>
+        <line x1="374" y1="272" x2="220" y2="272" marker-end="url(#u03-seq-fl)"/>
+        <line x1="374" y1="322" x2="220" y2="322" marker-end="url(#u03-seq-fl)"/>
+        <line x1="374" y1="368" x2="220" y2="368" marker-end="url(#u03-seq-fl)"/>
+      </g>
+      <g font-size="10" fill="currentColor" text-anchor="middle">
+        <text x="138" y="105">sbatch myscript.sh</text>
+        <text x="138" y="159">jobID</text>
+        <text x="295" y="191">run prolog</text>
+        <text x="465" y="213">run script</text>
+        <text x="295" y="267">return prolog</text>
+        <text x="295" y="291">run job-script</text>
+        <text x="295" y="317">return</text>
+        <text x="295" y="341">run epilog</text>
+        <text x="295" y="363">return epilog</text>
+        <text x="465" y="253">return</text>
+      </g>
+      <g font-size="10" fill="var(--acc2)">
+        <text x="252" y="122">queue myscript.sh (autollamada)</text>
+        <text x="588" y="230">rsync</text>
+        <text x="198" y="96" text-anchor="end">barra de activación</text>
+        <text x="80" y="300">línea de vida</text>
+      </g>
+    </svg>
+    <figcaption>Ejemplo de la cátedra: ejecución de un script en Slurm (cluster HPC). Se lee el orden temporal de arriba hacia abajo y la secuencia prolog, job-script, epilog. Las autollamadas (<code>queue myscript.sh</code> en el controlador, <code>rsync</code> en el prolog) muestran trabajo que un participante hace sobre sí mismo, sin salir a otro.</figcaption>
+  </figure>
+
+  <h4 id="u03-despliegue">Despliegue</h4>
+  <p>Muestra los nodos físicos donde corre el sistema, qué artefactos corren en cada uno y cómo se conectan (vista física). Es clave en escenarios IoT, donde hay componentes físicos que no son computadoras (sensores, drivers, motores) y esa diferencia debe quedar explícita. En sistemas distribuidos permite leer de un vistazo propiedades de la arquitectura. En el ejemplo de la cátedra (un cluster HPC del CONICET con MPI): muchos nodos con job workers en cantidad variable por nodo (el sistema escala agregando nodos), pero un único job producer coordinador en el nodo central y un único nodo de storage donde convergen todas las flechas: dos <b>puntos únicos de falla</b> que el diagrama delata de inmediato. En ese diagrama los nodos llevan estereotipos (<code>&lt;&lt;MPI Process&gt;&gt;</code>) y el coordinador se marca con <code>Rank = 0</code>, que es la forma de MPI de identificar al proceso maestro.</p>
+  <p>Notación: el nodo se dibuja como una caja en perspectiva (una caja 3D), los artefactos de software que corren en él van adentro como rectángulos, y los artefactos que <b>viajan</b> entre nodos (un archivo, un dato) se dibujan como íconos de documento apoyados sobre la conexión. Las conexiones se rotulan con el protocolo. El otro ejemplo de la cátedra es una fresadora CNC: la <code>Modeling PC</code> corriendo Rhino produce un artefacto <code>CAD</code> que consume la <code>Converter PC</code> (CAD-CAM converter), que produce un artefacto <code>G-Code</code> que consume la <code>Commander PC</code> (Mach3), que habla por un protocolo propietario con una <code>Breakout Board</code> (Controller), que a su vez maneja los drivers de los ejes X, Y y Z, y estos a los motores. Los últimos tres no son computadoras y se dibujan distinto (cajas planas y círculos): eso es lo que hace explícito el límite entre el software y el hardware físico, que es el valor del diagrama en escenarios IoT.</p>
+  <div class="idea">Si el diseño usa un recurso compartido local (ejemplo: servicios sincronizados por un volumen de Docker), el diagrama de despliegue lo expone: al querer distribuir los servicios en varias máquinas, todas las flechas siguen yendo a ese punto único. El despliegue es la herramienta para detectar acoplamientos físicos y puntos únicos de falla antes de implementar.</div>
+
+  <h4 id="u03-robustez">Robustez</h4>
+  <p>El diagrama por excelencia para diseñar arquitectura en esta materia: es el que se pide para traer diseños preliminares de los TPs. Sus elementos:</p>
+  <ul>
+    <li><b>Boundary:</b> la entrada al sistema, la interfaz con el exterior: una consola, una API, un protocolo. El usuario o cliente que la consume queda <b>afuera</b> del sistema, no se lo incluye como proceso propio.</li>
+    <li><b>Controller:</b> los procesos del sistema, los que ejecutan lógica.</li>
+    <li><b>Entity:</b> objetos estáticos que reciben y guardan información (un archivo, un almacenamiento). Una entity nunca interactúa por iniciativa propia con un controller: si hay una flecha, es el controller el que va a buscar la información.</li>
+    <li><b>Colas:</b> comunicación entre procesos, sin definir la tecnología: puede terminar siendo una queue de Python, un channel de Go, RabbitMQ o Kafka. Ese detalle pertenece a otra vista; acá solo importa quién intercambia información con quién.</li>
+    <li><b>Replicación:</b> los nodos que corren en múltiples instancias se dibujan solapados (o con un asterisco). Así se ven de un vistazo los puntos escalables del sistema.</li>
+    <li><b>Notación (hay que saber dibujarla):</b> el boundary es un círculo con una barra vertical corta pegada a su izquierda, el controller es un círculo con una flecha curva apoyada sobre el borde superior, y la entity es un círculo con una raya horizontal debajo (para archivos la cátedra usa además el ícono de documento, un rectángulo con la esquina superior derecha doblada). Las colas se dibujan como cilindros. Todo el sistema va dentro de una caja redondeada que marca su <b>borde</b>, y los actores quedan afuera de esa caja. Adentro se pueden anidar cajas más chicas para agrupar <b>subsistemas</b>.</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 760 356" role="img" aria-label="Diagrama de robustez con notacion canonica: actor afuera, borde del sistema, boundary, controllers, cola, entity y subsistema con controller replicado">
+      <defs>
+        <marker id="u03-rob-fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--linea)"/></marker>
+        <marker id="u03-rob-cc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/></marker>
+      </defs>
+
+      <rect x="86" y="16" width="656" height="306" rx="18" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <text x="92" y="340" font-size="10" fill="var(--acc2)">borde del sistema: los actores quedan afuera</text>
+
+      <circle cx="40" cy="56" r="9" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <g stroke="currentColor" stroke-width="1.5" fill="none">
+        <line x1="40" y1="65" x2="40" y2="90"/>
+        <line x1="26" y1="74" x2="54" y2="74"/>
+        <line x1="40" y1="90" x2="30" y2="106"/>
+        <line x1="40" y1="90" x2="50" y2="106"/>
+      </g>
+      <text x="40" y="122" text-anchor="middle" font-size="11" fill="currentColor">Cliente</text>
+      <text x="2" y="138" font-size="10" fill="var(--acc2)">actor (monigote)</text>
+      <line x1="58" y1="78" x2="108" y2="78" stroke="var(--linea)" stroke-width="1.5" marker-end="url(#u03-rob-fl)"/>
+
+      <line x1="116" y1="62" x2="116" y2="94" stroke="var(--acc)" stroke-width="2"/>
+      <circle cx="148" cy="78" r="26" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="148" y="82" text-anchor="middle" font-size="11" fill="currentColor">Console</text>
+      <text x="148" y="40" text-anchor="middle" font-size="10" fill="var(--acc2)">boundary</text>
+      <line x1="174" y1="78" x2="224" y2="78" stroke="var(--linea)" stroke-width="1.5" marker-end="url(#u03-rob-fl)"/>
+
+      <circle cx="254" cy="78" r="28" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M 268 54 A 28 28 0 0 0 244 52" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#u03-rob-cc)"/>
+      <text x="254" y="75" text-anchor="middle" font-size="10" fill="currentColor">Main</text>
+      <text x="254" y="88" text-anchor="middle" font-size="10" fill="currentColor">Service</text>
+      <text x="254" y="40" text-anchor="middle" font-size="10" fill="var(--acc2)">controller</text>
+      <line x1="282" y1="78" x2="340" y2="78" stroke="var(--linea)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#u03-rob-fl)"/>
+
+      <circle cx="374" cy="78" r="30" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M 389 52 A 30 30 0 0 0 363 50" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#u03-rob-cc)"/>
+      <text x="374" y="75" text-anchor="middle" font-size="10" fill="currentColor">Workers</text>
+      <text x="374" y="88" text-anchor="middle" font-size="10" fill="currentColor">Runner</text>
+      <text x="374" y="38" text-anchor="middle" font-size="10" fill="var(--acc2)">controller</text>
+
+      <line x1="254" y1="106" x2="252" y2="168" stroke="var(--linea)" stroke-width="1.5" marker-end="url(#u03-rob-fl)"/>
+      <ellipse cx="286" cy="195" rx="9" ry="13" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <line x1="218" y1="182" x2="286" y2="182" stroke="var(--linea)" stroke-width="1.5"/>
+      <line x1="218" y1="208" x2="286" y2="208" stroke="var(--linea)" stroke-width="1.5"/>
+      <ellipse cx="218" cy="195" rx="9" ry="13" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <text x="252" y="232" text-anchor="middle" font-size="11" fill="currentColor">tasks_q</text>
+      <text x="252" y="248" text-anchor="middle" font-size="10" fill="var(--acc2)">cola (cilindro)</text>
+
+      <line x1="234" y1="98" x2="160" y2="174" stroke="var(--linea)" stroke-width="1.5" marker-end="url(#u03-rob-fl)"/>
+      <path d="M 120 178 L 144 178 L 154 188 L 154 218 L 120 218 Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M 144 178 L 144 188 L 154 188" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="137" y="234" text-anchor="middle" font-size="11" fill="currentColor">Log_f</text>
+      <text x="137" y="250" text-anchor="middle" font-size="10" fill="var(--acc2)">entity (archivo)</text>
+
+      <rect x="340" y="150" width="250" height="112" rx="12" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="348" y="166" font-size="10" fill="var(--acc2)">subsistema</text>
+      <line x1="378" y1="108" x2="420" y2="158" stroke="var(--linea)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#u03-rob-fl)"/>
+      <line x1="297" y1="195" x2="401" y2="193" stroke="var(--linea)" stroke-width="1.5" marker-end="url(#u03-rob-fl)"/>
+      <g fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="430" cy="186" r="27"/>
+        <circle cx="436" cy="192" r="27"/>
+        <circle cx="442" cy="198" r="27"/>
+      </g>
+      <path d="M 455 175 A 27 27 0 0 0 432 173" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#u03-rob-cc)"/>
+      <text x="442" y="203" text-anchor="middle" font-size="11" fill="currentColor">Worker</text>
+      <text x="442" y="286" text-anchor="middle" font-size="10" fill="var(--acc2)">controller replicado (solapado)</text>
+
+      <line x1="470" y1="195" x2="632" y2="195" stroke="var(--linea)" stroke-width="1.5" marker-end="url(#u03-rob-fl)"/>
+      <circle cx="660" cy="195" r="26" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="632" y1="225" x2="688" y2="225" stroke="currentColor" stroke-width="1.5"/>
+      <text x="660" y="199" text-anchor="middle" font-size="11" fill="currentColor">Stats</text>
+      <text x="660" y="248" text-anchor="middle" font-size="10" fill="var(--acc2)">entity (círculo subrayado)</text>
+    </svg>
+    <figcaption>Robustez con la notación de la cátedra. El actor está afuera de la caja que marca el borde del sistema y entra por un boundary (círculo con barra vertical a la izquierda). Los controllers son círculos con la flecha curva sobre el borde: el Main Service encola trabajo en una cola (cilindro) y delega en el Workers Runner, que levanta los Worker replicados (círculos solapados: punto escalable) agrupados en un subsistema. Las entities son el círculo subrayado (<code>Stats</code>) y el ícono de documento para archivos (<code>Log_f</code>); siempre es el controller el que va hacia ellas, nunca al revés.</figcaption>
+  </figure>
+  <div class="idea">El diagrama de robustez se concentra en el escalamiento y la comunicación, no en la implementación. Que dos servicios se hablen "a través de una entity Stats" no dice dónde está ese archivo ni cómo se accede: si el middleware está bien definido, esas colas después se implementan con lo que convenga. Mirándolo se detecta rápido qué nodos son únicos (posibles cuellos de botella) y cuáles se escalan agregando instancias.</div>
+
+  <h4 id="u03-topologia-red">Topología de red (no UML)</h4>
+  <p>No todos los diagramas útiles son UML. Un diagrama de topología de red (internet, firewall de la universidad, entry point, proxy, la red interna donde corre el sistema y los clientes externos que se conectan por túnel) transmite muchísima información sin seguir ningún lineamiento UML. Vale el criterio de siempre: si el que lo lee entiende el sistema, el diagrama cumplió su objetivo y no se rechaza por no ser UML.</p>
+  <p>En el ejemplo de la cátedra el diagrama muestra <b>dos redes distintas, cada una con su rango</b>: la red de la facultad (<code>157.92.0.0/16</code>), con el firewall, un nodo de entrada, un proxy y los clientes internos, y la red privada del cluster (<code>192.168.1.0/24</code>), con los nodos de cómputo. El nodo de administración aparece <b>dos veces, una en cada nube</b>, porque tiene una interfaz de red en cada una: es el único nodo con una pata en cada red. Eso se lee de un vistazo y contesta sin más explicación por qué los nodos de cómputo del cluster no son alcanzables desde internet (solo a través de ese nodo) y por qué los clientes externos entran por túnel.</p>
+</section>

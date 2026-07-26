@@ -1,0 +1,344 @@
+<section class="unidad" id="u04" data-titulo="Layers, tiers, interfaces, protocolos y REST">
+  <h2>U04. Layers y tiers, interfaces, protocolos y REST</h2>
+  <p class="intro">Todo sistema distribuido se construye dividiendo un problema grande en subproblemas: capas lógicas (layers) y físicas (tiers) organizan esa división, las interfaces definen los contratos entre las partes, y los protocolos y formatos de mensaje definen cómo viajan los datos entre nodos. La unidad cierra con REST, el estándar de facto de la industria para exponer servicios sobre HTTP, y con el versionado de APIs. Es una unidad muy preguntada en finales: diseño de protocolos binarios vs texto plano, layers vs tiers y orientación de contratos aparecen una y otra vez.</p>
+
+  <h3 id="u04-arquitecturas-de-capas">Arquitecturas de capas</h3>
+  <p>Si un sistema se plantea como una sucesión de problemas pequeños, hay mucha más chance de resolver bien cada uno por separado. Las arquitecturas de capas hacen exactamente eso:</p>
+  <ul>
+    <li>Dividen el problema en subproblemas.</li>
+    <li>Fomentan el uso de interfaces: la línea delgada donde una capa toca a la otra e intercambian datos es, conceptualmente, una interfaz.</li>
+    <li>Permiten intercambiar componentes reutilizando conectores y protocolos ya definidos.</li>
+  </ul>
+  <div class="def"><b>Layer (capa lógica).</b> Agrupación lógica de componentes y funcionalidades de un sistema. No dice nada sobre dónde corre el código.</div>
+  <div class="def"><b>Tier (capa física).</b> Describe la distribución física de componentes y funcionalidad: cada tier es un nodo, un servidor, un elemento físico de despliegue.</div>
+  <div class="idea">Layers y tiers son dos vistas distintas del mismo sistema, igual que las vistas de un modelo de documentación (<a href="#u03">unidad 3</a>): el layer responde "cómo está organizado lógicamente el código", el tier responde "en qué máquinas se despliega". La distinción es histórica pero sigue siendo valiosa: usar la palabra precisa (lógico vs físico) evita malentendidos al comunicar una arquitectura.</div>
+
+  <div class="examen">Preguntado en finales: "Diferencie los conceptos de Capas Lógicas (Layers) y Niveles de Despliegue (Tiers) en el diseño de arquitectura de software. Dé un ejemplo de una arquitectura de 3-Tiers" (compilado de preguntas de finales de la cátedra). La respuesta esperada: layers = organización lógica del código para separar responsabilidades; tiers = distribución física en nodos; ejemplo 3-tier: UI en el dispositivo del cliente, lógica en un servidor de aplicaciones, base de datos en un servidor separado.</div>
+
+  <h3 id="u04-layers">Layers: comunicación, jerarquía y responsabilidades</h3>
+  <p>Los layers se disponen en dos sentidos:</p>
+  <ul>
+    <li><b>Capas verticales:</b> apiladas con jerarquía. La capa N se apoya en la N-1 para cumplir su funcionalidad: la capa inferior ofrece funcionalidad más básica y específica, y la superior la compone para armar funcionalidad de mayor complejidad.</li>
+    <li><b>Capas horizontales o transversales:</b> cruzan y tocan a todas las verticales (típicamente seguridad y auditoría).</li>
+  </ul>
+  <p>La disposición vertical define los canales de comunicación posibles:</p>
+  <ul>
+    <li><b>Downcall:</b> la capa N llama hacia abajo (N-1), con o sin respuesta. Es el caso normal.</li>
+    <li><b>Upcall:</b> la capa N llama hacia arriba (N+1). Es excepcional y problemático.</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 460 190" role="img" aria-label="Comunicacion entre layers">
+      <rect x="140" y="10" width="180" height="40" fill="none" stroke="currentColor"/>
+      <text x="230" y="35" text-anchor="middle" fill="currentColor" font-size="14">Layer N+1</text>
+      <rect x="140" y="75" width="180" height="40" fill="none" stroke="var(--acc)"/>
+      <text x="230" y="100" text-anchor="middle" fill="currentColor" font-size="14">Layer N</text>
+      <rect x="140" y="140" width="180" height="40" fill="none" stroke="currentColor"/>
+      <text x="230" y="165" text-anchor="middle" fill="currentColor" font-size="14">Layer N-1</text>
+      <line x1="180" y1="50" x2="180" y2="75" stroke="var(--acc)"/>
+      <polygon points="176,71 180,79 184,71" fill="var(--acc)"/>
+      <line x1="180" y1="115" x2="180" y2="140" stroke="var(--acc)"/>
+      <polygon points="176,136 180,144 184,136" fill="var(--acc)"/>
+      <text x="90" y="100" text-anchor="middle" fill="currentColor" font-size="12">downcall</text>
+      <line x1="280" y1="79" x2="280" y2="54" stroke="var(--acc2)" stroke-dasharray="4 3"/>
+      <polygon points="276,58 280,50 284,58" fill="var(--acc2)"/>
+      <text x="375" y="70" text-anchor="middle" fill="currentColor" font-size="12">upcall (excepcional)</text>
+    </svg>
+    <figcaption>La capa N provee servicios a la N+1 y consume servicios de la N-1. El upcall es la excepción.</figcaption>
+  </figure>
+
+  <h4 id="u04-dependencias-circulares">Upcalls y dependencias circulares</h4>
+  <p>¿Por qué el upcall trae problemas? Si el código de la capa N importa a la N-1 y el de la N-1 importa a la N, se arma una <b>dependencia circular</b>: molesta para los despliegues, hace confuso quién depende de quién, y ninguna de las dos capas puede existir sin la otra. La pregunta que hay que hacerse es si esa circularidad es real: si no se puede delimitar la responsabilidad de cada capa porque sus elementos "hablan demasiado" entre sí, probablemente no haya dos capas sino una sola con más cohesión, y conviene que una absorba a la otra.</p>
+  <p>Cuando la separación sí tiene sentido y la capa inferior necesita avisar algo hacia arriba, la solución típica es un <b>callback</b> o <b>event handler</b>: la capa superior registra una función en la inferior, y cuando en la capa de abajo ocurre un evento, invoca ese callback sin saber qué hay del otro lado. La capa de abajo no importa código de la de arriba: solo emite un evento.</p>
+  <pre><code># capa N-1: no conoce a la capa superior
+def register_callback(cb):
+    global callback
+    callback = cb
+
+def al_ocurrir_evento(datos):
+    if callback:
+        callback(datos)   # upcall sin dependencia circular
+
+# capa N: se registra como interesada
+register_callback(mi_handler)</code></pre>
+
+  <h4 id="u04-modelo-logico">Un modelo lógico típico</h4>
+  <p>Cada layer debe ser un módulo con responsabilidades limitadas, coherencia y cohesión: un conjunto acotado de cosas que hace y hace bien. El modelo lógico que encaja en la mayoría de las aplicaciones web actuales es:</p>
+  <ul>
+    <li><b>Persistence:</b> acceso a los datos, comunicación con la base de datos, storage.</li>
+    <li><b>Core Business:</b> entidades y modelo de negocio; se apoya en Persistence.</li>
+    <li><b>Services:</b> compone entidades básicas en operaciones complejas. Se intenta que cada servicio sea atómico: una única transacción desde que se lo invoca hasta que retorna.</li>
+    <li><b>API y Presentation:</b> puntos de entrada. Presentation define los boundaries con los que interactúa el usuario; API expone servicios a aplicaciones externas (la propia interfaz gráfica puede consumir la API, o puede hacerlo un tercero).</li>
+    <li><b>Security y Audit:</b> capas transversales que verifican roles, accesos y registran actividad antes de responder, sin ser parte de la lógica del servicio en sí.</li>
+  </ul>
+  <p>Otra forma de organizar layers es la <b>Onion Architecture</b> (Clean Architecture, de Jeffrey Palermo y Robert Martin): capas concéntricas con el dominio en el centro y las dependencias apuntando siempre hacia adentro.</p>
+
+  <h3 id="u04-tiers">Tiers: 2-tier, 3-tier y despliegue de layers</h3>
+  <p>En un diagrama de tiers cada caja es un nodo físico, y las líneas entre nodos se pueden anotar con el protocolo con que se hablan. La cantidad de tiers dio nombre a arquitecturas clásicas:</p>
+  <ul>
+    <li><b>2-Tier:</b> una base de datos central (un tier) y aplicaciones cliente instaladas en cada computadora (el otro tier) que abren conexión contra la base, extraen datos y los muestran. Con este modelo la industria sobrevivió muchos años; toda empresa tuvo alguna vez su base centralizada y un "clientito" instalado en cada máquina. A veces parte de la lógica vivía en la base (stored procedures, PL/SQL).</li>
+    <li><b>3-Tier:</b> la evolución: la lógica de negocio se separa a un servidor propio. Queda un cliente "tonto" que recibe la información ya procesada, un tier de lógica de negocio y un tier de base de datos. Es el modelo de las aplicaciones web clásicas: browser con HTML y algo de JavaScript, servidor PHP, base MySQL.</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 560 120" role="img" aria-label="Despliegue 3-tier">
+      <rect x="10" y="35" width="130" height="50" fill="none" stroke="currentColor"/>
+      <text x="75" y="57" text-anchor="middle" fill="currentColor" font-size="13">Client Tier</text>
+      <text x="75" y="74" text-anchor="middle" fill="currentColor" font-size="11">browser / app</text>
+      <rect x="215" y="35" width="150" height="50" fill="none" stroke="var(--acc)"/>
+      <text x="290" y="57" text-anchor="middle" fill="currentColor" font-size="13">Business Logic Tier</text>
+      <text x="290" y="74" text-anchor="middle" fill="currentColor" font-size="11">servidor de aplicación</text>
+      <rect x="430" y="35" width="120" height="50" fill="none" stroke="currentColor"/>
+      <text x="490" y="57" text-anchor="middle" fill="currentColor" font-size="13">Database Tier</text>
+      <text x="490" y="74" text-anchor="middle" fill="currentColor" font-size="11">base de datos</text>
+      <line x1="140" y1="60" x2="215" y2="60" stroke="var(--linea)"/>
+      <polygon points="209,56 217,60 209,64" fill="var(--linea)"/>
+      <line x1="365" y1="60" x2="430" y2="60" stroke="var(--linea)"/>
+      <polygon points="424,56 432,60 424,64" fill="var(--linea)"/>
+      <text x="177" y="50" text-anchor="middle" fill="currentColor" font-size="11">HTTP</text>
+      <text x="397" y="50" text-anchor="middle" fill="currentColor" font-size="11">SQL</text>
+    </svg>
+    <figcaption>Despliegue 3-tier: cliente tonto, lógica de negocio centralizada, base de datos separada.</figcaption>
+  </figure>
+  <p>Los dos modelos se integran: los layers (paquetes lógicos) se despliegan sobre los tiers. El ejemplo de la cátedra reparte los layers en cuatro tiers: un <b>Client Tier</b> con el WebClient, un <b>Application Tier</b> con Presentation y API, un <b>Business Logic Tier</b> con Services, Core Business y Persistence, y un <b>Database Tier</b> al que accede el anterior. Security y Audit no viven en un tier propio: son layers transversales que se despliegan en los dos servidores.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 600 245" role="img" aria-label="Despliegue de layers sobre cuatro tiers">
+      <defs>
+        <marker id="u04-tr-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--linea)"/>
+        </marker>
+      </defs>
+      <rect x="10" y="55" width="110" height="70" rx="4" fill="none" stroke="currentColor"/>
+      <text x="65" y="78" text-anchor="middle" fill="currentColor" font-size="12">Client Tier</text>
+      <rect x="24" y="88" width="82" height="24" rx="3" fill="none" stroke="var(--acc)"/>
+      <text x="65" y="104" text-anchor="middle" fill="currentColor" font-size="11">WebClient</text>
+
+      <rect x="165" y="35" width="170" height="110" rx="4" fill="none" stroke="currentColor"/>
+      <text x="250" y="53" text-anchor="middle" fill="currentColor" font-size="12">Application Tier</text>
+      <rect x="176" y="62" width="96" height="26" rx="3" fill="none" stroke="var(--acc)"/>
+      <text x="224" y="79" text-anchor="middle" fill="currentColor" font-size="11">Presentation</text>
+      <rect x="176" y="96" width="96" height="26" rx="3" fill="none" stroke="var(--acc)"/>
+      <text x="224" y="113" text-anchor="middle" fill="currentColor" font-size="11">API</text>
+      <rect x="280" y="62" width="20" height="60" rx="3" fill="none" stroke="var(--acc2)"/>
+      <text x="290" y="92" text-anchor="middle" fill="var(--acc2)" font-size="9" transform="rotate(-90 290 92)">Audit</text>
+      <rect x="305" y="62" width="20" height="60" rx="3" fill="none" stroke="var(--acc2)"/>
+      <text x="315" y="92" text-anchor="middle" fill="var(--acc2)" font-size="9" transform="rotate(-90 315 92)">Security</text>
+
+      <rect x="380" y="25" width="200" height="130" rx="4" fill="none" stroke="currentColor"/>
+      <text x="480" y="43" text-anchor="middle" fill="currentColor" font-size="12">Business Logic Tier</text>
+      <rect x="391" y="52" width="106" height="26" rx="3" fill="none" stroke="var(--acc)"/>
+      <text x="444" y="69" text-anchor="middle" fill="currentColor" font-size="11">Services</text>
+      <rect x="391" y="84" width="106" height="26" rx="3" fill="none" stroke="var(--acc)"/>
+      <text x="444" y="101" text-anchor="middle" fill="currentColor" font-size="11">Core Business</text>
+      <rect x="391" y="116" width="106" height="26" rx="3" fill="none" stroke="var(--acc)"/>
+      <text x="444" y="133" text-anchor="middle" fill="currentColor" font-size="11">Persistence</text>
+      <rect x="505" y="52" width="20" height="90" rx="3" fill="none" stroke="var(--acc2)"/>
+      <text x="515" y="97" text-anchor="middle" fill="var(--acc2)" font-size="9" transform="rotate(-90 515 97)">Audit</text>
+      <rect x="530" y="52" width="20" height="90" rx="3" fill="none" stroke="var(--acc2)"/>
+      <text x="540" y="97" text-anchor="middle" fill="var(--acc2)" font-size="9" transform="rotate(-90 540 97)">Security</text>
+
+      <rect x="400" y="195" width="160" height="40" rx="4" fill="none" stroke="currentColor"/>
+      <text x="480" y="219" text-anchor="middle" fill="currentColor" font-size="12">Database Tier</text>
+
+      <line x1="120" y1="90" x2="158" y2="90" stroke="var(--linea)" marker-end="url(#u04-tr-arr)"/>
+      <line x1="335" y1="90" x2="373" y2="90" stroke="var(--linea)" marker-end="url(#u04-tr-arr)"/>
+      <line x1="480" y1="155" x2="480" y2="188" stroke="var(--linea)" marker-end="url(#u04-tr-arr)"/>
+    </svg>
+    <figcaption>Los layers son paquetes lógicos; los tiers son nodos de despliegue. Services cae en el Business Logic Tier, no en el Application Tier. Audit y Security son transversales y se repiten en los dos servidores.</figcaption>
+  </figure>
+  <div class="warn">Ojo con dónde cae <b>Services</b>: va con Core Business y Persistence en el Business Logic Tier. El Application Tier expone la aplicación (Presentation y API); componer entidades en operaciones transaccionales ya es lógica de negocio. Confundirlos es el error clásico en el ejercicio de repartir layers sobre tiers.</div>
+  <div class="warn">Si un mismo layer (por ejemplo Audit) se despliega en dos tiers, hay que desplegar la <b>misma versión</b> en ambos. Un despliegue con versiones distintas de un componente compartido en distintos nodos puede hacer que el sistema distribuido "no ande muy bien": acá empieza la complejidad real de las aplicaciones web como sistemas distribuidos.</div>
+
+  <h3 id="u04-interfaces">Interfaces y contratos</h3>
+  <div class="def"><b>Interfaz.</b> Elemento que permite la comunicación entre dos o más componentes, servicios o sistemas definiendo un contrato: expone solo la parte pública del sistema y esconde la implementación privada.</div>
+  <p>Consecuencias directas de esa definición:</p>
+  <ul>
+    <li>Diferentes contratos permiten diferentes clientes.</li>
+    <li>La implementación puede modificarse sin avisarle a nadie, mientras el contrato se siga cumpliendo.</li>
+    <li>Un cambio de contrato implica una nueva versión de la interfaz.</li>
+  </ul>
+  <p>Hay dos ámbitos de interfaz:</p>
+  <table>
+    <thead><tr><th></th><th>Inter-aplicaciones</th><th>Intra-aplicación</th></tr></thead>
+    <tbody>
+      <tr><td>Qué es</td><td>Application Programming Interfaces (APIs): el punto de acceso para que una aplicación que vive por sí sola sea reutilizada por otra sin reescribir su funcionalidad.</td><td>Patrones como Facade o Mediator, e interfaces entre layers. La aplicación es una sola: no tiene sentido desplegar un pedacito suelto.</td></tr>
+      <tr><td>Ejemplos</td><td>Cliente de consola contra un web server, JS del navegador contra un servidor, servicio contra servicio.</td><td>Layer 2 consultando Layer 1, mensajes entre objetos locales (o remotos, si el despliegue tiene muchos nodos).</td></tr>
+    </tbody>
+  </table>
+  <p>Dos problemas guían el diseño de todo contrato:</p>
+  <ul>
+    <li><b>El software es difícil de integrar:</b> si expongo todos los puntos del sistema sin esconder nada, la complejidad de integrar crece exponencialmente con la cantidad de elementos expuestos. Mejor interfaces pequeñas que van al grano; si quedan chicas, se publica una nueva versión.</li>
+    <li><b>El software es difícil de cambiar:</b> si un sistema quedó altamente acoplado a una API y esta cambia, hay un problema grande. Hay una línea fina entre una interfaz flexible y una cerrada; y querer contemplar todo por años mete ruido y complica el uso.</li>
+  </ul>
+
+  <h4 id="u04-orientacion-contrato">Orientación del contrato: entidades vs procesos</h4>
+  <table>
+    <thead><tr><th></th><th>Orientado a entidades</th><th>Orientado a procesos</th></tr></thead>
+    <tbody>
+      <tr><td>Objetivo</td><td>Desacoplamiento entre sistemas, flexibilidad</td><td>Alta performance</td></tr>
+      <tr><td>Acoplamiento</td><td>Bajo</td><td>Componentes altamente acoplados</td></tr>
+      <tr><td>Funcionalidad</td><td>Estándar (CRUD sobre recursos)</td><td>Diversa (acciones, procesamiento)</td></tr>
+      <tr><td>Forma del endpoint</td><td>La URI nombra una entidad; la acción la da el verbo HTTP</td><td>La URI describe la acción</td></tr>
+    </tbody>
+  </table>
+  <div class="ej">La API de Wikipedia/Wikimedia mezcla ambos estilos. Orientados a entidades: <code>GET /page/title/{title}</code>, <code>POST /page/html/{title}</code>, <code>GET /feed/featured/{yyyy}/{mm}/{dd}</code> (la entidad "page" o "feed" y el verbo dicen todo). Orientados a procesos: <code>POST /transform/html/to/wikitext/{title}</code> (procesa y convierte formato), <code>POST /media/math/check/tex</code> (valida una fórmula LaTeX). No es que Wikipedia no sepa escribir interfaces: es que no siempre se puede ser purista con una sola orientación.</div>
+
+  <div class="examen">Preguntado en finales: "El contrato de una interfaz puede estar orientado a entidades o a procesos. Describa ambos modelos y dé un ejemplo de al menos dos endpoints de cada estilo para una API" (2025-02). Conviene tener listos dos endpoints de cada estilo (por ejemplo <code>GET /users/{id}</code> y <code>POST /products</code> vs <code>POST /search</code> y <code>POST /transform/...</code>) y las palabras clave: entidades = desacoplamiento y flexibilidad, procesos = acoplamiento y performance.</div>
+
+  <h4 id="u04-clasificacion-apis">Clasificación de APIs</h4>
+  <ul>
+    <li><b>Web APIs:</b> REST based (HTTP + JSON, hoy las más extendidas) y Web Services based (HTTP + SOAP, un XML de estructura muy fuerte para intercambio de objetos, con tooling propio para descubrir servicios).</li>
+    <li><b>Remote APIs:</b> servicios TCP/UDP custom; orientadas a objetos (CORBA, Java RMI, hoy en deprecación); orientadas a procedimientos (RPC, y su regreso moderno como gRPC de la mano de Google).</li>
+    <li><b>Library-based / frameworks:</b> la Java API (gracias a un contrato firme pueden convivir implementaciones como OpenJDK y Oracle JDK), la Android API.</li>
+    <li><b>OS related:</b> POSIX (un SO POSIX garantiza un mínimo de funciones: abrir, cerrar, saltear caracteres en un archivo, etc.; por eso Docker pudo apuntar "a sistemas POSIX" sin importar qué hay debajo), WinAPI.</li>
+  </ul>
+
+  <h3 id="u04-protocolos">Protocolos</h3>
+  <h4 id="u04-http">Ejemplo: el modelo HTTP</h4>
+  <p>HTTP es un modelo <b>cliente-servidor</b> y <b>request-reply</b>: el cliente siempre pide, el servidor siempre responde; el servidor nunca inicia un pedido hacia el cliente. Y es <b>sin estado</b> (del lado del servidor): una invocación no sabe nada de la siguiente, por lo que el cliente debe mantener el estado y referenciar en cada pedido a qué se refiere (por ejemplo, borrar indicando el id del recurso, no "el que seleccioné recién").</p>
+  <pre><code>GET https://en.wikipedia.org/wiki HTTP/1.1
+Host: www.example.com
+Accept: text/html,application/xhtml+xml;
+Accept-encoding: gzip, deflate, br
+Accept-language: en-US,en;q=0.9,es;q=0.8
+
+HTTP/1.1 200 OK
+Content-encoding: gzip
+Content-language: en
+Content-length: 18558
+Content-type: text/html; charset=UTF-8
+
+&lt;!DOCTYPE html&gt; ...</code></pre>
+  <p>El request lleva un verbo (GET, POST, PUT, ...), un path (con argumentos opcionales tras <code>?</code>) y headers (Host, qué tipos de respuesta acepto, qué encoding, qué idioma). La respuesta trae un código de retorno (200 = OK), el encoding e idioma usados, el content type y la longitud del body en bytes: contando esa cantidad el cliente decodifica el body.</p>
+
+  <h4 id="u04-pdu">Responsabilidades por capa y PDUs</h4>
+  <p>En un stack tipo TCP/IP (Application, Transport, Internet, Network Access) cada capa habla lógicamente con su par del otro nodo, pero HTTP solo existe en Application: las capas de abajo no saben nada de HTTP. Cada capa toma lo que le pasa la capa superior, lo mete en el body de su propio protocolo y le agrega sus headers. El mensaje crece a medida que baja.</p>
+  <div class="def"><b>PDU (Protocol Data Unit).</b> La unidad de datos de cada protocolo: el paquete que una capa entrega a la inferior para ser encapsulado.</div>
+  <p>Formas de encapsular PDUs entre capas:</p>
+  <ol>
+    <li><b>Encapsulación exacta:</b> la capa inferior reserva en su payload el espacio exacto para el mensaje de la superior (ej: payload dentro de TCP header, dentro de IP header, dentro de Net header).</li>
+    <li><b>Segmentación:</b> el mensaje supera el límite de la capa inferior y se corta en varios paquetes. Cada segmento repite headers: más overhead y una aplicación más chatty.</li>
+    <li><b>Batching (blocking):</b> la capa inferior espera varios paquetes de la superior y los agrupa en un solo bloque, amortizando headers.</li>
+  </ol>
+  <div class="idea">El concepto de PDU no es exclusivo de TCP: es universal entre las capas que uno mismo arma (Services puede tener su PDU que Communication encapsula). Y la segmentación pasa "sola": mandar una imagen de 32 MB en un solo chunk sobre UDP significa que se segmenta por debajo y, si se pierde un pedacito, se pierde la imagen. Una aplicación debe considerar sobre qué está parada y qué calidad de servicio le da la capa inferior.</div>
+  <p>La gracia de las capas es la abstracción: FTP, HTTP y SMTP se basan en TCP; DNS usa UDP para agilizar; y todos se apoyan en IP, que al cortar la visibilidad hacia abajo permite implementarse sobre cualquier network access (Ethernet, fibra, Token Ring). Mientras la capa de abajo cumpla su contrato, se la puede cambiar y todo sigue andando.</p>
+
+  <h3 id="u04-mensajes">Mensajes: formato y framing</h3>
+  <h4 id="u04-binario-vs-texto">Formato binario vs texto plano</h4>
+  <table>
+    <thead><tr><th></th><th>Binario</th><th>Texto plano</th></tr></thead>
+    <tbody>
+      <tr><td>Performance</td><td>Alta: mensajes de tamaño eficiente, compresión puede no ser necesaria</td><td>Baja: throughput menor, la compresión agrega overhead</td></tr>
+      <tr><td>Serialización</td><td>Autogeneración de código (Protobuf, Thrift, ASN.1); no siempre hay soporte en todos los lenguajes</td><td>Formatos human-readable (JSON, XML) o serialización básica (HTTP, SMTP)</td></tr>
+      <tr><td>Interacción</td><td>Cliente específico por aplicación, decoder para interpretar mensajes</td><td>Cliente único si se conoce el protocolo (cURL + REST API), fácil de debuggear</td></tr>
+      <tr><td>Ejemplos</td><td>Protobuf, TFTP, protocolos custom TCP/UDP</td><td>HTTP, SMTP, JSON, XML</td></tr>
+    </tbody>
+  </table>
+  <div class="ej">Con Protobuf se define el mensaje en un <code>.proto</code> (<code>message Person { required string name = 1; required int32 id = 2; optional string email = 3; }</code>), se autogenera código con <code>protoc</code>, y se puede serializar en Java y deserializar en C++: el contrato es el archivo .proto, no el lenguaje.</div>
+
+  <div class="examen">Preguntado en finales: "Explique la necesidad del uso de protocolos binarios y no-binarios para la comunicación en un sistema distribuido. Dé un ejemplo de protocolos conocidos en estas dos categorías" (2023-07, 2025-07). Respuesta esperada: binarios para performance (tamaño exacto, encoder/decoder específico, ej. Protobuf o TFTP), texto plano para interoperabilidad y debugging (parsers ubicuos, human-readable, ej. HTTP/JSON).</div>
+
+  <h4 id="u04-longitud-paquete">Longitud de paquete: bloques fijos, dinámicos y mixtos</h4>
+  <ul>
+    <li><b>Bloques fijos:</b> cada dato tiene longitud fija. Fácil de serializar, pero subóptimo con tipos de longitud variable como strings.</li>
+    <li><b>Bloques dinámicos:</b> un separador delimita comienzo y fin de campo, o un campo de longitud indica cuánto ocupa el valor. Pequeño overhead por los bytes extra.</li>
+    <li><b>Esquema mixto:</b> los parámetros fijos (integers) van sin delimitador ni longitud; los variables llevan delimitador o longitud.</li>
+  </ul>
+  <div class="ej"><b>TLV (Type-Length-Value):</b> todo parámetro se codifica como Type (tipo de dato, tamaño fijo), Length (longitud del value, tamaño fijo) y Value (dato, tamaño variable, admite subtipos). Con un mini protocolo donde 01 = integer, 02 = string, 03 = dirección (compuesto de 03.01 calle string, 03.02 número integer, 03.03 unidad string), la dirección "Alsina 2B" se serializa:
+  <pre><code>03 11                          # Direccion, 0x11 bytes
+  01 06 41 6c 73 69 6e 61      # Calle: "Alsina" (6 bytes)
+  02 04 00 00 00 02            # Numero: 2 (int de 4 bytes)
+  03 01 42                     # Unidad: "B" (1 byte)</code></pre></div>
+  <div class="ej"><b>TFTP</b> combina bloques fijos y delimitadores: el paquete Read/Write lleva opcode (2 bytes fijos), filename (string terminado en un byte 0) y mode (string + byte 0); el paquete Data lleva opcode 3, block# (2 bytes) y hasta 512 bytes de datos; el ACK lleva opcode 4 y block#. El fin de archivo se señala con un bloque de datos de menos de 512 bytes: un archivo de 513 bytes viaja como un bloque de 512 y uno de 1; uno de exactamente 512 obliga a mandar un segundo bloque de 0 bytes para indicar que terminó.</div>
+
+  <div class="examen">Preguntado en finales, con variantes: "Defina 2 protocolos distintos para la transmisión de paquetes considerando un registro que posee un int y un arreglo de flotantes / un struct con email:str y nacimiento:date / un float y una lista de strings. Compare ventajas y desventajas de cada protocolo" (2024-07, 2025-02, 2025-12). La estructura de respuesta es siempre la misma: protocolo 1 texto plano (JSON: fácil de implementar y debuggear, serializadores ubicuos, ocupa más), protocolo 2 binario (TLV o esquema mixto con longitud al inicio: bytes exactos, serialización inmediata, pero hay que implementar encoder/decoder por lenguaje, salvo que se use un IDL tipo Protobuf/gRPC que autogenera stubs).</div>
+
+  <h4 id="u04-sincronizacion">Sincronización de señales y mensajes sincrónicos vs asincrónicos</h4>
+  <p>En ciertos protocolos hay que saber dónde <b>empieza</b> una señal para entender la secuencia. Ejemplo de bajo nivel: el sensor DHT11 (humedad y temperatura) manda por un pin una señal de sincronismo inicial y luego 40 bits de datos (byte entero y decimal de humedad, byte entero y decimal de temperatura, checksum).</p>
+  <p>En cuanto a la interacción, un intercambio puede ser <b>sincrónico</b> (el cliente queda idle esperando la respuesta antes de continuar) o <b>asincrónico</b> (el cliente sigue activo tras enviar el request y procesa la respuesta cuando llega). Este eje va a reaparecer en <a href="#u05">middlewares y MOMs</a>.</p>
+
+  <h4 id="u04-multiples-canales">Caso real: protocolo custom con múltiples canales</h4>
+  <div class="ej">Una bolsa de comercio recibe órdenes de muchos operadores distribuidos, con picos de tráfico donde importa el throughput. Solución: cada trader contrata dos canales dedicados (fibras de dos carriers) y manda cada paquete <b>duplicado</b> por ambos, con un protocolo UDP liviano y números de serie. El servidor procesa el primero que llega y descarta el duplicado del otro canal. Si un paquete se pierde en un canal, llega por el otro: la redundancia cubre la enorme mayoría de las pérdidas sin retransmitir. Para el caso raro en que se pierden ambos, hay un canal TCP lento por el que el exchange pide "retransmitime el paquete N". Así el 99% de los casos corre a máxima velocidad y la excepción se resuelve sacrificando throughput solo un instante. Moraleja: los protocolos se diseñan a medida del problema, combinando canales y garantías.</div>
+
+  <h3 id="u04-rest">REST</h3>
+  <div class="def"><b>REST (Representational State Transfer).</b> Estilo de arquitectura basado en entidades (web resources), donde cada recurso se representa con una URI, HTTP/HTTPS es el protocolo de comunicación, JSON/XML el formato de serialización, y los cambios de estado se hacen con operaciones CRUD mapeadas a verbos HTTP.</div>
+  <table>
+    <thead><tr><th>Operación</th><th>Verbo HTTP</th><th>Equivalente SQL</th></tr></thead>
+    <tbody>
+      <tr><td>Create</td><td>POST</td><td>INSERT</td></tr>
+      <tr><td>Read</td><td>GET</td><td>SELECT</td></tr>
+      <tr><td>Update</td><td>PUT</td><td>UPDATE</td></tr>
+      <tr><td>Delete</td><td>DELETE</td><td>DELETE</td></tr>
+    </tbody>
+  </table>
+  <div class="warn"><b>Idempotencia de los verbos.</b> PUT es idempotente: repetir la misma actualización N veces deja el objeto igual que hacerla una vez. GET también: 100 GETs seguidos devuelven lo mismo. POST <b>no</b> es idempotente: ejecutarlo N veces crea N entidades. Esto importa muchísimo al reintentar operaciones (retries ante timeouts): un GET o PUT se puede repetir tranquilo; un POST repetido duplica. La idempotencia vuelve como concepto central en tolerancia a fallos y mensajes duplicados.</div>
+
+  <h4 id="u04-rest-principios">Principios de arquitectura</h4>
+  <p>REST persigue alta performance, escalabilidad y confiabilidad mediante:</p>
+  <ul>
+    <li><b>Arquitectura cliente/servidor.</b></li>
+    <li><b>Cacheability:</b> las respuestas pueden cachearse para optimizar performance.</li>
+    <li><b>Statelessness:</b> el servidor no guarda estado entre requests.</li>
+    <li><b>Layered system:</b> el cliente no sabe si habla con el servidor final o con un intermediario.</li>
+    <li><b>Interfaz uniforme</b>, incluyendo <b>HATEOAS</b> (Hypermedia As The Engine Of Application State): la respuesta de un recurso incluye los links de las acciones posibles. Por ejemplo, un GET a una cuenta devuelve su número y balance junto con links a <code>/deposit</code>, <code>/withdraw</code>, <code>/transfer</code> y <code>/close</code>: la aplicación cliente descubre qué puede hacer con cada objeto a partir de la propia representación. Es un concepto poderoso pero no es estándar extendido en la industria.</li>
+  </ul>
+
+  <h4 id="u04-rest-practica">REST en la práctica: herramientas y GitLab</h4>
+  <p>Para explorar y probar APIs REST: <code>curl</code> (como un netcat para protocolos como HTTP: <code>-X</code> el verbo, <code>-H</code> los headers, <code>-d</code> el body; clave para scriptear pruebas sin interfaz gráfica), httpbin.org (servicios de ejemplo online) y Swagger (con ports como Flasgger para Flask/Python) que genera una UI de documentación y prueba dinámica de la API; una API sería suele desplegarlo en un <code>/apidocs</code>.</p>
+  <div class="ej">La API v4 de GitLab es un buen modelo mixto: entidades (<code>/projects</code>, <code>/groups</code>, <code>/users</code>, <code>/snippets</code>, <code>/runners</code>) más acciones necesarias que no son entidades (<code>/search</code>, <code>/lint</code>).
+  <pre><code># obtener proyectos (la coleccion completa, en plural)
+curl -H Accept:application/json -X GET https://gitlab.com/api/v4/projects
+
+# referencia anidada: usuarios de un proyecto
+curl -X GET https://gitlab.com/api/v4/projects/3472737/users
+
+# detalle de un usuario por id
+curl -X GET https://gitlab.com/api/v4/users/43416
+
+# crear un tag
+curl -H Content-Type:application/json -X POST /projects/3472737/repository/tags \
+     --data '{"tag_name":"stable", "ref":"master"}'
+
+# borrar un branch (responde 204 No Content)
+curl -X DELETE .../projects/3472737/repository/branches/issue-123</code></pre>
+  Sin id se obtiene la colección completa; con id, un único elemento. Las referencias anidadas suelen devolver una versión resumida de cada entidad (id, username, avatar) para acortar el chattiness: si devolvieran solo ids, el cliente tendría que pedir el detalle de cada uno. El costo es la consistencia: esa copia resumida puede quedar vieja si la información cambia rápido.</div>
+  <p>Status codes típicos de una API REST:</p>
+  <table>
+    <thead><tr><th>Código</th><th>Significado</th></tr></thead>
+    <tbody>
+      <tr><td>200 OK</td><td>GET/PUT/DELETE exitoso, el recurso vuelve como JSON</td></tr>
+      <tr><td>201 Created</td><td>POST exitoso, devuelve el recurso creado</td></tr>
+      <tr><td>204 No Content</td><td>Exitoso, sin contenido para devolver (típico de DELETE)</td></tr>
+      <tr><td>304 Not Modified</td><td>El recurso no cambió desde el último pedido (usá tu caché)</td></tr>
+      <tr><td>400 Bad Request</td><td>Falta un atributo requerido en el pedido</td></tr>
+      <tr><td>401 / 403</td><td>No autenticado / no autorizado</td></tr>
+      <tr><td>404 Not Found</td><td>No se encontró el recurso</td></tr>
+      <tr><td>409 Conflict</td><td>Ya existe un recurso en conflicto (ej: nombre duplicado)</td></tr>
+      <tr><td>422 Unprocessable</td><td>La entidad no pudo procesarse</td></tr>
+      <tr><td>500 Server Error</td><td>Falla del lado del servidor</td></tr>
+    </tbody>
+  </table>
+  <div class="idea">Regla mnemotécnica: 2xx todo bien, 3xx no cambió nada o redirección, 4xx el cliente invocó mal, 5xx el problema es del servidor.</div>
+
+  <h4 id="u04-rest-identidad">Identidad y relaciones</h4>
+  <p>Identificar unívocamente una entidad entre sistemas es prioritario, y <b>identidad no es nombre</b>: el nombre puede cambiar (bautizo de nuevo a mi perro), la identidad no. Buscar <code>/pet?name=Lassie</code> puede traer todos los Lassie que haya; <code>/pet/12345</code> es <b>el</b> lugar en toda Internet para ese perro. La URL define la identidad de la entidad, y el identificador debería llevar información de qué referencia:</p>
+  <pre><code>// Bad ID                          // Better ID
+{ "id": "12345",                   { "id": "/pet/12345",
+  "type": "/dog",                    "type": "/dog",
+  "name": "Lassie" }                 "name": "Lassie" }</code></pre>
+  <p>Lo mismo para las relaciones: siempre usar URIs para referenciar otras entidades (<code>"owner": "/users/98765"</code> en lugar de <code>"owner": "98765"</code>), relativas si la entidad es del mismo sistema. Así las referencias se pueden navegar sin hardcodear en el cliente que "owner es un user".</p>
+
+  <h3 id="u04-versionado">Versionado de APIs y de objetos</h3>
+  <div class="def"><b>Semantic Versioning (semver).</b> Estándar de versionado <code>Major.Minor.Patch</code> (ej: 1.7.1) enfocado en comunicar retrocompatibilidad de la interfaz: Major se incrementa con cambios incompatibles con la versión anterior; Minor al agregar funcionalidad manteniendo retrocompatibilidad; Patch (o build) con correcciones que no afectan la interfaz.</div>
+  <p>¿Por qué importa tanto? Porque al desplegar una versión nueva no todos los consumidores se actualizan al mismo tiempo: el browser sí, pero las apps mobile que la gente no descarga y los servidores de terceros (que requieren coordinar con otra compañía) no. Por eso se mantienen versiones viejas de la API convivendo con la nueva, hasta fijar una fecha de deprecación.</p>
+  <p>Formas de versionar una API REST:</p>
+  <ul>
+    <li><b>Versionado explícito en URL</b> (<code>/api/v4/...</code>): fácil de usar y testear, RESTful compliant (interfaz uniforme). Es el estándar de facto.</li>
+    <li><b>HTTP custom header</b> (ej: <code>-H "Version: 1"</code>): semánticamente incorrecto.</li>
+    <li><b>HTTP Accept header:</b> semánticamente correcto (indica cómo quiero obtener el recurso, reutilizando el estándar), pero difícil de testear.</li>
+  </ul>
+  <p><b>Versionado de objetos ≠ versionado de API.</b> Dos tipos:</p>
+  <ul>
+    <li><b>Format versioning:</b> distintas representaciones de la misma entidad (invocar distintas versiones de la API, o filtrar campos del resultado, como el user completo vs resumido de GitLab). Es un versionado "cosmético".</li>
+    <li><b>Historical versioning:</b> la misma entidad tiene distintas fotos a lo largo de su ciclo de vida. Ejemplo, páginas de una wiki: <code>GET /api/pages/{id}</code>, <code>/latest</code>, <code>/{rev}</code> o <code>?version={rev}</code>.</li>
+  </ul>
+  <p><b>Resumen de REST:</b> es el estándar de facto de la industria; basado en entidades y cambios de estado, es ideal para manejar recursos pero complejo para ejecución remota de lógica de negocio (ahí asoman gRPC y las interfaces orientadas a procesos). La teoría importa, pero también el pragmatismo: el equilibrio entre pureza REST y practicidad es lo que diferencia a quien despliega a producción de quien solo discute diseño. Eso sí, sin pifiar en lo básico: usar HTTP/JSON directamente, identificar entidades unívocamente con URLs (no con nombres) y manejar bien versionado y queries.</p>
+</section>

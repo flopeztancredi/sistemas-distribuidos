@@ -1,0 +1,529 @@
+<section class="unidad" id="u10" data-titulo="MapReduce, MPI, Flink y Beam">
+  <h2>U10. Distribución y coordinación de procesos: MapReduce, MPI, Flink y Beam</h2>
+  <p class="intro">Esta unidad baja a la práctica los patrones de coordinación de procesos: como dividir un problema, despachar las partes a muchos nodos y consolidar los resultados. Se estudian cuatro casos de estudio reales: MapReduce (paradigma de Google para procesar datos masivos), Open MPI (middleware clásico de HPC), Apache Flink (motor de data pipelines sobre streams) y Apache Beam (modelo portable de pipelines con runners intercambiables). Los cuatro implementan, con distintas interfaces, las mismas ideas de fork, join, difusión y consolidación.</p>
+
+  <h3 id="u10-coordinacion">Coordinación de actividades</h3>
+  <p>Descomponer un problema en pasos y volver a componerlo usando grafos es una idea vieja en sistemas distribuidos, pero volvio a ser central en la industria por el volumen de datos a procesar y las operaciones de cómputo intensivo que se pueden fragmentar. Los patrones básicos de coordinación son:</p>
+  <ul>
+    <li><b>División / despacho / difusión:</b> una tarea T se parte en subtareas T1, T2, T3 que se ejecutan en paralelo. El elemento que divide y despacha actúa como orquestador.</li>
+    <li><b>Consolidación:</b> un elemento hace la operación tipo join de las respuestas parciales (R1, R2, R3) y entrega el resultado final.</li>
+    <li><b>Replicación:</b> la misma tarea T se ejecuta N veces en nodos distintos, esperando el mismo resultado R en todos.</li>
+    <li><b>Serialización:</b> cuando muchos procesos compiten por un único recurso compartido, se encolan los pedidos y se ejecutan en serie, devolviendo cada respuesta a su emisor.</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 540 460" role="img" aria-label="Los tres esquemas de coordinacion de actividades: division/despacho/difusion, replicacion y serializacion de acceso a un recurso compartido">
+      <defs>
+        <marker id="u10-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--linea)"/>
+        </marker>
+      </defs>
+      <g fill="currentColor" font-size="13" font-weight="bold">
+        <text x="10" y="22">División / despacho / difusión</text>
+      </g>
+      <g fill="none" stroke="var(--linea)">
+        <rect x="10" y="70" width="34" height="24" rx="3"/>
+        <circle cx="108" cy="82" r="24" stroke="var(--acc)"/>
+        <circle cx="260" cy="40" r="16"/>
+        <circle cx="260" cy="82" r="16"/>
+        <circle cx="260" cy="124" r="16"/>
+        <circle cx="410" cy="82" r="24" stroke="var(--acc2)"/>
+        <rect x="474" y="70" width="34" height="24" rx="3"/>
+      </g>
+      <g stroke="var(--linea)" marker-end="url(#u10-arr)">
+        <line x1="44" y1="82" x2="82" y2="82"/>
+        <line x1="130" y1="70" x2="246" y2="45"/>
+        <line x1="132" y1="82" x2="244" y2="82"/>
+        <line x1="130" y1="94" x2="246" y2="119"/>
+        <line x1="276" y1="45" x2="388" y2="72"/>
+        <line x1="276" y1="82" x2="386" y2="82"/>
+        <line x1="276" y1="119" x2="388" y2="92"/>
+        <line x1="434" y1="82" x2="472" y2="82"/>
+      </g>
+      <g fill="currentColor" text-anchor="middle">
+        <text x="27" y="86" font-size="12">T</text>
+        <text x="491" y="86" font-size="12">R</text>
+        <text x="108" y="118" font-size="10">orquestador</text>
+        <text x="410" y="118" font-size="10">consolidación</text>
+        <text x="260" y="150" font-size="10">ejecución</text>
+        <text x="185" y="38" font-size="11">T1</text>
+        <text x="185" y="76" font-size="11">T2</text>
+        <text x="185" y="116" font-size="11">T3</text>
+        <text x="335" y="60" font-size="11">R1</text>
+        <text x="335" y="76" font-size="11">R2</text>
+        <text x="335" y="106" font-size="11">R3</text>
+      </g>
+
+      <line x1="0" y1="168" x2="540" y2="168" stroke="var(--linea)" stroke-dasharray="4 4"/>
+
+      <g fill="currentColor" font-size="13" font-weight="bold">
+        <text x="10" y="190">Replicación</text>
+      </g>
+      <g fill="none" stroke="var(--linea)">
+        <rect x="10" y="238" width="34" height="24" rx="3"/>
+        <circle cx="108" cy="250" r="24" stroke="var(--acc)"/>
+        <circle cx="260" cy="208" r="16"/>
+        <circle cx="260" cy="250" r="16"/>
+        <circle cx="260" cy="292" r="16"/>
+        <circle cx="410" cy="250" r="24" stroke="var(--acc2)"/>
+        <rect x="474" y="238" width="34" height="24" rx="3"/>
+      </g>
+      <g stroke="var(--linea)" marker-end="url(#u10-arr)">
+        <line x1="44" y1="250" x2="82" y2="250"/>
+        <line x1="130" y1="238" x2="246" y2="213"/>
+        <line x1="132" y1="250" x2="244" y2="250"/>
+        <line x1="130" y1="262" x2="246" y2="287"/>
+        <line x1="276" y1="213" x2="388" y2="240"/>
+        <line x1="276" y1="250" x2="386" y2="250"/>
+        <line x1="276" y1="287" x2="388" y2="260"/>
+        <line x1="434" y1="250" x2="472" y2="250"/>
+      </g>
+      <g fill="currentColor" text-anchor="middle">
+        <text x="27" y="254" font-size="12">T</text>
+        <text x="491" y="254" font-size="12">R</text>
+        <text x="108" y="286" font-size="10">difusión</text>
+        <text x="410" y="286" font-size="10">consolidación</text>
+        <text x="260" y="318" font-size="10">ejecución</text>
+        <text x="185" y="206" font-size="11">T</text>
+        <text x="185" y="244" font-size="11">T</text>
+        <text x="185" y="284" font-size="11">T</text>
+        <text x="335" y="228" font-size="11">R</text>
+        <text x="335" y="244" font-size="11">R</text>
+        <text x="335" y="274" font-size="11">R</text>
+      </g>
+
+      <line x1="0" y1="336" x2="540" y2="336" stroke="var(--linea)" stroke-dasharray="4 4"/>
+
+      <g fill="currentColor" font-size="13" font-weight="bold">
+        <text x="10" y="358">Serialización (acceso a un recurso compartido)</text>
+      </g>
+      <g fill="none" stroke="var(--linea)">
+        <rect x="10" y="374" width="30" height="20" rx="3"/>
+        <rect x="10" y="400" width="30" height="20" rx="3"/>
+        <rect x="10" y="426" width="30" height="20" rx="3"/>
+        <circle cx="130" cy="410" r="22" stroke="var(--acc)"/>
+        <rect x="220" y="398" width="100" height="24" rx="3"/>
+      </g>
+      <g stroke="var(--linea)" marker-end="url(#u10-arr)">
+        <line x1="40" y1="384" x2="112" y2="400"/>
+        <line x1="40" y1="410" x2="108" y2="410"/>
+        <line x1="40" y1="436" x2="112" y2="420"/>
+        <line x1="152" y1="410" x2="218" y2="410"/>
+        <line x1="320" y1="410" x2="392" y2="410"/>
+      </g>
+      <g fill="currentColor" text-anchor="middle">
+        <text x="25" y="388" font-size="11">P1</text>
+        <text x="25" y="414" font-size="11">P2</text>
+        <text x="25" y="440" font-size="11">P3</text>
+        <text x="130" y="446" font-size="10">serialización</text>
+        <text x="270" y="414" font-size="11">ejecución</text>
+        <text x="185" y="398" font-size="10">P2, P1, P3</text>
+        <text x="356" y="398" font-size="10">R2, R1, R3</text>
+      </g>
+    </svg>
+    <figcaption>Los cuatro patrones de coordinación de actividades. En división/despacho/difusión y en replicación, un orquestador reparte T entre varios ejecutores y un consolidador junta las respuestas. En serialización, los pedidos a un recurso compartido se encolan y se sirven de a uno: la salida "R2, R1, R3" remarca que el orden de las respuestas no tiene por qué coincidir con el orden de llegada de los pedidos "P1, P2, P3": la exclusión mutua está garantizada, el orden de servicio no.</figcaption>
+  </figure>
+  <div class="idea"><b>Con cuatro patrones alcanza.</b> Fork, join, replicar y serializar: con esos bloques se expresa casi cualquier esquema de procesamiento paralelo. La pregunta de diseño nunca es "que patrón existe" sino si aplicarlo ayuda en el caso concreto: a nivel performance, a nivel complejidad y a nivel de cuanto sincronismo agrega.</div>
+  <p>La diferencia entre dividir y replicar es de diseño: en la división se espera que las respuestas sean distintas (cada worker proceso una parte diferente) y la consolidación las combina. En la replicación se espera el mismo resultado, y se réplica por otros motivos:</p>
+  <ul>
+    <li><b>Redundancia ante fallos:</b> componentes que fallan de forma no determinística (bugs de concurrencia que aparecen 1 de cada 100 corridas), cadenas largas de servicios donde la caída de uno tumba todo, o hardware que falla por polvo, temperatura o vibraciones (el ejemplo clásico: un avion).</li>
+    <li><b>Latencia acotada:</b> se lanza la misma tarea a varios nodos y se toma la primera respuesta que llega, descartando el resto.</li>
+    <li><b>Verificación:</b> se esperan todas las respuestas y se consolida con un criterio (mínimo, mayoría, scoring de confiabilidad) cuando la randomicidad o los errores pueden afectar el resultado. Los nodos replicados pueden incluso correr algoritmos distintos a propósito.</li>
+    <li><b>Durabilidad:</b> replicar también aplica a storage, no solo a cómputo: se ejecuta la escritura en varios lugares para que quede registro confiable (se retoma en <a href="#u13">la unidad de data intensive applications</a>).</li>
+  </ul>
+  <div class="warn">No todo problema se puede paralelizar: existe un camino crítico de tareas interdependientes que fija una cota inferior al tiempo total (modelo Work-Span, visto en <a href="#u03">paralelización</a>), y la concurrencia sobre recursos compartidos implica sincronización y retención de procesos. Paralelizar tiene sentido cuando se pueden identificar tareas independientes o grupos de datos procesables en paralelo.</div>
+  <div class="examen">Preguntado en finales: "En que consiste el modelo de Work-Span para análisis de paralelización de tareas y camino crítico?" (2025-02, 2024-07). Aunque el modelo se desarrolla en la unidad de paralelización, la motivación de MapReduce (que problemas conviene paralelizar y cual es el límite) sale de ahí. También es recurrente pedir una barrera de sincronización entre 3 workers usando request-reply, blocking queues o MOMs (2024-12, 2024-07, 2025-07).</div>
+
+  <h3 id="u10-mapreduce">MapReduce</h3>
+  <p>MapReduce es un paradigma de parallel computing desarrollado por Google en 2004, ligeramente basado en las funciones <code>map</code> y <code>reduce</code> de LISP:</p>
+  <ul>
+    <li><code>map f [a,b,c] =&gt; [f(a), f(b), f(c)]</code> (ej: <code>map sqrt [a,b,c]</code>)</li>
+    <li><code>reduce f [a,b,c] =&gt; f(a, f(b, f(c, NULL)))</code> (ej: <code>reduce sum [1,2,3]</code>)</li>
+  </ul>
+  <p>Implementaciones conocidas: Apache Hadoop, Amazon EMR, Google MapReduce (AppEngine).</p>
+  <p>Una primera aproximación ingenua (arquitectura naive) conecta al cliente directamente con todos los map workers y estos con todos los reduce workers, sin ningún coordinador de por medio. No escala: el cliente tendría que trackear a mano el estado de cada worker (quien terminó, quien falló, a quien reasignarle trabajo), acoplando la lógica de negocio con la de coordinación del cluster. Por eso se delega esa responsabilidad a un proceso Master dedicado.</p>
+
+  <h4 id="u10-mr-caso-ideal">El caso ideal: master-worker</h4>
+  <p>El caso ideal de parallel computing se da cuando no existe dependencia entre los datos y pueden partirse en chunks del mismo tamanio, con cada proceso trabajando sobre un chunk (shard). El esquema master-worker reparte responsabilidades:</p>
+  <ul>
+    <li><b>Master:</b> parte la data en chunks, envía la ubicación de cada chunk a los workers y recibe la ubicación de los resultados.</li>
+    <li><b>Workers:</b> reciben la ubicación de su chunk, lo procesan y devuelven al master la ubicación del resultado.</li>
+  </ul>
+  <p>Notar que entre master y workers viajan <em>ubicaciones</em> de datos, no los datos: el cómputo se mueve hacia los datos, no al reves.</p>
+
+  <h4 id="u10-mr-map-reduce">Las funciones Map y Reduce</h4>
+  <div class="def"><b>Map.</b> <code>(input shard) -&gt; intermediate (key/value pairs)</code>. La data se particiona automáticamente en chunks procesados por M workers que ejecutan la función map provista por el usuario sobre cada par key-value del chunk. El usuario decide como filtrar la data; la libreria MapReduce agrupa los valores asociados a una misma key y envía la ubicación de los datos al master.</div>
+  <div class="def"><b>Reduce.</b> <code>intermediate (key/value pairs) -&gt; result files</code>. La función reduce del usuario se llama una vez por cada key única, hace merge de los valores recibidos para formar un set de datos menor y escribe el resultado final. Se distribuye particionando las keys entre R reduce workers, donde R lo específica el usuario.</div>
+
+  <h4 id="u10-mr-pasos">Los pasos de una ejecución</h4>
+  <ol>
+    <li><b>Particionar la entrada</b> en M chunks, típicamente de 64 MB (configurable).</li>
+    <li><b>Fork de procesos en el cluster:</b> 1 master (scheduler y coordinador) y muchos workers: tantos mappers como chunks y R reducers configurados por el usuario.</li>
+    <li><b>Map:</b> cada mapper lee su chunk, filtra los datos en formato key/value y ejecuta la función del usuario sobre cada par que paso el filtro, produciendo valores intermedios.</li>
+    <li><b>Archivos intermedios y particionamiento:</b> cada key/value intermedio se bufferea y se escribe periódicamente en el <em>disco local</em> del mapper, particionado en R regiones con una función de particionamiento. Al terminar su chunk, el mapper notifica al master y le envía la ubicación del archivo intermedio (IF); el master reenvia esas ubicaciones a los reducers.</li>
+    <li><b>Shuffle y sort:</b> cada reduce worker lee (vía RPC, del disco local de cada mapper) la partición que le corresponde de cada IF, ordena la data por key y agrupa todas las ocurrencias de la misma key.</li>
+    <li><b>Reduce:</b> aplica la función reduce del usuario sobre cada grupo, almacena la salida en un output file y al final se despierta al proceso de usuario indicandole la ubicación de los output files.</li>
+  </ol>
+  <div class="def"><b>Función de partición.</b> Decide cual de los R reducers procesa cada key. Default: <code>hash(key) mod R</code>. Los mappers particionan su salida por keys con esta función, y cada reducer lee de cada mapper solo la partición que le toca. Garantiza que todas las ocurrencias de una misma key terminan en el mismo reducer, sin coordinación adicional.</div>
+  <figure class="diag">
+    <svg viewBox="0 0 720 300" role="img" aria-label="Arquitectura MapReduce">
+      <g fill="none" stroke="currentColor">
+        <rect x="10" y="120" width="70" height="34" rx="4"/>
+        <rect x="120" y="120" width="70" height="34" rx="4" stroke="var(--acc)"/>
+        <rect x="230" y="30" width="76" height="30" rx="4"/>
+        <rect x="230" y="130" width="76" height="30" rx="4"/>
+        <rect x="230" y="230" width="76" height="30" rx="4"/>
+        <rect x="340" y="30" width="40" height="30" rx="4" stroke="var(--acc2)"/>
+        <rect x="340" y="130" width="40" height="30" rx="4" stroke="var(--acc2)"/>
+        <rect x="340" y="230" width="40" height="30" rx="4" stroke="var(--acc2)"/>
+        <rect x="450" y="75" width="86" height="30" rx="4"/>
+        <rect x="450" y="185" width="86" height="30" rx="4"/>
+        <rect x="580" y="75" width="80" height="30" rx="4" stroke="var(--acc)"/>
+        <rect x="580" y="185" width="80" height="30" rx="4" stroke="var(--acc)"/>
+      </g>
+      <g stroke="var(--linea)">
+        <line x1="80" y1="137" x2="120" y2="137"/>
+        <line x1="190" y1="130" x2="230" y2="50"/>
+        <line x1="190" y1="137" x2="230" y2="145"/>
+        <line x1="190" y1="144" x2="230" y2="240"/>
+        <line x1="306" y1="45" x2="340" y2="45"/>
+        <line x1="306" y1="145" x2="340" y2="145"/>
+        <line x1="306" y1="245" x2="340" y2="245"/>
+        <line x1="380" y1="45" x2="450" y2="85"/>
+        <line x1="380" y1="145" x2="450" y2="95"/>
+        <line x1="380" y1="145" x2="450" y2="195"/>
+        <line x1="380" y1="245" x2="450" y2="205"/>
+        <line x1="536" y1="90" x2="580" y2="90"/>
+        <line x1="536" y1="200" x2="580" y2="200"/>
+      </g>
+      <g fill="currentColor" font-size="12" text-anchor="middle">
+        <text x="45" y="141">Client</text>
+        <text x="155" y="141">Master</text>
+        <text x="268" y="49">Mapper 1</text>
+        <text x="268" y="149">Mapper 2</text>
+        <text x="268" y="249">Mapper M</text>
+        <text x="360" y="49">IF</text>
+        <text x="360" y="149">IF</text>
+        <text x="360" y="249">IF</text>
+        <text x="493" y="94">Reducer 1</text>
+        <text x="493" y="204">Reducer R</text>
+        <text x="620" y="94">Output 1</text>
+        <text x="620" y="204">Output R</text>
+        <text x="155" y="110" font-size="10">forks, asigna tareas</text>
+        <text x="415" y="20" font-size="10">partición hash(key) mod R</text>
+        <text x="415" y="285" font-size="10">lectura via RPC del disco local</text>
+      </g>
+    </svg>
+    <figcaption>Arquitectura MapReduce: el master forkea mappers (uno por chunk) y R reducers. Cada mapper escribe archivos intermedios (IF) particionados por key; cada reducer lee su partición de todos los IF, ordena, agrupa y escribe su output file.</figcaption>
+  </figure>
+  <div class="examen">Preguntado en finales: "Detalle la estrategia de diseño utilizada por Map-Reduce para paralelizar el procesamiento de una tarea dentro de una plataforma distribuida. Como se realiza la coordinación interna de los resultados (o salidas) de la ejecución paralela mencionada?" (2025-07-03, 2025-07-17). La respuesta esperada cubre: partición en chunks, master-worker, funciones map y reduce, archivos intermedios en disco local, función de partición <code>hash(key) mod R</code>, y el shuffle/sort por key antes del reduce.</div>
+
+  <h4 id="u10-mr-ejemplos">Ejemplos canonicos</h4>
+  <div class="ej">
+    <p><b>Word count:</b> contar ocurrencias de cada palabra en un texto. El map emite <code>(palabra, 1)</code> por cada palabra; el reduce recibe, para cada palabra, la lista de unos y emite su longitud.</p>
+<pre><code>map(key, value):        # key: nombre del documento, value: texto
+    for word in value:
+        emitIntermediate(word, 1)
+
+reduce(key, values):    # key: palabra, values: lista de 1s
+    emit(key, len(values))</code></pre>
+  </div>
+  <div class="ej">
+    <p><b>Word frequency:</b> frecuencia de cada palabra (ocurrencias sobre total de palabras). El problema es que ningun reducer conoce el total global. Se resuelve con una key especial (cadena vacia) a la que todos los mappers aportan, y una agregación global sobre esa key:</p>
+<pre><code>map(key, value):
+    for word in value:
+        emitAll("", 1)              # aporta al contador global
+        emitIntermediate(word, 1)
+
+reduce(key, values):
+    totalWords = reduceAll("", sum) # agregacion global previa
+    emit(key, count(values) / totalWords)</code></pre>
+  </div>
+  <div class="ej">
+    <p><b>Union:</b> palabras que aparecen en al menos uno de N documentos. El map emite <code>(palabra, doc)</code> una sola vez por palabra (deduplicando localmente con un diccionario); el reduce simplemente emite la key.</p>
+    <p><b>Intersect:</b> palabras presentes en todos los documentos. El map emite <code>(palabra, doc)</code>; el reduce cuenta cuantos documentos distintos aparecen en los valores y emite la palabra solo si son todos. Si la cantidad de documentos no se conoce de antemano, se obtiene con el mismo truco de la key global: cada mapper hace <code>emitAll("", key)</code> y el reduce calcula <code>amountDocuments = reduceAll("", (sort, uniq, len))</code>.</p>
+  </div>
+  <div class="ej">
+    <p><b>Join:</b> dados S1 = [shared_field, field_1] y S2 = [shared_field, field_2], obtener S3 = [shared_field, field_1, field_2]. El map emite el campo compartido como key y una tupla (origen, valor); el reduce arma la fila combinando según el origen:</p>
+<pre><code>map(key, value):        # key: "S1" o "S2", value: csv "shared_field,field_X"
+    for line in value:
+        fields = line.split(',')
+        emitIntermediate(fields[0], (key, fields[1]))
+
+reduce(key, values):    # key: campo de join, values: tuplas (origen, dato)
+    row = [key, None, None]
+    for (origen, dato) in values:
+        if origen == 'S1': row[1] = dato
+        else:              row[2] = dato
+    emit(key, ','.join(row))</code></pre>
+  </div>
+  <div class="idea"><b>Como pensar un problema en MapReduce.</b> Todo pasa por elegir bien la key intermedia: la garantía del framework es que todo lo emitido con la misma key llega junto al mismo reducer. Contar: key = elemento a contar. Join: key = campo compartido. Agregado global: key artificial única (todo converge a un reducer, o se usa emitAll/reduceAll). Estos ejercicios están en HackerRank (dominios "MapReduce Tutorials" y "Relational MapReduce Patterns").</div>
+
+  <h3 id="u10-openmpi">Open MPI</h3>
+  <p>MPI (Message Passing Interface) es una interfaz estandar, nacida en C con portings a muchos lenguajes, para escribir programas paralelos basados en transmisión y recepción de mensajes. Open MPI es su implementación dominante. Se usa como una libreria con abstracciones de uso general (no atadas a un dominio) con foco en cómputo distribuido, muy usada en HPC (High Performance Computing): el programa se escribe una vez y se ejecuta de forma transparente en 1 a N nodos, dejando que el middleware resuelva transporte, normalización de tipos de datos entre sistemas operativos y comunicación de grupos: <code>MPI_Send</code>, <code>MPI_Recv</code>, <code>MPI_Bcast</code>, <code>MPI_Scatter</code>, <code>MPI_Gather</code>, <code>MPI_Reduce</code>, etc.</p>
+
+  <h4 id="u10-mpi-modelo">Modelo de ejecución</h4>
+  <p>El comando <code>mpirun -np 4 ./main</code> lanza el binario en N procesos; el nodo desde el que se ejecuta actúa como nodo maestro y registra a los demas. Un archivo <em>hostfile</em> declara cuantos slots de procesos MPI tiene cada máquina (<code>localhost slots=1024</code>, <code>192.168.0.3 slots=4</code>, ...). El nodo maestro (desde donde corre <code>mpirun</code>) también puede alojar procesos worker propios: no es necesariamente una máquina aparte dedicada solo a coordinar, cada nodo del cluster puede correr varios procesos MPI (slots) a la vez. Dentro del programa:</p>
+  <ul>
+    <li><code>MPI_Init</code> inicializa el middleware y <code>MPI_Finalize</code> limpia buffers y cierra sockets al terminar.</li>
+    <li><code>world_size</code>: cantidad de procesos del grupo de comunicaciones.</li>
+    <li><code>world_rank</code>: posición única de este proceso en el grupo (0, 1, 2, ...). Por convención, el rank 0 actúa como nodo especial que hace las tareas de los extremos: generación o difusión de datos y consolidación final.</li>
+  </ul>
+  <div class="warn">La particularidad (y lo confuso) de MPI es que <b>el mismo código corre en todos los nodos</b>: en un mismo segmento de código conviven el rol pre-fork y el rol forkeado, y uno acompasa mentalmente el puntero de instrucciones de cada proceso. Las operaciones colectivas (<code>MPI_Bcast</code>, <code>MPI_Scatter</code>, <code>MPI_Gather</code>) se escriben con <em>la misma línea</em> en todos los procesos: el parámetro <code>root</code> decide internamente quien envía y quien recibe. Un <code>MPI_Bcast</code> ejecutado por un proceso que no es root no broadcastea nada: es la forma de <em>escuchar</em> el broadcast del root. Los buffers que solo usa el root pueden ir en NULL en el resto.</div>
+  <pre><code>MPI_Init(NULL, NULL);
+MPI_Comm_size(MPI_COMM_WORLD, &amp;world_size);
+MPI_Comm_rank(MPI_COMM_WORLD, &amp;world_rank);
+if (world_rank == 0) {
+    int data[4] = {1, 2, 3, 4};
+    for (i = 1; i &lt; world_size; ++i)
+        MPI_Send(data, 4, MPI_INT, i, 0, MPI_COMM_WORLD);
+} else {
+    int data[4];
+    MPI_Recv(data, 4, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+}
+// equivalente, sin if explicito: la misma linea en todos los procesos
+int data[4] = {1, 2, 3, 4};
+MPI_Bcast(data, 4, MPI_INT, 0, MPI_COMM_WORLD);
+MPI_Finalize();</code></pre>
+
+  <h4 id="u10-mpi-primitivas">Primitivas de grupo</h4>
+  <table>
+    <thead><tr><th>Primitiva</th><th>Que hace</th></tr></thead>
+    <tbody>
+      <tr><td><code>MPI_Send</code> / <code>MPI_Recv</code></td><td>Punto a punto: buffer, cantidad, tipo de dato, destino/origen, tag y grupo (<code>MPI_Comm</code>). Son bloqueantes y no permiten short reads ni short writes.</td></tr>
+      <tr><td><code>MPI_Bcast</code></td><td>El proceso <code>root</code> difunde un buffer a todos; al retornar, todos tienen la misma data en esa variable.</td></tr>
+      <tr><td><code>MPI_Scatter</code></td><td>El root particiona su buffer y reparte un pedazo a cada proceso (se reserva un pedazo para si mismo). Los ordenes se corresponden con los world_rank.</td></tr>
+      <tr><td><code>MPI_Gather</code></td><td>Inversa del scatter: todos envían su pedazo y el root los consolida en un buffer, ordenados por rank.</td></tr>
+      <tr><td><code>MPI_Allgather</code></td><td>Como gather, pero al final todos los procesos quedan con la colección completa ordenada.</td></tr>
+      <tr><td><code>MPI_Reduce</code></td><td>Consolida los datos de todos aplicando una operación (<code>MPI_SUM</code>, <code>MPI_MAX</code>, <code>MPI_MIN</code>, <code>MPI_PROD</code>, operaciones lógicas y binarias); el resultado queda en el root.</td></tr>
+    </tbody>
+  </table>
+  <p>Los grupos de comunicaciones (<code>MPI_Comm</code>) permiten segmentar el cluster: un grupo para despacho de operaciones, otro para sensado, etc. <code>MPI_COMM_WORLD</code> es el grupo global.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 540 660" role="img" aria-label="Estado de los datos en cada rank antes y despues de Scatter, Gather, Allgather y Reduce, con el ejemplo numerico de Reduce sumando 5, 2, 7 y 4">
+      <defs>
+        <marker id="u10-arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--linea)"/>
+        </marker>
+      </defs>
+
+      <g fill="currentColor" font-size="13" font-weight="bold"><text x="10" y="24">Scatter</text></g>
+      <g fill="none" stroke="var(--linea)">
+        <rect x="210" y="45" width="120" height="30" rx="4"/>
+        <circle cx="90" cy="115" r="18"/>
+        <circle cx="210" cy="115" r="18"/>
+        <circle cx="330" cy="115" r="18"/>
+        <circle cx="450" cy="115" r="18"/>
+      </g>
+      <g stroke="var(--linea)" marker-end="url(#u10-arr2)">
+        <line x1="235" y1="75" x2="90" y2="97"/>
+        <line x1="250" y1="75" x2="210" y2="97"/>
+        <line x1="290" y1="75" x2="330" y2="97"/>
+        <line x1="305" y1="75" x2="450" y2="97"/>
+      </g>
+      <g fill="currentColor" text-anchor="middle">
+        <text x="270" y="64" font-size="11">rank 0: A B C D</text>
+        <text x="90" y="119" font-size="12">A</text>
+        <text x="210" y="119" font-size="12">B</text>
+        <text x="330" y="119" font-size="12">C</text>
+        <text x="450" y="119" font-size="12">D</text>
+        <text x="90" y="145" font-size="10">rank 0</text>
+        <text x="210" y="145" font-size="10">rank 1</text>
+        <text x="330" y="145" font-size="10">rank 2</text>
+        <text x="450" y="145" font-size="10">rank 3</text>
+      </g>
+
+      <line x1="0" y1="160" x2="540" y2="160" stroke="var(--linea)" stroke-dasharray="4 4"/>
+
+      <g fill="currentColor" font-size="13" font-weight="bold"><text x="10" y="182">Gather (inverso del scatter)</text></g>
+      <g fill="none" stroke="var(--linea)">
+        <circle cx="90" cy="205" r="18"/>
+        <circle cx="210" cy="205" r="18"/>
+        <circle cx="330" cy="205" r="18"/>
+        <circle cx="450" cy="205" r="18"/>
+        <rect x="210" y="255" width="120" height="30" rx="4"/>
+      </g>
+      <g stroke="var(--linea)" marker-end="url(#u10-arr2)">
+        <line x1="90" y1="223" x2="235" y2="255"/>
+        <line x1="210" y1="223" x2="250" y2="255"/>
+        <line x1="330" y1="223" x2="290" y2="255"/>
+        <line x1="450" y1="223" x2="305" y2="255"/>
+      </g>
+      <g fill="currentColor" text-anchor="middle">
+        <text x="90" y="209" font-size="12">A</text>
+        <text x="210" y="209" font-size="12">B</text>
+        <text x="330" y="209" font-size="12">C</text>
+        <text x="450" y="209" font-size="12">D</text>
+        <text x="90" y="245" font-size="10">rank 0</text>
+        <text x="210" y="245" font-size="10">rank 1</text>
+        <text x="330" y="245" font-size="10">rank 2</text>
+        <text x="450" y="245" font-size="10">rank 3</text>
+        <text x="270" y="274" font-size="11">rank 0: A B C D</text>
+      </g>
+
+      <line x1="0" y1="302" x2="540" y2="302" stroke="var(--linea)" stroke-dasharray="4 4"/>
+
+      <g fill="currentColor" font-size="13" font-weight="bold"><text x="10" y="324">Allgather (todos con todos)</text></g>
+      <g fill="currentColor" font-size="10"><text x="16" y="360">antes</text><text x="16" y="435">después</text></g>
+      <g fill="none" stroke="var(--linea)">
+        <circle cx="90" cy="355" r="16"/>
+        <circle cx="210" cy="355" r="16"/>
+        <circle cx="330" cy="355" r="16"/>
+        <circle cx="90" cy="430" r="18"/>
+        <circle cx="210" cy="430" r="18"/>
+        <circle cx="330" cy="430" r="18"/>
+      </g>
+      <g stroke="var(--linea)" marker-end="url(#u10-arr2)">
+        <line x1="90" y1="371" x2="90" y2="412"/>
+        <line x1="90" y1="371" x2="210" y2="412"/>
+        <line x1="90" y1="371" x2="330" y2="412"/>
+        <line x1="210" y1="371" x2="90" y2="412"/>
+        <line x1="210" y1="371" x2="210" y2="412"/>
+        <line x1="210" y1="371" x2="330" y2="412"/>
+        <line x1="330" y1="371" x2="90" y2="412"/>
+        <line x1="330" y1="371" x2="210" y2="412"/>
+        <line x1="330" y1="371" x2="330" y2="412"/>
+      </g>
+      <g fill="currentColor" text-anchor="middle">
+        <text x="90" y="359" font-size="12">A</text>
+        <text x="210" y="359" font-size="12">B</text>
+        <text x="330" y="359" font-size="12">C</text>
+        <text x="90" y="434" font-size="9">A B C</text>
+        <text x="210" y="434" font-size="9">A B C</text>
+        <text x="330" y="434" font-size="9">A B C</text>
+      </g>
+
+      <line x1="0" y1="464" x2="540" y2="464" stroke="var(--linea)" stroke-dasharray="4 4"/>
+
+      <g fill="currentColor" font-size="13" font-weight="bold"><text x="10" y="486">Reduce (ejemplo con MPI_SUM)</text></g>
+      <g fill="none" stroke="var(--linea)">
+        <circle cx="90" cy="515" r="18"/>
+        <circle cx="210" cy="515" r="18"/>
+        <circle cx="330" cy="515" r="18"/>
+        <circle cx="450" cy="515" r="18"/>
+        <rect x="210" y="560" width="120" height="26" rx="4" stroke="var(--acc)"/>
+        <circle cx="270" cy="615" r="18" stroke="var(--acc2)"/>
+      </g>
+      <g stroke="var(--linea)" marker-end="url(#u10-arr2)">
+        <line x1="90" y1="533" x2="235" y2="560"/>
+        <line x1="210" y1="533" x2="250" y2="560"/>
+        <line x1="330" y1="533" x2="290" y2="560"/>
+        <line x1="450" y1="533" x2="305" y2="560"/>
+        <line x1="270" y1="586" x2="270" y2="597"/>
+      </g>
+      <g fill="currentColor" text-anchor="middle">
+        <text x="90" y="519" font-size="12">5</text>
+        <text x="210" y="519" font-size="12">2</text>
+        <text x="330" y="519" font-size="12">7</text>
+        <text x="450" y="519" font-size="12">4</text>
+        <text x="90" y="545" font-size="10">rank 0</text>
+        <text x="210" y="545" font-size="10">rank 1</text>
+        <text x="330" y="545" font-size="10">rank 2</text>
+        <text x="450" y="545" font-size="10">rank 3</text>
+        <text x="270" y="578" font-size="11">MPI_SUM</text>
+        <text x="270" y="620" font-size="13">18</text>
+        <text x="270" y="642" font-size="10">rank 0 (root)</text>
+      </g>
+    </svg>
+    <figcaption>Que dato tiene cada proceso antes y después de cada primitiva colectiva de MPI. En Scatter, el root reparte un elemento distinto a cada rank; Gather es la inversa: cada rank aporta su elemento y el root arma el arreglo completo. En Allgather, cada rank termina con la colección completa de todos (todos con todos). En Reduce, los valores locales de cada rank (5, 2, 7, 4) se combinan con la operación indicada (aquí <code>MPI_SUM</code>) y el resultado (18) queda únicamente en el root.</figcaption>
+  </figure>
+
+  <h4 id="u10-mpi-montecarlo">Ejemplo: estimar pi con Montecarlo</h4>
+  <div class="ej">
+    <p>El método Montecarlo estima pi de forma no determinística: se "tiran dardos" (puntos aleatorios) sobre un cuadrado de 2x2 que contiene un círculo unitario, y la proporción de puntos que caen dentro del círculo aproxima la relación de áreas, de donde se despeja pi. Tres implementaciones muestran la evolución del uso de MPI:</p>
+    <ul>
+      <li><b>Con Bcast:</b> el rank 0 genera todos los puntos aleatorios y los difunde completos a todos; cada nodo computa sus hits y los envía con Send; el rank 0 recibe con N-1 Recv y acumula. Ineficiente: todos reciben todos los datos y la consolidación es manual.</li>
+      <li><b>Con Scatter/Gather:</b> el rank 0 genera el array completo, Scatter reparte a cada nodo solo la porción que le toca, cada nodo computa sus hits y Gather los consolida en el root. Mejor uso de red y memoria: cada nodo recibe solo lo suyo.</li>
+      <li><b>Con Reduce:</b> cada nodo genera sus propios puntos aleatorios y cuenta sus hits localmente (no se trafican datos), y una única línea <code>MPI_Reduce(..., MPI_SUM, 0, ...)</code> suma los hits de todos en el rank 0, que estima pi. El código queda mucho más lineal: procesar local, compartir un dato chiquito al final.</li>
+    </ul>
+  </div>
+  <div class="warn"><b>Cuantos procesos lanzar?</b> Si la tarea es puro cómputo (sin esperas de I/O), nunca conviene lanzar más procesos que cores físicos: no pueden correr todos a la vez y el context switching agrega overhead creciente. Con muchas esperas de entrada/salida (disco, red) si conviene sobredimensionar, porque la CPU queda idle mientras los threads esperan.</div>
+
+  <h3 id="u10-flink">Apache Flink</h3>
+  <p>Flink es una plataforma open source de Apache para procesamiento distribuido de datos, orientada a datos masivos (mismos conceptos de coordinación que MPI, pero para data processing en lugar de HPC). Ofrece tres cosas: un framework Java/Scala para escribir pipelines, un motor de ejecución (un servidor al que se le suben jobs) y la posibilidad de sumar nodos de cómputo al cluster. Además de la API de DAGs (DataSet y DataStream API), SQL y Table API permiten definir tablas dinámicas (lógicas) sobre los flujos y operar con algebra relacional.</p>
+
+  <h4 id="u10-flink-dataflow">Dataflows, streams y batches</h4>
+  <div class="def"><b>Dataflow.</b> DAG de operaciones sobre un flujo de datos; dataflow es sinonimo de pipeline. Opera sobre dos formatos de datos: <b>streams</b> (flujo de información que puede no finalizar nunca) y <b>batches</b> (dataset de tamanio conocido desde el momento en que se lanza la ejecución).</div>
+  <p>Los bloques de un pipeline son tres:</p>
+  <ul>
+    <li><b>Source:</b> bloque que inyecta datos al pipeline (una cola de Kafka, un archivo, una base).</li>
+    <li><b>Transformation</b> (u operador): nodo que modifica o filtra datos. Son los nodos que más aparecen: se encadenan, se ramifican en branches paralelos y se vuelven a unir, formando el DAG.</li>
+    <li><b>Sink:</b> destino final de la información (storage, otra cola, una base).</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 700 150" role="img" aria-label="Pipeline de Flink como DAG">
+      <g fill="none" stroke="currentColor">
+        <rect x="10" y="55" width="90" height="34" rx="17" stroke="var(--acc)"/>
+        <rect x="150" y="55" width="110" height="34" rx="4"/>
+        <rect x="310" y="10" width="120" height="34" rx="4"/>
+        <rect x="310" y="100" width="120" height="34" rx="4"/>
+        <rect x="480" y="10" width="80" height="34" rx="17" stroke="var(--acc2)"/>
+        <rect x="480" y="100" width="80" height="34" rx="17" stroke="var(--acc2)"/>
+      </g>
+      <g stroke="var(--linea)">
+        <line x1="100" y1="72" x2="150" y2="72"/>
+        <line x1="260" y1="65" x2="310" y2="30"/>
+        <line x1="260" y1="79" x2="310" y2="115"/>
+        <line x1="430" y1="27" x2="480" y2="27"/>
+        <line x1="430" y1="117" x2="480" y2="117"/>
+      </g>
+      <g fill="currentColor" font-size="12" text-anchor="middle">
+        <text x="55" y="76">Source</text>
+        <text x="205" y="76">map / parse</text>
+        <text x="370" y="31">window + count words</text>
+        <text x="370" y="121">window + count chars</text>
+        <text x="520" y="31">Sink 1</text>
+        <text x="520" y="121">Sink 2</text>
+      </g>
+    </svg>
+    <figcaption>Un dataflow es un DAG: un source, transformaciones encadenadas (que pueden ramificarse en branches paralelos) y uno o más sinks. Es el mismo modelo de DAG que se usa para diseniar el TP.</figcaption>
+  </figure>
+  <p>En código (Java), un pipeline típico lee líneas de Kafka, las parsea a eventos, agrupa por key con una ventana y aplica una función de agregación, y agrega un sink para definir donde dejar los resultados:</p>
+  <pre><code>lines  = env.addSource(kafka_source)
+events = lines.map(line =&gt; parse(line))
+stats  = events.keyBy("id")
+               .timeWindow(Time.seconds(10))
+               .apply(MyWindowAggregationFunction)
+stats.addSink(sink)</code></pre>
+  <div class="examen">Preguntado en finales: "Ejemplifique el uso de Direct Acyclic Graphs (DAGs) al diseniar el procesamiento de datos de todas las ventas diarias de una cadena de tiendas..." pidiendo top 10 de productos, min-max-avg y conteos (2025-02). La respuesta es exactamente este modelo: source de ventas, branches paralelos de transformaciones (uno por resultado pedido) y sinks, dibujado como DAG.</div>
+
+  <h4 id="u10-flink-ventanas">Ventanas para streaming</h4>
+  <p>Si el stream no termina nunca, una función de agregación (suma, máximo, promedio) necesita saber donde cortar para poder entregar un resultado, sin frenar el flujo. Ese corte lo definen las ventanas:</p>
+  <ul>
+    <li><b>Por tiempo:</b> cada N segundos se corta y se agrega lo que haya entrado, sea un dato o un millon.</li>
+    <li><b>Por cantidad:</b> cada N elementos (por ejemplo <code>Count(3)</code>) se corta y se agrega, independientemente del tiempo.</li>
+  </ul>
+  <p>Elegir bien el tipo y tamanio de ventana depende del caso: el flujo es constante? cuantos datos llegan por segundo? Además, "el tiempo" puede referirse a tres cosas distintas: <b>event time</b> (el timestamp dentro del dato), <b>ingestion time</b> (cuando entro al sistema) y <b>processing time</b> (cuando lo proceso la ventana). Los eventos que llegan tarde (marcados con un timestamp anterior al cierre de la ventana) pueden descartarse hacia la ventana siguiente o esperarse, a costa de demorar el cierre de cada ventana.</p>
+  <p>Sobre un mismo stream, una ventana por tiempo puede terminar agrupando un evento o un millón, mientras que una ventana por cantidad (por ejemplo <code>Count(3)</code>) siempre agrupa la misma cantidad de eventos, aunque eso implique esperar más o menos tiempo según el flujo entrante en ese momento.</p>
+  <p>Las tres nociones de tiempo, además, se miden en etapas distintas del pipeline: el event time viaja dentro del dato desde que se genera en el productor del evento, el ingestion time se marca cuando el dato entra a la fuente de datos de Flink (el Data Source), y el processing time se marca cuando lo procesa el Window Operator. Entre la fuente y el operador de ventana puede haber una repartición (reshuffle) de los datos, porque el paralelismo de cada uno es independiente: si el Data Source tiene 2 instancias leyendo particiones de una cola y el Window Operator agrupa por key, un dato leído por una instancia de la fuente puede terminar siendo procesado por una instancia distinta del operador.</p>
+  <div class="idea"><b>Para que sirve el ventaneo.</b> Los ejemplos son infinitos: eventos de una antena de telefonia celular, clicks en una aplicación web. Eso llega por colas y no frena nunca; no se puede "congelar el planeta" para calcular una estadística. La ventana es el concepto que detiene la pelota un segundo, agrega y entrega el resultado sin cortar el flujo.</div>
+  <div class="examen">Preguntado en finales: "Utilizando una arquitectura Publisher-Subscriber, calcule el promedio de ventas de registros recibidos en modo streaming, optimice el uso de P procesos y entregue resultados en ventanas de 1M registros" (2025-07). Es una ventana por cantidad implementada a mano sobre pub-sub: la noción de ventana de esta unidad es la herramienta conceptual para plantearlo.</div>
+
+  <h4 id="u10-flink-arquitectura">Arquitectura y operación</h4>
+  <p>Un despliegue de Flink tiene un <b>Job Manager</b> (maestro coordinador, con consola web de administración) y N <b>Task Managers</b> (esclavos que ejecutan las tareas, escalables como contenedores). Para correr un trabajo se sube el jar del pipeline, se indica la clase de inicio y los parámetros, y la consola muestra el DAG del plan de ejecución. Desde ahí se monitorea: records y bytes enviados/recibidos por cada nodo del DAG, que tareas corren en que manager, el paralelismo de cada operador (cada cajita del DAG puede escalarse por separado), watermarks, checkpoints para recuperarse ante caídas, y métricas propias emitidas desde el código. Mirar que cajitas tardan más es la forma práctica de encontrar cuellos de botella.</p>
+  <p>Casos de uso según la propia documentación de Flink:</p>
+  <ul>
+    <li><b>ETL (Extract Transform Load):</b> jobs periódicos programados que leen de una base, transforman y vuelcan en otro destino definido, escribiendo código en lugar de herramientas point and click.</li>
+    <li><b>Data pipelines:</b> procesamiento recurrente disparado por la ocurrencia de eventos, con ingesta continúa, estado intermedio y consolidación hacia colas, web services o storage.</li>
+  </ul>
+  <p>En un ecosistema de Big Data típico conviven muchos Flink en un cluster procesando transacciones, logs y clicks que entran por colas y storages, y cuyos resultados salen hacia aplicaciones, colas o storage consolidado. Todo se conecta por colas: por eso la materia da tanta importancia a los MOMs. Ese cluster de cómputo lo administra un orquestador de recursos, encargado de asignarle CPU y memoria a cada instancia de Flink (Kubernetes, YARN o Mesos), y el storage consolidado de entrada y salida suele ser un sistema de archivos distribuido (HDFS, S3 o NFS), que se retoma en <a href="#u13">la unidad de data intensive applications</a>.</p>
+
+  <h3 id="u10-beam">Apache Beam</h3>
+  <p>Beam es un modelo de definición de pipelines con portabilidad de lenguajes y de motores de ejecución. A diferencia de Flink, Beam da solamente el framework: no trae runner, hay que elegir uno.</p>
+  <ul>
+    <li><b>Lenguajes:</b> Java (el original), Python, Go; los demas son portings del SDK original.</li>
+    <li><b>Runners:</b> ejecución directa (DirectRunner o standalone, útil solo para desarrollo: es lentisimo, nunca va a producción), motores de cluster (Apache Hadoop, Apache Flink, Apache Spark) y plataformas cloud (Google Dataflow, IBM Streams).</li>
+  </ul>
+  <p>Los componentes básicos son los mismos que en Flink con otros nombres:</p>
+  <table>
+    <thead><tr><th>Beam</th><th>Flink</th><th>Concepto</th></tr></thead>
+    <tbody>
+      <tr><td>Input / Output</td><td>Source / Sink</td><td>Origen y destino de los datos</td></tr>
+      <tr><td>PCollection</td><td>Stream</td><td>Colección paralelizable de elementos (la P es de Parallel)</td></tr>
+      <tr><td>Transformation</td><td>Operator / Transformation</td><td>Modificación aplicada elemento a elemento</td></tr>
+    </tbody>
+  </table>
+  <p>El código crea un <code>Pipeline</code> y encadena <code>apply()</code>: se lee un origen (obteniendo una PCollection), se aplican transformaciones (que pueden ramificarse: de una misma PCollection salen dos ramas paralelas, por ejemplo contar palabras y contar caracteres) y se escribe a un sink. El framework ya trae escritas las ventanas, los agrupamientos por key y las agregaciones; el usuario escribe solo la lógica de negocio (las funciones de cada transformación) y el encadenamiento del pipeline.</p>
+  <div class="ej"><b>El mismo pipeline, local o en la nube.</b> Un pipeline en Python que lee un CSV de días de entrenamiento, filtra el header, parsea, y en dos ramas paralelas escribe un summary de parseos y suma los días validos, corre identico con <code>--runner=DirectRunner</code> en la máquina local o con el runner de Google Cloud Dataflow cambiando solo parámetros de configuración (proyecto, bucket de storage). En la nube, Dataflow arma el grafo, provisiona instancias automáticamente, muestra métricas y logs integrados por nodo del DAG, y escala: si detecta un cuello de botella levanta más workers, y cuando dejan de llegar eventos baja solo hasta cero. Esa elasticidad es la "magia" que se paga: los runners administrables open source escasean, y las plataformas cloud cobran por toda esa infraestructura (siempre hay billing).</div>
+  <div class="warn">Estos frameworks no sirven para procesar dos líneas: tienen sentido para streams que no terminan o batches enormes (gigabytes o terabytes). Para un archivo chico, el overhead de levantar la infraestructura supera con creces el procesamiento.</div>
+  <div class="examen">Preguntado en finales: "Defina los conceptos básicos de plataformas de procesamiento de datos presentes en frameworks tales como Flink o Beam. Utilice un diagrama para mostrar un caso práctico de su uso" (2025-03). La respuesta esperada: dataflow/pipeline como DAG, source/input, transformations/operators, sink/output, PCollection, streams vs batches y ventanas, más un diagrama tipo el DAG de arriba con un caso concreto (conteo de palabras, procesamiento de ventas).</div>
+</section>

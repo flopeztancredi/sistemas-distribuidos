@@ -1,0 +1,483 @@
+<section class="unidad" id="u16" data-titulo="SOA, Cloud, PaaS, App Engine y BigTable">
+  <h2>U16. SOA, Cloud, PaaS, App Engine y BigTable</h2>
+  <p class="intro">Esta unidad recorre la evolución de las arquitecturas de aplicaciones: del monolito a SOA, de SOA a microservicios y serverless, y el ecosistema cloud que hizo posible ese salto (IaaS, PaaS, SaaS). Como caso de estudio se analiza Google App Engine como PaaS, su modelo de colas e instancias, el Datastore y su particionamiento, y BigTable como base de datos distribuida de escala masiva. Es la unidad que conecta el diseño de arquitecturas con la infraestructura real sobre la que se despliegan.</p>
+
+  <h3 id="u16-evolucion">De monolitos a servicios: la evolución de las arquitecturas</h3>
+
+  <h4 id="u16-monolito">La arquitectura monolítica y sus límites</h4>
+  <p>La arquitectura estrella de internet fue siempre la más simple: un web server con toda la lógica de negocio y una base de datos detrás. A medida que crecen los features crece ese único componente, y algo de ese tamaño parece un monolito: indivisible, se compila y despliega como un único artefacto (un WAR en Java, un wheel en Python, un conjunto de DLLs en .NET).</p>
+  <p>El monolito escala, pero con técnicas acotadas:</p>
+  <ul>
+    <li><b>Reverse proxy adelante:</b> los archivos estáticos (imágenes, JS, CSS) se sirven desde una capa anterior (un Nginx o Apache optimizado para eso), para que no lleguen requests triviales al servidor caro donde vive la lógica.</li>
+    <li><b>Réplicas del web server:</b> el proxy reparte requests entre varias copias, por round robin o por afinidad (mandar cierto tipo de request al servidor que tiene el recurso que necesita). Permite usar varias máquinas medianas en vez de un servidor gigante, lo que abarata mucho, pero el proxy queda como single point of failure: hay que monitorearlo y no recargarlo de responsabilidades.</li>
+    <li><b>Réplicas de la base:</b> un servidor maestro y réplicas esclavas (mirroring) distribuyen las consultas de lectura, con la penalidad conocida en la escritura. Si el problema es el volumen de datos, particionar la información es la otra herramienta.</li>
+  </ul>
+  <div class="warn">La escalabilidad del monolito es esencialmente <b>vertical</b>: más CPU y memoria al mismo servidor, cada vez más caro. No se puede desplegar una parte sin desplegar todo, ni asignar recursos distintos a funcionalidades distintas. Y si el proceso se cae, se cae la aplicación entera. Esas limitaciones son las que motivan todo lo que sigue.</div>
+
+  <h4 id="u16-soa">SOA: Service Oriented Architecture</h4>
+  <div class="def"><b>SOA (Service Oriented Architecture).</b> Estilo arquitectónico (auge alrededor del año 2000) que descompone las aplicaciones en servicios que representan los procesos del negocio (ventas, logística, facturación), publicados en un registro de servicios (service registry), comunicados mediante un service bus y orquestados por procesos de capa superior.</div>
+  <div class="idea">La idea central de SOA es que el código replique lo que ocurre en la compañía: todo lo que se pueda pensar como servicio es un servicio, incluso los datos (grabar un país es un servicio, leerlo es otro). Servicios simples abajo, y alguien de una capa superior los agrega para resolver procesos más complejos, incluyendo procesos B2B expuestos como APIs a partners.</div>
+  <p>Elementos característicos del ecosistema SOA:</p>
+  <ul>
+    <li><b>Web Services:</b> la implementación típica fue SOAP sobre HTTP, con mensajes XML validables por esquemas y contratos WSDL que describen qué servicios existen y cómo invocarlos. El contrato y la interfaz garantizaban interoperabilidad entre tecnologías.</li>
+    <li><b>Enterprise Service Bus (ESB):</b> message brokers para emitir y recibir eventos entre servicios sin que se conozcan directamente.</li>
+    <li><b>Service registry:</b> discovery centralizado, donde se busca dónde vive cada servicio.</li>
+    <li><b>BPM (Business Process Management):</b> disciplina (no una aplicación) que implica modelar, automatizar, controlar, medir y optimizar flujos de negocio. Aparecieron herramientas BPM donde uno arrastraba cajitas (servicios) y definía el proceso como un diagrama de estados, con la promesa de que no había que programar más. No funcionó del todo así, pero SOA quedó como concepto de metodología además de arquitectura.</li>
+  </ul>
+
+  <h4 id="u16-microservicios">Microservicios</h4>
+  <div class="def"><b>Microservicio.</b> Servicio pequeño, con coherencia y cohesión en el uso de sus datos, que encapsula su propia lógica y su propia base de datos, se despliega de forma independiente y escala horizontalmente. Los clientes externos acceden a través de un <b>gateway</b> que conoce dónde están los microservicios y orquesta las llamadas.</div>
+  <p>Frente a SOA clásico, los microservicios (auge desde ~2010) fragmentan aún más: cada servicio con su base propia elimina la base de datos única como cuello de botella, permite desplegar una pieza chica sin tocar el resto y asignar a cada servicio exactamente los recursos que necesita. La comunicación entre microservicios es cruzada (se prestan servicios entre sí), y el gateway resuelve en un único lugar el problema de coordinar transacciones que tocan varios servicios.</p>
+  <div class="idea">La ganancia clave es la <b>falla parcial</b>: si se apaga el servicio de correos, el resto del sistema sigue operando (solo no salen correos). En el monolito, si se apagaba algo, probablemente no andaba nada. Es, en el fondo, aceptar que el sistema es un sistema distribuido.</div>
+  <p>Este auge vino en paralelo con la containerización: en vez de calcular servidores por aplicación, uno levanta un cluster de nodos, tira los contenedores adentro y deja que la plataforma acomode el balanceo. La vista de microservicios es lógica, no física.</p>
+  <div class="examen">Preguntado en finales: "En el contexto de Microservicios, explique el rol de un API Gateway y cómo ayuda a desacoplar el cliente de los servicios internos" (banco de preguntas de la cátedra). La respuesta esperada: punto de entrada único que rutea requests a los servicios internos y oculta la topología (ubicación, cantidad e interfaces de los microservicios), pudiendo además agregar respuestas, transformar protocolos y centralizar autenticación.</div>
+
+  <h4 id="u16-serverless">Serverless y Function as a Service</h4>
+  <p>Si los microservicios granularizan, el límite de la granularidad es la función. AWS populariza esta idea con Lambda: desplegar directamente funciones a producción, sin saber ni decidir dónde corren. Cada función puede escalarse, dotarse de recursos y segurizarse por separado (privilegios de acceso a un storage y no a otro, exposición externa o solo interna). Las funciones se invocan típicamente de dos maneras: vía HTTP (cada función tiene una URL y responde a verbos REST) o despertándose ante eventos que aparecen en una cola.</p>
+  <div class="warn">Dos precisiones que gustan en exámenes. Primero: serverless de "sin servidor" tiene poco, el código corre en servidores reales del proveedor, solo que ocultos; cuando esa infraestructura falla, la aplicación falla. Segundo: al fragmentar en funciones se pierde la cohesión dato-servicio del microservicio (que tenía su propia base); muchas aplicaciones serverless terminaron con un gran storage compartido, y mantener coherencia y persistencia se vuelve difícil.</div>
+  <div class="examen">Preguntado en finales: "Qué caracteriza a una arquitectura Serverless (o Function as a Service)? Mencione una ventaja principal y una limitación de este enfoque" (banco de preguntas de la cátedra). Ventaja típica: granularidad extrema con escalamiento y facturación por invocación, sin administrar infraestructura. Limitación típica: pérdida de cohesión sobre los datos y dificultad para mantener coherencia y estado entre funciones.</div>
+
+  <figure class="diag">
+    <svg viewBox="0 0 720 150" role="img" aria-label="Evolución de arquitecturas">
+      <g fill="none" stroke="currentColor">
+        <rect x="10" y="40" width="130" height="70" rx="6"/>
+        <rect x="200" y="40" width="130" height="70" rx="6"/>
+        <rect x="390" y="40" width="130" height="70" rx="6"/>
+        <rect x="580" y="40" width="130" height="70" rx="6"/>
+      </g>
+      <g stroke="var(--acc)" fill="var(--acc)">
+        <line x1="140" y1="75" x2="196" y2="75"/>
+        <polygon points="196,75 188,71 188,79"/>
+        <line x1="330" y1="75" x2="386" y2="75"/>
+        <polygon points="386,75 378,71 378,79"/>
+        <line x1="520" y1="75" x2="576" y2="75"/>
+        <polygon points="576,75 568,71 568,79"/>
+      </g>
+      <g fill="currentColor" font-size="13" text-anchor="middle">
+        <text x="75" y="70">Monolito</text>
+        <text x="75" y="90" font-size="10">escala vertical</text>
+        <text x="265" y="70">SOA</text>
+        <text x="265" y="90" font-size="10">bus + registry</text>
+        <text x="455" y="70">Microservicios</text>
+        <text x="455" y="90" font-size="10">gateway, DB propia</text>
+        <text x="645" y="70">Serverless</text>
+        <text x="645" y="90" font-size="10">funciones (FaaS)</text>
+        <text x="360" y="135" font-size="11" fill="var(--acc2)">granularidad y escalabilidad horizontal crecientes</text>
+      </g>
+    </svg>
+    <figcaption>Evolución de arquitecturas orientadas a servicios: cada paso aumenta la granularidad y pasa de escalar verticalmente a escalar horizontalmente.</figcaption>
+  </figure>
+
+  <h3 id="u16-cloud">Cloud computing</h3>
+  <div class="def"><b>Cloud.</b> Metáfora para internet y todo lo que ofrece: "todo lo que se pueda consumir más allá del firewall". Es una forma de ofrecer recursos de IT (cómputo, memoria, storage, redes, plataformas y servicios), no necesariamente una tecnología nueva: es virtualización a gran escala operada por compañías que ofrecen esos ecosistemas.</div>
+  <p>Principales beneficios de moverse a la nube:</p>
+  <ul>
+    <li><b>Accesibilidad:</b> access anywhere, con presencia global y buena latencia desde cualquier país.</li>
+    <li><b>Time-to-market:</b> disponibilidad instantánea de recursos. Definir hoy una aplicación y lanzarla maniana con dos clics, sin comprar, instalar ni segurizar hardware.</li>
+    <li><b>Escalabilidad:</b> capacidad virtualmente ilimitada de storage, cómputo, ancho de banda y memoria. Antes había que estimar la carga de antemano y comprar hardware fijo para esa estimación.</li>
+    <li><b>Costos:</b> pago a demanda (pay as you go) y control del gasto según uso, frente al costo fijo de un datacenter propio.</li>
+  </ul>
+
+  <h4 id="u16-publica-privada">Cloud pública vs privada</h4>
+  <table>
+    <thead><tr><th></th><th>Cloud pública</th><th>Cloud privada</th></tr></thead>
+    <tbody>
+      <tr><td>Servidores</td><td>Compartidos con otros usuarios</td><td>Datacenter propio, recursos dedicados</td></tr>
+      <tr><td>Garantías</td><td>Disponibilidad garantizada por SLAs</td><td>Control total de los recursos</td></tr>
+      <tr><td>Costos</td><td>Variables, pay as you go</td><td>Fijos, de mantenimiento y expansión</td></tr>
+      <tr><td>Acceso</td><td>Por internet</td><td>Por intranet</td></tr>
+    </tbody>
+  </table>
+  <div class="ej">La nube pública nace de capacidad ociosa: Amazon compraba servidores para soportar los picos de Navidad y Black Friday, y el resto del año los alquilaba; Google hizo lo propio con su storage y su capacidad de cómputo distribuido. La contracara: en un pico de demanda, el proveedor prioriza sus propios servidores frente a los de sus clientes (salvo que se paguen recursos dedicados), y estadísticamente eso ya pasó. Por eso bancos y empresas reguladas, o empresas cuyo consumo es tan constante (CPU 24 horas al día) que el costo variable supera al fijo, mantienen datacenters propios.</div>
+
+  <h4 id="u16-adopcion">Adopción y resistencia al cambio</h4>
+  <ul>
+    <li><b>Factores políticos:</b> licenciamiento, jurisdicción y pérdida de gobernabilidad sobre los datos. Los esquemas de replicación del proveedor pueden mover datos entre países para no perderlos, aunque uno haya elegido una región: los logs pueden estar yendo a Europa y volviendo. También se pierde influencia sobre las decisiones de hardware y versiones: si la plataforma solo soporta Python 3.7, no se puede usar 3.9 hasta que el proveedor lo decida.</li>
+    <li><b>Factores técnicos:</b> costo en dinero y tiempo de las migraciones desde sistemas on premise, alta exposición de datos sensibles (todo endpoint público es atacado apenas se abre, de ahí la proliferación de VPNs), y adaptación de los sistemas a los nuevos modelos de arquitectura cloud.</li>
+  </ul>
+
+  <h3 id="u16-modelos-servicio">Todo como servicio: IaaS, PaaS y SaaS</h3>
+  <div class="def"><b>Niveles de abstracción cloud.</b> La "S" final es siempre "as a Service": la diferencia entre IaaS, PaaS y SaaS es cuánto del stack administra el proveedor y cuánto el cliente.</div>
+  <ul>
+    <li><b>IaaS (Infrastructure as a Service):</b> almacenamiento, redes y virtualización de equipos. El cliente define redes, elige capacidad frente a la carga y administra desde el sistema operativo hacia arriba. Ejemplos: Amazon EC2 (Elastic Computing), Compute Engine.</li>
+    <li><b>CaaS (Containers as a Service):</b> el proveedor además administra el sistema operativo; el cliente entrega contenedores en vez de encargarse de la máquina completa. Ejemplo: Cloud Run.</li>
+    <li><b>PaaS (Platform as a Service):</b> frameworks y plataformas para desarrollar aplicaciones cloud ready; los recursos se exponen como servicios para el desarrollo y el ciclo de vida de la aplicación (logs, monitoring, despliegue). El cliente solo escribe la aplicación: el SO, el storage y la seguridad vienen dados y a lo sumo se configuran. Ejemplos: App Engine, Heroku, Windows Azure original.</li>
+    <li><b>FaaS (Function as a Service):</b> un peldaño más cerca del SaaS que el PaaS: el proveedor se hace cargo también del escalamiento, y el cliente entrega funciones sueltas en vez de una aplicación completa. Ejemplos: Cloud Functions, AWS Lambda (desarrollado en detalle en <a href="#u16-serverless">serverless</a>).</li>
+    <li><b>SaaS (Software as a Service):</b> software a demanda, alquiler de servicios ya programados y desplegados. El cliente no escribe ni una línea de código del sistema, solo configura y consume; se cobra por usuario o por request. Ejemplos: Gmail y Google Workspace, Salesforce.</li>
+  </ul>
+  <table>
+    <thead><tr><th>Capa</th><th>On premise</th><th>IaaS</th><th>CaaS</th><th>PaaS</th><th>FaaS</th><th>SaaS</th></tr></thead>
+    <tbody>
+      <tr><td>Datos y configuración</td><td>Cliente</td><td>Cliente</td><td>Cliente</td><td>Cliente</td><td>Cliente</td><td>Cliente</td></tr>
+      <tr><td>Código de aplicación</td><td>Cliente</td><td>Cliente</td><td>Cliente</td><td>Cliente</td><td>Cliente</td><td>Proveedor</td></tr>
+      <tr><td>Escalamiento</td><td>Cliente</td><td>Cliente</td><td>Cliente</td><td>Cliente</td><td>Proveedor</td><td>Proveedor</td></tr>
+      <tr><td>Runtime</td><td>Cliente</td><td>Cliente</td><td>Cliente</td><td>Proveedor</td><td>Proveedor</td><td>Proveedor</td></tr>
+      <tr><td>Sistema operativo</td><td>Cliente</td><td>Cliente</td><td>Proveedor</td><td>Proveedor</td><td>Proveedor</td><td>Proveedor</td></tr>
+      <tr><td>Virtualización</td><td>Cliente</td><td>Proveedor</td><td>Proveedor</td><td>Proveedor</td><td>Proveedor</td><td>Proveedor</td></tr>
+      <tr><td>Hardware</td><td>Cliente</td><td>Proveedor</td><td>Proveedor</td><td>Proveedor</td><td>Proveedor</td><td>Proveedor</td></tr>
+    </tbody>
+  </table>
+  <div class="idea">La matriz se lee de abajo hacia arriba: cada modelo le cede al proveedor una capa más que el anterior, y el cliente siempre conserva sus datos y su configuración, nunca se tercerizan. Los dos modelos intermedios que suelen faltar en la comparación clásica de tres niveles son CaaS (el proveedor ya pone el sistema operativo) y FaaS (donde además el escalamiento deja de ser problema del cliente): son el punto exacto donde Cloud Run y Cloud Functions se ubican entre IaaS/PaaS y PaaS/SaaS respectivamente. Regla para ubicar cualquier producto en el espectro: cuanto más cerca de IaaS, más hay que invertir en operar (nada está automanejado); cuanto más cerca de SaaS, menor costo de operación pero mayor costo por el valor agregado (la licencia mensual, el dólar por request a la API de visión, contra fracciones de centavo por minuto de cómputo crudo). En el ecosistema de Google el espectro va de Compute Engine y Kubernetes Engine (IaaS, nodos visibles), pasando por Cloud Run (CaaS), Cloud Functions (FaaS) y App Engine (PaaS, la aplicación entera), hasta las APIs SaaS como Visión o Translation. Del lado de datos: BigQuery (warehouse sin administrar nodos), Dataflow (pipelines tipo Flink/Beam con máquinas que se crean y apagan solas), Pub/Sub (colas administradas). El mapa completo de la cátedra ordena estos productos en dos ejes: el de automanejo recién descrito, y uno perpendicular de <b>público objetivo</b> (desarrollo, infraestructura, analítica de datos o negocio). Sirve de recordatorio de que elegir un servicio cloud no es solo elegir un nivel de abstracción: también es elegir qué equipo lo va a operar.</div>
+  <div class="examen">Preguntado en finales: "Compare los modelos de servicio en la nube IaaS, PaaS y SaaS. Indique qué nivel de gestión es responsabilidad del proveedor y cuál del cliente en cada uno" (banco de preguntas de la cátedra). La tabla de arriba es la respuesta completa (incluye además CaaS y FaaS, que a veces se piden por separado); conviene cerrar con un ejemplo de cada modelo.</div>
+
+  <h3 id="u16-paas">Platform as a Service en detalle</h3>
+  <p>Un PaaS es un entorno de desarrollo con la infraestructura incluida: se sube el paquete con un script o un botón y la plataforma se ocupa del resto. Sus cinco componentes típicos:</p>
+  <table>
+    <thead><tr><th>Componente</th><th>Qué incluye</th></tr></thead>
+    <tbody>
+      <tr><td>Infraestructura</td><td>Servidores y red virtualizados, entornos de despliegue, todo lo de IaaS por debajo</td></tr>
+      <tr><td>Plataforma de desarrollo</td><td>Runtime de programación, sistema operativo definido y parcheado, librerías y middlewares para consumir la nube</td></tr>
+      <tr><td>Persistencia</td><td>Bases de datos (opciones cerradas: son estas y no otras), archivos blob para binarios grandes, colas de mensajes para eventos, todo accesible por API/SDK</td></tr>
+      <tr><td>Monitoreo</td><td>Logs de actividad, control de acceso, dashboards de recursos, alertas y acciones frente a caídas</td></tr>
+      <tr><td>Escalabilidad</td><td>Balanceo de carga, creación y destrucción automática de nodos (elasticidad)</td></tr>
+    </tbody>
+  </table>
+  <p>App Engine fue la respuesta de Google al modelo de Amazon: mientras Amazon alquilaba nodos crudos ("pone ahí lo que quieras"), Google proponía una forma de trabajar (app servers, frontends configurados, storage único bien definido, cache obligatoria porque el storage cuesta y la cache es gratis, servicios SaaS accesibles por API). Ese modelo perdió comercialmente en su momento frente al IaaS de Amazon, pero la idea resurgió: hoy casi todas las nubes venden PaaS y el mundo serverless es exactamente ese concepto, "quiero escribir mi código y nada más".</p>
+
+  <h3 id="u16-appengine">Caso de estudio: Google App Engine</h3>
+
+  <h4 id="u16-appengine-objetivos">Objetivos de diseño: buenas prácticas forzadas</h4>
+  <p>App Engine fuerza las buenas prácticas de las aplicaciones altamente escalables, no las sugiere:</p>
+  <ul>
+    <li>Sistemas granulares con <b>escalamiento horizontal</b> como única opción.</li>
+    <li><b>Requests breves</b>: cada request tiene un límite de tiempo; si no se cumple, la plataforma termina la instancia y reintenta. Lo largo se encola.</li>
+    <li>Independencia del sistema operativo y del hardware: concentrarse solo en programar.</li>
+    <li>Servicios de aplicación integrados: cache (Memcached), colas de mensajes, elasticidad, versionado, logs, debugging, monitoreo y modelos no relacionales con Datastore/BigTable.</li>
+  </ul>
+  <div class="idea">Si cualquier instancia puede ser detenida en cualquier momento, cuánto cuidado conviene poner en almacenar cosas en memoria? Ninguno: mejor no guardar nada. El límite de tiempo por request empuja naturalmente al diseño stateless, y las colas pasan a ser el lugar donde queda la información pendiente, con reintentos incluidos.</div>
+
+  <h4 id="u16-appengine-arquitectura">Arquitectura interna</h4>
+  <figure class="diag">
+    <svg viewBox="0 0 720 170" role="img" aria-label="Arquitectura interna de App Engine">
+      <g fill="none" stroke="currentColor">
+        <rect x="10" y="60" width="80" height="46" rx="6"/>
+        <rect x="120" y="60" width="90" height="46" rx="6"/>
+        <rect x="240" y="60" width="90" height="46" rx="6"/>
+        <rect x="360" y="60" width="100" height="46" rx="6"/>
+        <rect x="500" y="12" width="120" height="40" rx="6"/>
+        <rect x="500" y="72" width="200" height="86" rx="6" stroke-dasharray="5 4"/>
+        <rect x="512" y="86" width="80" height="28" rx="4"/>
+        <rect x="606" y="86" width="80" height="28" rx="4"/>
+        <rect x="512" y="122" width="80" height="28" rx="4"/>
+        <rect x="606" y="122" width="80" height="28" rx="4"/>
+      </g>
+      <g stroke="var(--acc)" fill="var(--acc)">
+        <line x1="90" y1="83" x2="116" y2="83"/><polygon points="116,83 108,79 108,87"/>
+        <line x1="210" y1="83" x2="236" y2="83"/><polygon points="236,83 228,79 228,87"/>
+        <line x1="330" y1="83" x2="356" y2="83"/><polygon points="356,83 348,79 348,87"/>
+        <line x1="460" y1="72" x2="496" y2="40"/><polygon points="496,40 487,42 492,49"/>
+        <line x1="460" y1="95" x2="496" y2="110"/><polygon points="496,110 489,104 486,112"/>
+      </g>
+      <g fill="currentColor" font-size="12" text-anchor="middle">
+        <text x="50" y="86">Request</text>
+        <text x="165" y="80">Edge Cache</text>
+        <text x="165" y="96" font-size="10">(CDN)</text>
+        <text x="285" y="80">Google</text>
+        <text x="285" y="96" font-size="10">Front End</text>
+        <text x="410" y="80">AppEngine FE</text>
+        <text x="410" y="96" font-size="10">load balancing</text>
+        <text x="560" y="37">Static Servers</text>
+        <text x="600" y="66" font-size="10" fill="var(--acc2)">App Servers (auto scalable)</text>
+        <text x="552" y="104" font-size="10">Instance</text>
+        <text x="646" y="104" font-size="10">Instance</text>
+        <text x="552" y="140" font-size="10">Instance</text>
+        <text x="646" y="140" font-size="10">Instance</text>
+      </g>
+    </svg>
+    <figcaption>Camino de un request en App Engine: edge cache (CDN), Google Front End (validaciones de primer nivel), AppEngine Front End (balanceo) y de ahí a static servers o a instancias de aplicación autoescalables.</figcaption>
+  </figure>
+  <div class="ej">La primera vez que alguien en Argentina pide un recurso estático, el request viaja hasta la aplicación y el recurso vuelve; pero si la respuesta trae headers cacheables, queda en los datacenters más próximos al origen del request y los pedidos siguientes no vuelven a viajar (al menos por unas horas). Ese edge cache es el mismo concepto de CDN visto para contenido estático.</div>
+  <p>El diagrama oficial de Google agrega dos elementos que no se ven desde afuera del pedido. Uno es el <b>App Master</b>: el componente de control que gobierna los front ends y los app servers, despliega versiones, decide cuántas instancias hay y las da de baja, el equivalente al plano de control de un orquestador. El otro es el conjunto de <b>servicios de plataforma</b> que las instancias consumen por API, la forma concreta de los "servicios de aplicación integrados": Datastore y Memcache para datos, Task Queue para trabajo diferido, y APIs como Images (procesamiento de imágenes), Users (autenticación con cuentas de Google) y URLfetch. URLfetch es la única forma de hacer requests HTTP salientes desde una instancia, porque no tiene acceso libre a la red: hasta salir a internet pasa por una API de la plataforma, el precio típico de un PaaS.</p>
+
+  <h4 id="u16-appengine-servicios">Aplicaciones, servicios, versiones e instancias</h4>
+  <p>La jerarquía de despliegue es: <b>Application</b> (proyecto) contiene <b>Services</b> (módulos que agrupan operaciones afines), cada servicio puede tener varias <b>versiones</b> desplegadas, y cada versión corre en una o más <b>instancias</b> (los App Servers o backend servers, la unidad de procesamiento). Los servicios comparten recursos agrupados por namespace: Memcached, Datastore y task queues.</p>
+  <table>
+    <thead><tr><th></th><th>Instancias dinámicas</th><th>Instancias residentes</th></tr></thead>
+    <tbody>
+      <tr><td>Creación</td><td>Las crean los requests; si no hay tráfico, cero instancias</td><td>Manual, por configuración; hay un límite hacia abajo</td></tr>
+      <tr><td>Carga típica</td><td>Requests pequeños, respuesta rápida, stateless forzado</td><td>Requests largos, batch, con o sin estado</td></tr>
+      <tr><td>Entrada</td><td>Requests externos (GET) e internos (colas push)</td><td>Consumo de colas pull; capacidad de cómputo a elección</td></tr>
+      <tr><td>Por qué existen</td><td>Pagar solo lo que se usa</td><td>Evitar la latencia de arranque: están warm, precalentadas para atender</td></tr>
+    </tbody>
+  </table>
+
+  <h4 id="u16-colas">Colas push, colas pull y leasing de mensajes</h4>
+  <p>La comunicación interna combina frontends efímeros, backends residentes, CRON y dos tipos de colas:</p>
+  <ul>
+    <li><b>Push queue:</b> la cola es un elemento activo: envía los requests a instancias activas, y si no hay instancias del otro lado (o hay pocas), las crea; puede además hacer el balanceo de carga. El mensaje se define por nombre, URL y headers: la URL indica instancia, servicio y versión que deben atenderlo, y el payload va en los argumentos y headers. Es el mecanismo que hoy reaparece en las lambdas activadas por eventos.</li>
+    <li><b>Pull queue:</b> el enfoque clásico: tareas encoladas (nombre, payload, etiqueta) que consumidores residentes retiran de forma controlada, con afinidad por etiqueta (tag). Es reemplazable por colas Pub/Sub.</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 780 260" role="img" aria-label="Circuito de comunicación interna de App Engine">
+      <g fill="none" stroke="currentColor">
+        <rect x="80" y="25" width="90" height="40" rx="6"/>
+        <rect x="80" y="190" width="90" height="40" rx="6"/>
+        <rect x="250" y="25" width="110" height="36" rx="6"/>
+        <rect x="440" y="10" width="130" height="46" rx="6"/>
+        <rect x="470" y="190" width="110" height="46" rx="6"/>
+        <rect x="250" y="110" width="210" height="130" rx="6" stroke-dasharray="5 4"/>
+        <rect x="270" y="140" width="170" height="26" rx="4"/>
+        <rect x="270" y="196" width="170" height="26" rx="4"/>
+        <rect x="590" y="10" width="170" height="190" rx="6" stroke-dasharray="5 4"/>
+        <rect x="615" y="55" width="120" height="50" rx="6"/>
+        <rect x="615" y="125" width="120" height="44" rx="6"/>
+      </g>
+      <g stroke="var(--acc)" fill="var(--acc)">
+        <line x1="10" y1="45" x2="70" y2="45"/><polygon points="70,45 62,41 62,49"/>
+        <line x1="170" y1="45" x2="246" y2="43"/><polygon points="246,43 238,40 238,48"/>
+        <path d="M150,190 L280,61" fill="none"/><polygon points="280,61 273,66 279,72"/>
+        <path d="M505,56 L390,108" fill="none"/><polygon points="390,108 396,101 400,109"/>
+      </g>
+      <g stroke="var(--acc2)" fill="var(--acc2)" stroke-dasharray="4 3">
+        <path d="M360,40 L436,35" fill="none"/><polygon points="436,35 428,33 429,41" stroke-dasharray="0"/>
+        <path d="M400,240 L466,214" fill="none"/><polygon points="466,214 458,215 460,223" stroke-dasharray="0"/>
+      </g>
+      <g fill="currentColor" font-size="11" text-anchor="middle">
+        <text x="40" y="40">Request</text>
+        <text x="125" y="49">Front</text>
+        <text x="125" y="61" font-size="9">(dinámicas)</text>
+        <text x="125" y="214">CRON</text>
+        <text x="305" y="47">Push Queue</text>
+        <text x="505" y="30">Back</text>
+        <text x="505" y="44" font-size="9">(residentes)</text>
+        <text x="525" y="210">Back</text>
+        <text x="525" y="224" font-size="9">(residentes)</text>
+        <text x="355" y="126" font-size="10">Pull Queue 1..N</text>
+        <text x="355" y="157">Pull Queue 1</text>
+        <text x="355" y="182" font-size="12">...</text>
+        <text x="355" y="213">Pull Queue N</text>
+        <text x="675" y="24" font-size="10">compartidos</text>
+        <text x="675" y="105">Datastore</text>
+        <text x="675" y="151">Memcached</text>
+      </g>
+      <g fill="var(--acc2)" font-size="9" text-anchor="middle">
+        <text x="675" y="36">(agrupados por namespace)</text>
+        <text x="400" y="80">la cola empuja y crea</text>
+        <text x="400" y="91">instancias si no hay</text>
+        <text x="420" y="256">lease por tag</text>
+      </g>
+    </svg>
+    <figcaption>Circuito de comunicación interna de App Engine: el request entra a un frontend dinámico, que publica en la push queue junto con CRON; la push queue empuja (y crea) instancias back. Los backends encolan en pull queues, de las que otros backends residentes hacen lease por tag. Datastore y Memcached quedan afuera del circuito, compartidos y agrupados por namespace.</figcaption>
+  </figure>
+  <div class="def"><b>Leasing de mensajes.</b> En las colas pull los mensajes se prestan, no se borran: el consumidor hace lease de N mensajes (por tag), estos desaparecen de la vista pero siguen en la cola hasta que el consumidor confirma el procesamiento. Si el proceso muere o tarda más que el timeout del lease, el mensaje reaparece en la cola.</div>
+  <div class="idea">El leasing es exactamente el ACK de RabbitMQ, pero expuesto con el nombre del concepto: es lo mismo que se vive en el TP cuando un worker muere sin confirmar y el mensaje vuelve a la cola.</div>
+
+  <h4 id="u16-datastore">Datastore y particionamiento del almacenamiento</h4>
+  <div class="def"><b>Datastore.</b> Base no-SQL administrada por Google en modalidad PaaS. Modelo de objetos con atributos (<b>Entities</b>, de hasta 1 MB) agrupados en tipos sin esquema con atributos indexables (<b>Kinds</b>). Está construida sobre BigTable, que a su vez se apoya en un file system distribuido de Google (Colossus). Soporta consultas por clave o por atributos indexados, millones de escrituras por segundo (no es buena para consultas complejas) y operaciones ACID incluso entre entidades.</div>
+  <p>La clave del diseño es <b>cómo se particiona</b>. Si se declara una entidad raíz (aggregation root) y todos sus hijos se agrupan bajo ella (entity group), el framework almacena el árbol completo con proximidad física: una transacción dentro del grupo (<code>begin ... commit</code>) aplica sobre un único lugar real y resuelve con poco delay. Una transacción <b>cross-group</b>, en cambio, obliga a que dos nodos distintos se coordinen, y eso es costoso.</p>
+  <div class="ej">Guardando evaluaciones de empleados con el país como raíz: todo el árbol de un país queda junto y una transacción sobre empleados de Argentina es barata. Pero una operación transaccional que toque Argentina y Colombia es cross-group: dos servidores deben hablarse para coordinarla. El tradeoff inverso también existe: si se particiona por el ID de cada evaluación (la hoja), las evaluaciones quedan repartidas en todos los nodos y una consulta puede buscarlas en paralelo en todos; si todo cuelga de una raíz enorme, hay poco paralelismo. Saber particionar es lo que permite garantizar operaciones atómicas baratas, y el concepto se repite en muchos otros storages distribuidos.</div>
+  <p>El mecanismo detrás de ese reparto es la clave de la entidad, que en Datastore no es un identificador plano sino un <b>path</b>: el camino de ancestros desde la raíz hasta la entidad (por ejemplo <code>Arg/Emp2/Eval2011</code>). Como la función de partición usa ese path completo y no un id suelto, todo el árbol de un entity group queda mapeado al mismo nodo físico sin importar cuántos niveles tenga: es el path el que garantiza la proximidad, y por eso una transacción dentro del grupo se resuelve en un solo nodo mientras que una cross group obliga a coordinar dos.</p>
+  <figure class="diag">
+    <svg viewBox="0 -20 760 280" role="img" aria-label="Path de entidades y mapeo de entity groups a nodos en Datastore">
+      <g fill="none" stroke="currentColor">
+        <rect x="15" y="35" width="60" height="28" rx="5"/>
+        <rect x="140" y="4" width="70" height="26" rx="5"/>
+        <rect x="140" y="60" width="70" height="26" rx="5"/>
+        <rect x="250" y="60" width="95" height="26" rx="5"/>
+        <rect x="15" y="150" width="60" height="28" rx="5"/>
+        <rect x="140" y="150" width="70" height="26" rx="5"/>
+        <rect x="250" y="122" width="95" height="26" rx="5"/>
+        <rect x="250" y="178" width="95" height="26" rx="5"/>
+        <rect x="420" y="8" width="230" height="222" rx="6" stroke-dasharray="5 4"/>
+        <rect x="450" y="40" width="170" height="52" rx="6"/>
+        <rect x="450" y="108" width="170" height="52" rx="6"/>
+        <rect x="450" y="176" width="170" height="52" rx="6"/>
+      </g>
+      <g stroke="currentColor" fill="none">
+        <path d="M75,47 L140,17"/>
+        <path d="M75,55 L140,73"/>
+        <path d="M210,73 L250,73"/>
+        <path d="M75,164 L140,163"/>
+        <path d="M210,157 L250,135"/>
+        <path d="M210,169 L250,191"/>
+      </g>
+      <g stroke="var(--acc)" fill="var(--acc)">
+        <path d="M345,73 L450,66" fill="none"/><polygon points="450,66 442,63 442,71"/>
+        <path d="M345,178 L450,202" fill="none"/><polygon points="450,202 445,195 439,201"/>
+      </g>
+      <g stroke="var(--acc2)" fill="var(--acc2)" stroke-dasharray="4 3">
+        <path d="M295,60 C 260,-15 80,-15 45,35" fill="none"/>
+        <polygon points="45,35 53,32 49,41" stroke-dasharray="0"/>
+        <path d="M620,66 C 700,66 700,202 620,202" fill="none"/>
+        <polygon points="620,66 628,63 626,72" stroke-dasharray="0"/>
+        <polygon points="620,202 628,205 626,196" stroke-dasharray="0"/>
+        <path d="M700,52 Q 660,52 622,64" fill="none"/>
+        <polygon points="622,64 630,59 626,67" stroke-dasharray="0"/>
+      </g>
+      <g fill="currentColor" font-size="11" text-anchor="middle">
+        <text x="45" y="53">Arg.</text>
+        <text x="175" y="21">Emp1</text>
+        <text x="175" y="77">Emp2</text>
+        <text x="297" y="77">Eval. 2011</text>
+        <text x="45" y="168">Col.</text>
+        <text x="175" y="167">Emp3</text>
+        <text x="297" y="139">Eval. 2011</text>
+        <text x="297" y="195">Eval. 2012</text>
+        <text x="535" y="24">Datastore</text>
+        <text x="535" y="70">Node 1</text>
+        <text x="535" y="138">Node 2</text>
+        <text x="535" y="206">Node 3</text>
+      </g>
+      <g fill="var(--acc2)" font-size="9" text-anchor="middle">
+        <text x="170" y="0">Path (clave = camino de ancestros)</text>
+        <text x="705" y="42">Single entity group</text>
+        <text x="705" y="53">trx (barata)</text>
+        <text x="708" y="130">Cross group trx</text>
+        <text x="708" y="141">(coordinación</text>
+        <text x="708" y="152">entre nodos)</text>
+      </g>
+    </svg>
+    <figcaption>Path y mapeo a nodos en Datastore: la clave de cada entidad es el camino de ancestros desde la raíz (Path), así que todo el árbol de un entity group cae en el mismo nodo. Una transacción dentro del grupo (Node 1) es barata; una cross group entre Node 1 y Node 3 requiere coordinar dos nodos.</figcaption>
+  </figure>
+
+  <h3 id="u16-bigtable">BigTable</h3>
+  <p>BigTable es a la vez un producto (se consume y se paga a Google) y un concepto: el paper público explica cómo implementarlo, y de ahí derivan bases distribuidas de código abierto que reutilizan sus ideas junto con las de Google File System y Hadoop.</p>
+
+  <h4 id="u16-bigtable-modelo">Modelo de datos: claves, columnas y column families</h4>
+  <ul>
+    <li>Solo almacena pares clave-datos; la clave define la función de partición.</li>
+    <li>Los datos de una fila son en realidad un conjunto de valores (columnas). Como los conjuntos son dispersos (sparse, con muchos null), los valores no se guardan en un orden fijo: cada valor conoce su <b>column family</b>.</li>
+    <li>Ventajas del modelo: operaciones atómicas por clave, lecturas por rango de claves (aprovechan el principio de localidad de datos) y versionado de celdas.</li>
+    <li>Restricciones: no se pueden crear índices secundarios (hay que organizar el indexado en la clave, o simular índices duplicando datos en nuevas tablas) ni contextos de transacción cross-keys.</li>
+  </ul>
+  <table>
+    <thead><tr><th>Row key</th><th>cf1:col1</th><th>cf1:col2</th><th>cf2:col1</th><th>cf2:col2</th></tr></thead>
+    <tbody>
+      <tr><td>row1</td><td>valor</td><td>valor</td><td>(vacío, no se almacena)</td><td>valor @t3, valor @t2, valor @t1</td></tr>
+      <tr><td>row2</td><td>valor</td><td>valor</td><td>valor</td><td>(vacío, no se almacena)</td></tr>
+    </tbody>
+  </table>
+  <p>Una columna se identifica siempre por family más nombre (<code>cf1:col1</code>), y el mismo nombre de columna puede repetirse en dos families distintas sin ambigüedad. Las celdas sin valor no ocupan lugar, no se guardan como null: de ahí que el modelo se llame disperso. Y cada celda no guarda un único valor sino una pila de versiones indexadas por timestamp, de la que por defecto se lee la más reciente.</p>
+
+  <h4 id="u16-bigtable-tablets">Tablets y jerarquía de tres niveles</h4>
+  <div class="def"><b>Tablet.</b> Conjunto de filas consecutivas de acuerdo a la clave. Es la unidad de balanceo de BigTable: repartiendo y dividiendo tablets es como el sistema escala.</div>
+  <p>Las tablets se organizan en un árbol de solo tres niveles, similar a un árbol B+: una tablet <b>root de metadata</b> (primer nivel), tablets de metadata de segundo nivel, y las tablets de las tablas de usuario en el tercero. Cada tablet guarda claves ordenadas que indican a qué tablet del nivel siguiente saltar.</p>
+  <div class="idea">Con tres niveles, tablets con muchísimas entradas y bloques enormes en el último nivel, la capacidad direccionable es prácticamente infinita. La consecuencia importante: acceder a un dato cuesta tres niveles siempre, tenga la base 1 MB o 1 PB. Para una base chica es lento; para un petabyte es rapidísimo, y esa <b>velocidad constante</b> es toda la gracia del diseño.</div>
+
+  <h4 id="u16-bigtable-arquitectura">Arquitectura: master, tablet servers y Chubby</h4>
+  <figure class="diag">
+    <svg viewBox="0 0 720 190" role="img" aria-label="Arquitectura de BigTable">
+      <g fill="none" stroke="currentColor">
+        <rect x="20" y="70" width="110" height="46" rx="6"/>
+        <rect x="290" y="20" width="140" height="44" rx="6"/>
+        <rect x="290" y="130" width="140" height="44" rx="6"/>
+        <rect x="540" y="70" width="150" height="70" rx="6"/>
+        <rect x="552" y="100" width="55" height="26" rx="4"/>
+        <rect x="618" y="100" width="55" height="26" rx="4"/>
+      </g>
+      <g stroke="var(--acc)" fill="var(--acc)">
+        <line x1="130" y1="80" x2="286" y2="48"/><polygon points="286,48 277,48 279,56"/>
+        <line x1="130" y1="105" x2="536" y2="105"/><polygon points="536,105 528,101 528,109"/>
+        <line x1="430" y1="48" x2="560" y2="76"/><polygon points="560,76 553,70 551,78"/>
+      </g>
+      <g stroke="var(--acc2)" fill="var(--acc2)">
+        <line x1="360" y1="130" x2="360" y2="68"/><polygon points="360,68 356,76 364,76"/>
+        <line x1="430" y1="152" x2="545" y2="130"/><polygon points="545,130 536,129 538,137"/>
+      </g>
+      <g fill="currentColor" font-size="12" text-anchor="middle">
+        <text x="75" y="90">Client</text>
+        <text x="75" y="106" font-size="10">(librería)</text>
+        <text x="360" y="38">BigTable Master</text>
+        <text x="360" y="54" font-size="10">metadata, splits</text>
+        <text x="360" y="148">Chubby</text>
+        <text x="360" y="164" font-size="10">locks</text>
+        <text x="615" y="88">Tablet Server</text>
+        <text x="579" y="117" font-size="10">tablet</text>
+        <text x="645" y="117" font-size="10">tablet</text>
+        <text x="205" y="45" font-size="10">metadata ops</text>
+        <text x="330" y="98" font-size="10" fill="var(--acc)">R/W directo (datos)</text>
+        <text x="500" y="45" font-size="10">migración de chunks</text>
+      </g>
+    </svg>
+    <figcaption>Arquitectura de BigTable: el master maneja metadata y decide splits, Chubby provee los locks, y los clientes leen y escriben directamente contra los tablet servers.</figcaption>
+  </figure>
+  <p>Esa es la arquitectura del paper. El producto gestionado (<b>Cloud Bigtable</b>) expone las mismas ideas en capas, y agrega un punto que no se ve en el diagrama anterior: la separación entre cómputo y almacenamiento.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 720 400" role="img" aria-label="Arquitectura en capas de Cloud Bigtable">
+      <g fill="none" stroke="currentColor">
+        <rect x="80" y="10" width="100" height="36" rx="6"/>
+        <rect x="310" y="10" width="100" height="36" rx="6"/>
+        <rect x="540" y="10" width="100" height="36" rx="6"/>
+        <rect x="30" y="70" width="660" height="36" rx="6"/>
+        <rect x="20" y="140" width="680" height="130" rx="6" stroke-dasharray="5 4"/>
+        <rect x="75" y="185" width="110" height="50" rx="6"/>
+        <rect x="305" y="185" width="110" height="50" rx="6"/>
+        <rect x="535" y="185" width="110" height="50" rx="6"/>
+        <rect x="10" y="300" width="700" height="90" rx="6" stroke-dasharray="5 4"/>
+        <rect x="43" y="322" width="50" height="26" rx="3"/>
+        <rect x="105" y="322" width="50" height="26" rx="3"/>
+        <rect x="167" y="322" width="50" height="26" rx="3"/>
+        <rect x="273" y="322" width="50" height="26" rx="3"/>
+        <rect x="335" y="322" width="50" height="26" rx="3"/>
+        <rect x="397" y="322" width="50" height="26" rx="3"/>
+        <rect x="503" y="322" width="50" height="26" rx="3"/>
+        <rect x="565" y="322" width="50" height="26" rx="3"/>
+        <rect x="627" y="322" width="50" height="26" rx="3"/>
+        <rect x="20" y="356" width="220" height="24" rx="4"/>
+        <rect x="250" y="356" width="220" height="24" rx="4"/>
+        <rect x="480" y="356" width="220" height="24" rx="4"/>
+      </g>
+      <g stroke="var(--acc)" fill="var(--acc)">
+        <line x1="130" y1="46" x2="130" y2="70"/><polygon points="130,70 126,62 134,62"/>
+        <line x1="360" y1="46" x2="360" y2="70"/><polygon points="360,70 356,62 364,62"/>
+        <line x1="590" y1="46" x2="590" y2="70"/><polygon points="590,70 586,62 594,62"/>
+        <line x1="130" y1="106" x2="130" y2="140"/><polygon points="130,140 126,132 134,132"/>
+        <line x1="360" y1="106" x2="360" y2="140"/><polygon points="360,140 356,132 364,132"/>
+        <line x1="590" y1="106" x2="590" y2="140"/><polygon points="590,140 586,132 594,132"/>
+        <line x1="130" y1="235" x2="130" y2="300"/><polygon points="130,300 126,292 134,292"/>
+        <line x1="360" y1="235" x2="360" y2="300"/><polygon points="360,300 356,292 364,292"/>
+        <line x1="590" y1="235" x2="590" y2="300"/><polygon points="590,300 586,292 594,292"/>
+      </g>
+      <g stroke="var(--acc2)" fill="var(--acc2)" stroke-dasharray="4 3">
+        <line x1="130" y1="252" x2="590" y2="252"/>
+        <polygon points="130,252 138,248 138,256" stroke-dasharray="0"/>
+        <polygon points="590,252 582,248 582,256" stroke-dasharray="0"/>
+      </g>
+      <g fill="currentColor" font-size="12" text-anchor="middle">
+        <text x="130" y="32">Client</text>
+        <text x="360" y="32">Client</text>
+        <text x="590" y="32">Client</text>
+        <text x="360" y="92" font-size="13">Front end server pool</text>
+        <text x="360" y="158">Cluster de Bigtable</text>
+        <text x="130" y="214">Node</text>
+        <text x="360" y="214">Node</text>
+        <text x="590" y="214">Node</text>
+        <text x="360" y="314" font-size="11">Colossus</text>
+        <text x="68" y="339" font-size="9">SSTable</text>
+        <text x="130" y="339" font-size="9">SSTable</text>
+        <text x="192" y="339" font-size="9">SSTable</text>
+        <text x="298" y="339" font-size="9">SSTable</text>
+        <text x="360" y="339" font-size="9">SSTable</text>
+        <text x="422" y="339" font-size="9">SSTable</text>
+        <text x="528" y="339" font-size="9">SSTable</text>
+        <text x="590" y="339" font-size="9">SSTable</text>
+        <text x="652" y="339" font-size="9">SSTable</text>
+        <text x="130" y="372" font-size="10">Shared Log</text>
+        <text x="360" y="372" font-size="10">Shared Log</text>
+        <text x="590" y="372" font-size="10">Shared Log</text>
+      </g>
+      <g fill="var(--acc2)" font-size="10" text-anchor="middle">
+        <text x="360" y="172">(los nodos solo sirven, no almacenan)</text>
+        <text x="360" y="246">mover una tablet = mover un puntero</text>
+      </g>
+    </svg>
+    <figcaption>Vista de producto de Cloud Bigtable: los clientes hablan con un pool de front ends, que rutea al cluster de nodos; los nodos no almacenan datos, solo sirven las tablets que les asignaron. Los datos viven abajo, en Colossus, como SSTables con un log compartido de escrituras por grupo.</figcaption>
+  </figure>
+  <p>La consecuencia es la que importa para la escalabilidad: como un nodo no es dueño de los bytes sino que solo sirve las tablets que le asignaron, mover una tablet de un nodo a otro (o agregar nodos al cluster) es reasignar punteros hacia Colossus y no copiar datos. Por eso el rebalanceo es barato y el throughput crece casi linealmente con la cantidad de nodos.</p>
+  <ul>
+    <li><b>Tablet servers:</b> almacenan y sirven las tablets. Cumplen el rol análogo a los DataNodes de HDFS.</li>
+    <li><b>BigTable Master:</b> análogo al NameNode de Hadoop, pero solo para control: gestiona la metadata, monitorea a los tablet servers, les pregunta si tienen muchos datos y decide cuándo y cómo particionar (crear tablets, migrar chunks). No transfiere datos de usuario.</li>
+    <li><b>Chubby:</b> servidor de locks distribuido (tiene su propio paper) con el que el master bloquea tablets o pedazos de datos para que los tablet servers no se pisen.</li>
+    <li><b>Cliente:</b> resuelve las operaciones de lectura/escritura hablando directamente con los tablet servers, sin pasar por el master.</li>
+  </ul>
+  <div class="examen">Preguntado en finales e integradores: "Describa el modelo de arquitectura utilizado por BigTable. Qué factores permiten garantizar la escalabilidad?" (integrador 2025-02, y en el banco de preguntas de finales de la cátedra). Los factores de escalabilidad esperados: (1) separación de control y datos, los clientes hablan directo con los tablet servers y el master no es cuello de botella; (2) particionamiento dinámico en tablets por rangos de clave, que se dividen y rebalancean automáticamente según la carga; (3) jerarquía de solo tres niveles que mantiene el costo de acceso constante sin importar el volumen.</div>
+
+  <h4 id="u16-bigtable-splits">División de tablets y el problema de las claves monotónicas</h4>
+  <p>Cuando una tablet recibe muchas escrituras y crece demasiado (se "sobrecalienta"), el master decide un split: un particionado horizontal que parte las filas por la mitad y deja dos tablets hermanas, cada una con la mitad de los datos. Como el split ocurre abajo de todo, en pequeños elementos y no en un punto centralizado, BigTable queda muy optimizado para escritura masiva.</p>
+  <div class="ej"><b>Split exitoso:</b> si las claves llegan distribuidas (dog, zebra, ...), al partirse la tablet quedan la a..l de un lado y la m..z del otro, y las siguientes lecturas y escrituras se reparten entre dos servidores. <b>Split no exitoso:</b> si las claves son monotónicas o casi idénticas (name, nameless, namelessly, ...), todas caen en el mismo rango; la tablet se parte, pero los siguientes requests vuelven a caer todos en la misma mitad, que vuelve a crecer y a partirse, siempre con el hotspot en el mismo lugar.</div>
+  <div class="warn">Las claves monotónicamente crecientes (timestamps, IDs secuenciales, prefijos comunes) son el punto débil de BigTable y de Datastore: no hay función de partición que las reparta, porque la partición es por rangos de clave. La solución es elegir otra clave o invertirla (que la parte variable quede al principio) para que las escrituras se distribuyan y no haya cuellos de botella.</div>
+
+  <details class="mas"><summary>BigTable vs HDFS: por qué el árbol cambia el juego</summary>
+  <p>En HDFS el NameNode sabe exactamente dónde dejó cada bloque, y el límite llega cuando no hay más espacio o la metadata desborda. En BigTable, en cambio, el árbol de tres niveles direcciona la información: se pueden agregar más y más tablet servers (incluso vacíos, listos para recibir splits) sin complicar el acceso, porque mientras los tres niveles estén bien populados la performance objetivo se mantiene. Los números típicos del paper: tablets de 100 a 200 MB como unidad de distribución y rebalanceo entre miles de servidores.</p>
+  </details>
+</section>

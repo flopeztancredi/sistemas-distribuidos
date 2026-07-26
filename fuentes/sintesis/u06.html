@@ -1,0 +1,217 @@
+<section class="unidad" id="u06" data-titulo="Práctica de diseño multicomputing">
+  <h2>U06. Práctica de diseño multicomputing</h2>
+  <p class="intro">Esta unidad es la práctica de diseño de la materia: dado un enunciado con requerimientos funcionales y no funcionales, hay que producir una arquitectura multicomputing que los cumpla, eligiendo procesos, colas y patrones de comunicación con criterio. Se trabajan dos casos completos (un Web Crawler y un Shopping Cart) que ejercitan las dos familias de problemas típicas: procesamiento paralelo de un flujo de tareas y atención de un gran volumen de operaciones sobre estado compartido. Es, además, el entrenamiento directo para el ejercicio de diseño que aparece en casi todos los finales.</p>
+
+  <h3 id="u06-metodo">Cómo encarar un ejercicio de diseño</h3>
+  <p>El método que propone la cátedra arranca siempre del enunciado, no de la tecnología. Los pasos:</p>
+  <ol>
+    <li><b>Separar requerimientos funcionales de no funcionales.</b> Los funcionales dicen qué hace el sistema (qué entra, qué sale, qué transforma). Los no funcionales dicen cómo debe hacerlo: paralelismo, volumen esperado, concurrencia de usuarios, auditoría, monitoreo. Los no funcionales son los que moldean la arquitectura.</li>
+    <li><b>Identificar las unidades de trabajo.</b> ¿Qué cosa discreta fluye por el sistema? (una URL, un archivo a descargar, un pedido de compra). Cada unidad de trabajo es un candidato a mensaje.</li>
+    <li><b>Descomponer en procesos por responsabilidad.</b> Cada etapa de procesamiento distinta es un candidato a proceso (o pool de procesos) separado, conectado por colas.</li>
+    <li><b>Elegir el patrón de comunicación de cada arista</b> (ver <a href="#u06-patrones">el toolbox</a>): request-reply para consultas, producer-consumer para repartir trabajo, publisher-subscriber para notificar eventos, pipeline para procesamiento en etapas.</li>
+    <li><b>Analizar volumen y puntos de contención.</b> ¿Dónde se acumula trabajo? ¿Qué etapa necesita más workers? ¿Qué estado debe serializarse?</li>
+    <li><b>Resolver el monitoreo como un flujo más</b>, no como un agregado de último momento.</li>
+  </ol>
+  <div class="idea">La pregunta guía en todo momento es: ¿qué puede correr en paralelo sin coordinarse, y qué necesita obligatoriamente un punto de serialización? Todo lo paralelo escala agregando procesos; todo lo serializado hay que aislarlo en el componente más chico y liviano posible.</div>
+  <div class="examen">Preguntado en finales, es <b>el</b> ejercicio típico de diseño (punto 10 de prácticamente todos los integradores: 2022-08, 2023-07, 2024-07, 2024-12, 2025-02, 2025-03, 2025-07): "Diseñe una arquitectura que asegure la escalabilidad para un sistema con los siguientes requisitos: [4 o 5 requerimientos de un caso real: Smart TVs, chatbot de Anses, aulas virtuales, cadena de cafeterías]. Resuelva el problema mediante análisis de volumen, endpoints y vista física con su explicación". Se espera exactamente el método de esta sección: estimar volúmenes, listar endpoints de entrada y dibujar la vista física (procesos, colas y réplicas) justificando cada decisión.</div>
+
+  <h3 id="u06-patrones">El toolbox: patrones de comunicación aplicados</h3>
+  <p>Estos patrones se desarrollan en profundidad en la unidad de patrones de comunicación; acá importa saber elegirlos. Resumen operativo:</p>
+  <ul>
+    <li><b>Request-Reply.</b> Modelo cliente-servidor, sincrónico (bloqueante) por defecto: el cliente envía un request y espera el reply. En la variante <b>asincrónica</b>, el servidor encola el pedido y responde de inmediato con un ACK; el cliente averigua después el resultado (por ejemplo con polling). Para tolerancia a fallos: timeouts con retries y algoritmos de backoff con jitter (¿cuánto espero el reply antes de reintentar?).</li>
+    <li><b>Producer-Consumer.</b> Productores generan información, consumidores la esperan para procesarla. Con una working queue en el medio, N consumidores compiten por los ítems y el trabajo se reparte solo (round-robin o pull según disponibilidad). Es el patrón por excelencia para pools de workers.</li>
+    <li><b>Publisher-Subscriber.</b> Los publishers emiten eventos de interés y los subscribers reciben aquellos a los que se suscribieron. Puede basarse en tópicos (bus de mensajes) o en canales (colas). Desacopla al emisor de quiénes y cuántos escuchan.</li>
+    <li><b>Pipeline.</b> El flujo de datos atraviesa filtros (procesos) conectados en secuencia. Habilita algoritmos online (se generan resultados parciales mientras sigue llegando información) y procesar flujos infinitos: si no sé cuándo termina la entrada, no me importa que termine.</li>
+    <li><b>DAG (grafo dirigido acíclico).</b> Generalización del pipeline cuando el flujo se bifurca y se junta: representación natural de dataflows, la carga se paraleliza por ramas y admite lazy loading (solo se procesan los nodos que las dependencias requieren). Si el grafo tuviera ciclos, podrían aparecer deadlocks.</li>
+  </ul>
+  <p>Para paralelizar un pipeline hay dos modos de asignar workers:</p>
+  <table>
+    <thead>
+      <tr><th>Modo</th><th>Cómo funciona</th><th>Conviene cuando</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><b>Worker por filter</b></td><td>Cada etapa del pipeline tiene su propia unidad de procesamiento; los ítems se reciben, procesan y reenvían a la etapa siguiente.</td><td>Datos livianos, procesamiento pesado (mover el dato entre etapas es barato).</td></tr>
+      <tr><td><b>Worker por item</b></td><td>Un worker toma el ítem al ingresar y lo acompaña hasta el final, aplicándole todos los filtros paso a paso.</td><td>Datos pesados, procesamiento liviano (evita mover el dato de proceso en proceso).</td></tr>
+    </tbody>
+  </table>
+  <div class="examen">Preguntado en finales, aplicar estos patrones con pseudocódigo: "Utilizando MOMs / request-reply / blocking queues, implemente una barrera para que 3 workers se sincronicen en cierto punto del algoritmo" (2024-07, 2024-12, 2025-02, 2025-07); "Utilizando una arquitectura Publisher-Subscriber, calcule la suma / el promedio de un flujo de registros optimizando el uso de P procesos conocidos" (2022-08, 2025-02, 2025-07); "Ejemplifique el uso de DAGs al diseñar el procesamiento de las ventas diarias de una cadena de tiendas" (2025-02).</div>
+
+  <h3 id="u06-crawler">Caso 1: Web Crawler</h3>
+  <h4 id="u06-crawler-req">Requerimientos</h4>
+  <p>Funcionales:</p>
+  <ul>
+    <li>Dada una URL, obtener el HTML y analizarlo.</li>
+    <li>Detectar nuevas URLs e identificar archivos multimedia, documentos y otras páginas web.</li>
+    <li>Descargar los archivos multimedia (.jpg, .png, .mp3, .ogg) y los documentos (.pdf, .odt).</li>
+    <li>Agendar el procesamiento de las nuevas páginas encontradas.</li>
+    <li>Detener el análisis de nuevos links luego de N anidaciones.</li>
+  </ul>
+  <p>No funcionales:</p>
+  <ul>
+    <li>Descargas y análisis deben ejecutar en paralelo.</li>
+    <li>Monitoreo constante en un archivo de texto: URLs analizadas, archivos descargados por extensión, y cantidad de procesos en cada estado (obteniendo HTML, procesando HTML, descargando recurso).</li>
+  </ul>
+
+  <h4 id="u06-crawler-descomposicion">Descomposición en pipeline</h4>
+  <p>El propio enunciado regala la descomposición: los tres estados que pide monitorear (obteniendo HTML, procesando HTML, descargando recurso) son las tres etapas naturales del pipeline. Cada etapa es un pool de workers idénticos conectado por working queues:</p>
+  <ul>
+    <li><b>Fetchers</b>: consumen de la cola de URLs, hacen el GET y publican el HTML crudo en la cola siguiente.</li>
+    <li><b>Parsers</b>: consumen HTML, extraen links y clasifican: los recursos (multimedia y documentos) van a la cola de descargas; las páginas nuevas se reencolan como URLs a procesar.</li>
+    <li><b>Downloaders</b>: consumen tareas de descarga y persisten el archivo.</li>
+  </ul>
+  <p>Es producer-consumer encadenado: cada pool escala por separado según dónde esté el cuello de botella (fetchers y downloaders son I/O bound, así que suelen necesitar más instancias; el parseo es CPU bound). Como los ítems que viajan son livianos (URLs, HTML) y el trabajo de cada etapa es distinto, el modo natural es <a href="#u06-patrones">worker por filter</a>.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 760 300" width="100%" role="img" aria-label="Pipeline del web crawler con realimentación y monitor">
+      <defs>
+        <marker id="u06-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <!-- cola URLs -->
+      <rect x="20" y="70" width="110" height="44" rx="22" fill="none" stroke="var(--acc)"/>
+      <text x="75" y="97" text-anchor="middle" fill="currentColor" font-size="13">cola URLs</text>
+      <!-- fetchers -->
+      <rect x="175" y="60" width="120" height="64" rx="6" fill="none" stroke="var(--linea)"/>
+      <rect x="181" y="66" width="120" height="64" rx="6" fill="none" stroke="var(--linea)"/>
+      <text x="241" y="103" text-anchor="middle" fill="currentColor" font-size="13">Fetchers</text>
+      <!-- cola HTML -->
+      <rect x="345" y="70" width="110" height="44" rx="22" fill="none" stroke="var(--acc)"/>
+      <text x="400" y="97" text-anchor="middle" fill="currentColor" font-size="13">cola HTML</text>
+      <!-- parsers -->
+      <rect x="499" y="60" width="120" height="64" rx="6" fill="none" stroke="var(--linea)"/>
+      <rect x="505" y="66" width="120" height="64" rx="6" fill="none" stroke="var(--linea)"/>
+      <text x="565" y="103" text-anchor="middle" fill="currentColor" font-size="13">Parsers</text>
+      <!-- cola descargas -->
+      <rect x="345" y="180" width="130" height="44" rx="22" fill="none" stroke="var(--acc)"/>
+      <text x="410" y="207" text-anchor="middle" fill="currentColor" font-size="13">cola descargas</text>
+      <!-- downloaders -->
+      <rect x="175" y="170" width="120" height="64" rx="6" fill="none" stroke="var(--linea)"/>
+      <rect x="181" y="176" width="120" height="64" rx="6" fill="none" stroke="var(--linea)"/>
+      <text x="241" y="213" text-anchor="middle" fill="currentColor" font-size="13">Downloaders</text>
+      <!-- monitor -->
+      <rect x="620" y="200" width="120" height="50" rx="6" fill="none" stroke="var(--acc2)"/>
+      <text x="680" y="222" text-anchor="middle" fill="currentColor" font-size="13">Monitor</text>
+      <text x="680" y="239" text-anchor="middle" fill="currentColor" font-size="11">(archivo .txt)</text>
+      <!-- flechas principales -->
+      <line x1="130" y1="92" x2="170" y2="92" stroke="currentColor" marker-end="url(#u06-arr)"/>
+      <line x1="301" y1="92" x2="340" y2="92" stroke="currentColor" marker-end="url(#u06-arr)"/>
+      <line x1="455" y1="92" x2="494" y2="92" stroke="currentColor" marker-end="url(#u06-arr)"/>
+      <line x1="499" y1="128" x2="480" y2="185" stroke="currentColor" marker-end="url(#u06-arr)"/>
+      <line x1="345" y1="202" x2="306" y2="202" stroke="currentColor" marker-end="url(#u06-arr)"/>
+      <!-- realimentacion -->
+      <path d="M 565 60 L 565 25 L 75 25 L 75 65" fill="none" stroke="var(--acc)" marker-end="url(#u06-arr)"/>
+      <text x="320" y="18" text-anchor="middle" fill="currentColor" font-size="12">nuevas URLs (nivel + 1, si nivel &lt; N)</text>
+      <!-- eventos a monitor -->
+      <path d="M 241 134 L 241 152 L 640 152 L 668 196" fill="none" stroke="var(--acc2)" stroke-dasharray="4 4" marker-end="url(#u06-arr)"/>
+      <path d="M 625 134 L 660 196" fill="none" stroke="var(--acc2)" stroke-dasharray="4 4" marker-end="url(#u06-arr)"/>
+      <path d="M 241 244 L 241 270 L 660 270 L 675 254" fill="none" stroke="var(--acc2)" stroke-dasharray="4 4" marker-end="url(#u06-arr)"/>
+      <text x="450" y="146" text-anchor="middle" fill="currentColor" font-size="11">eventos de estado (cola de monitoreo)</text>
+    </svg>
+    <figcaption>Web Crawler: pipeline de tres pools (fetchers, parsers, downloaders) conectados por working queues, con realimentación de nuevas URLs y una cola dedicada de eventos hacia el monitor.</figcaption>
+  </figure>
+
+  <h4 id="u06-crawler-profundidad">La realimentación y el corte por profundidad</h4>
+  <p>A diferencia de un pipeline puro, acá el parser reencola trabajo hacia el inicio: el grafo tiene un ciclo. Sin un mecanismo de corte, el crawler no termina nunca. La solución es que cada mensaje viaje con su nivel de anidación: la URL semilla entra con nivel 0 y el parser reencola las URLs encontradas con <code>nivel + 1</code>, descartando las que superan N. El estado de corte viaja en el mensaje, no en un coordinador central: ningún proceso necesita conocer el estado global del crawl.</p>
+  <pre><code>def parser_worker():
+    while True:
+        msg = cola_html.pop()                # bloqueante
+        urls, recursos = analizar(msg.html)
+        for r in recursos:
+            cola_descargas.push(r)
+        if msg.nivel &lt; N:
+            for u in urls:
+                cola_urls.push(url=u, nivel=msg.nivel + 1)
+        cola_monitoreo.push(evento="html_procesado")</code></pre>
+  <div class="warn">Un pipeline con realimentación ya no es un DAG: aparece un ciclo, y con ciclos pueden existir deadlocks (por ejemplo, si las colas son acotadas y todos los pools se bloquean haciendo push entre sí). El corte por N anidaciones garantiza que el flujo se agota; conviene mencionarlo explícitamente al defender el diseño. El enunciado tampoco pide detectar URLs repetidas: si se quisiera evitar reprocesar páginas ya visitadas haría falta estado compartido (un registro de visitadas), un agregado que hay que aclarar como supuesto porque introduce un punto de serialización que el enunciado original no exige.</div>
+
+  <h4 id="u06-crawler-monitoreo">Monitoreo como flujo separado</h4>
+  <p>El requerimiento de monitoreo (contadores de URLs analizadas, descargas por extensión y procesos por estado, en un archivo de texto) se resuelve con el mismo vocabulario: cada worker publica eventos (cambié de estado, procesé una URL, descargué un .pdf) en una cola de monitoreo, y un único proceso monitor los consume, agrega los contadores y escribe el archivo. Un único escritor elimina toda contención sobre el archivo: no hay locks, y el monitoreo nunca frena el procesamiento porque es asincrónico (fire and forget hacia la cola).</p>
+  <div class="idea">Este es el patrón sink: cuando muchos procesos generan información que debe consolidarse (métricas, auditoría, resultados), se la canaliza por una cola hacia un único sumidero que centraliza la escritura. Aparece de nuevo en el <a href="#u06-cart">Shopping Cart</a> con el log de auditoría.</div>
+  <div class="examen">Preguntado en finales: "Asumiendo un equipo de hasta 10 agentes de atención al cliente, defina cómo implementar un middleware distribuido que permita a los agentes llamar al siguiente número en fila. ¿Dónde almacenaría la información del último número llamado?" (2024-12 y listado de preguntas de finales). Respuesta esperada: working queue de la que los agentes consumen de a uno (producer-consumer con distribución round-robin o pull por disponibilidad), ACK explícito al terminar la llamada (si el agente cae sin ACK, el mensaje se reencola para otro: semántica at-least-once), y el último número llamado NO se guarda en la cola (que es transitoria) sino en un sink o base de datos compartida que los agentes actualizan al finalizar.</div>
+
+  <h3 id="u06-cart">Caso 2: Shopping Cart</h3>
+  <h4 id="u06-cart-req">Requerimientos</h4>
+  <p>Funcionales:</p>
+  <ul>
+    <li>Aceptar pedidos de compra con usuario, tipo de producto y cantidad; mantener el stock por tipo de producto.</li>
+    <li>Aceptar además: modificaciones de stock (administradores), consultas del estado de los pedidos (compradores) y notificación de la entrega (empleados).</li>
+    <li>Controlar el estado de cada pedido: Recibido, Aceptado, Rechazado, Entregado.</li>
+  </ul>
+  <p>No funcionales:</p>
+  <ul>
+    <li>Catálogo reducido (unos 10 productos) pero gran volumen de pedidos y gran cantidad de usuarios concurrentes.</li>
+    <li>Todo pedido debe quedar como entrada de log ordenada, con fines de auditoría.</li>
+    <li>Los pedidos pueden incluir varios tipos de producto y se aceptan o rechazan en su totalidad (todo o nada).</li>
+    <li>El monitoreo de los flujos de información es clave para garantizar la performance.</li>
+  </ul>
+
+  <h4 id="u06-cart-flujo">Flujo del pedido: request-reply asincrónico</h4>
+  <p>Con gran cantidad de usuarios concurrentes, procesar cada pedido de forma sincrónica (el cliente bloqueado esperando el veredicto) no escala. El estado inicial "Recibido" del propio enunciado sugiere el diseño: <a href="#u06-patrones">request-reply asincrónico</a>. Un frontend replicado (stateless, escalable horizontalmente) valida el pedido, lo encola y responde de inmediato: pedido Recibido, con su id. El comprador consulta después el estado (polling sobre el endpoint de consultas), que se sirve desde un almacén de estados alimentado por el backend. Entrada y decisión quedan desacopladas: los picos de tráfico se absorben en la cola.</p>
+
+  <h4 id="u06-cart-stock">Stock, atomicidad y log ordenado</h4>
+  <p>El corazón del problema es la combinación de tres requerimientos: stock compartido por todos los pedidos, decisión todo o nada sobre pedidos multi-producto, y log ordenado de auditoría. Los tres piden lo mismo: un punto de serialización. Las dos opciones clásicas:</p>
+  <table>
+    <thead>
+      <tr><th>Opción</th><th>Diseño</th><th>A favor</th><th>En contra</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>Serializar pedidos</b></td>
+        <td>Una única cola de pedidos hacia un proceso de stock que los consume en orden, decide Aceptado/Rechazado y apendea el log.</td>
+        <td>El orden total del log sale gratis; la atomicidad todo o nada es trivial (nadie más toca el stock); con un catálogo de 10 productos la decisión es O(items), muy barata.</td>
+        <td>Un solo decisor: cuello de botella teórico si la decisión dejara de ser liviana.</td>
+      </tr>
+      <tr>
+        <td><b>Particionar por producto</b></td>
+        <td>Un proceso de stock por tipo de producto; un pedido multi-producto reserva en cada partición y confirma o cancela según respondan todas.</td>
+        <td>Paraleliza la decisión entre productos.</td>
+        <td>La atomicidad exige coordinar reservas entre particiones (protocolo de reserva y confirmación) y el log ordenado global requiere un secuenciador aparte: mucha más complejidad.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>Con este enunciado conviene la primera: el volumen está en la entrada de pedidos y en las consultas (que ya escalan por réplicas y colas), mientras que la decisión de stock es una operación en memoria sobre 10 contadores. El cuello de botella real es el I/O de log, que se resuelve apendeando secuencialmente (el patrón sink otra vez).</p>
+  <pre><code>def proceso_stock():
+    while True:
+        pedido = cola_pedidos.pop()      # una sola cola: orden total
+        log.append(pedido)               # entrada de auditoria, ya ordenada
+        if all(stock[i.producto] &gt;= i.cantidad for i in pedido.items):
+            for i in pedido.items:
+                stock[i.producto] -= i.cantidad
+            estados.set(pedido.id, "Aceptado")
+        else:
+            estados.set(pedido.id, "Rechazado")   # todo o nada</code></pre>
+  <div class="warn">Error común: particionar el stock por producto "porque distribuido es mejor", y descubrir después que los pedidos multi-producto con decisión todo o nada obligan a un protocolo de coordinación entre particiones. Serializar no es una mala palabra: si la sección crítica es chica y barata (10 contadores en memoria), un único decisor es más simple, más auditable y suficientemente rápido. El diseño se justifica con el análisis de volumen, no con reflejos.</div>
+
+  <h4 id="u06-cart-actores">Actores, estados y notificaciones</h4>
+  <ul>
+    <li><b>Administradores</b> modifican stock: sus operaciones entran por la misma cola serializada que los pedidos, así el log de auditoría también las ordena respecto de las compras y no hay carreras contra las decisiones de stock.</li>
+    <li><b>Compradores</b> consultan estado: camino de lectura separado (request-reply contra el almacén de estados), que escala con réplicas sin tocar el camino de escritura.</li>
+    <li><b>Empleados</b> notifican la entrega: un evento más que transiciona el pedido de Aceptado a Entregado.</li>
+    <li><b>Notificar al comprador</b>: publisher-subscriber; el sistema publica los cambios de estado y el comprador (o el canal que corresponda) se suscribe a los eventos de sus pedidos. El emisor no necesita saber quién escucha.</li>
+  </ul>
+  <p>La máquina de estados del pedido queda: Recibido (al encolar) → Aceptado o Rechazado (decisión de stock, todo o nada) → Entregado (evento del empleado, solo desde Aceptado).</p>
+  <p>El monitoreo de los flujos de información, que el enunciado marca como clave para la performance, se implementa igual que en el crawler: eventos hacia un monitor sink. La métrica más valiosa en una arquitectura de colas es la profundidad de cada cola: una cola que crece sostenidamente señala exactamente qué etapa necesita más workers.</p>
+
+  <h3 id="u06-decisiones">Decisiones recurrentes (las preguntas del TP)</h3>
+  <p>Las dudas que aparecen al diseñar el TP son siempre las mismas; conviene tener posición tomada:</p>
+  <ul>
+    <li><b>¿Todos los workers iguales, o responsabilidades divididas?</b> Un fork-join distribuido con workers homogéneos es válido cuando el trabajo es una sola operación paralelizable. Pero si el procesamiento tiene etapas distintas (como el crawler: fetch, parse, download), dividir responsabilidades en pipeline permite escalar cada etapa según su propio cuello de botella y dimensionar cada pool por separado. La respuesta sale del análisis de volumen, no de una regla fija.</li>
+    <li><b>¿Worker por filter o worker por item?</b> Datos livianos y cómputo pesado: worker por filter. Datos pesados y cómputo liviano: worker por item (mover el dato cuesta más que moverlo de etapa).</li>
+    <li><b>¿El middleware comunica solo cliente-sistema, o también entre workers?</b> El middleware es la capa de comunicación de todo el sistema: también conecta workers entre sí (las working queues del pipeline son middleware). Lo que no le corresponde es la lógica de negocio.</li>
+    <li><b>¿El middleware distribuye el trabajo o solo entrega mensajes?</b> El middleware garantiza entrega y reparte mensajes entre consumidores (round-robin, pull por disponibilidad); eso ya es distribución de carga. Pero el plan de ejecución (qué etapas existen, qué hace cada una, cuándo cortar) es una decisión de diseño de la aplicación, no del middleware.</li>
+  </ul>
+  <p>Los dos casos, lado a lado, resumen las dos familias de problemas de diseño:</p>
+  <table>
+    <thead>
+      <tr><th></th><th>Web Crawler</th><th>Shopping Cart</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><b>Naturaleza</b></td><td>Flujo de tareas independientes que se expande solo (cada página genera más trabajo).</td><td>Gran volumen de operaciones que compiten por estado compartido (el stock).</td></tr>
+      <tr><td><b>Patrón dominante</b></td><td>Pipeline de producer-consumer con realimentación.</td><td>Request-reply asincrónico + cola serializadora + pub-sub de eventos.</td></tr>
+      <tr><td><b>Dificultad central</b></td><td>Terminación (corte por profundidad N) y balance entre etapas.</td><td>Atomicidad todo o nada y orden total del log con alta concurrencia.</td></tr>
+      <tr><td><b>Dónde escala</b></td><td>Agregando workers a la etapa cuello de botella.</td><td>Replicando la entrada y las lecturas; la decisión queda serializada a propósito.</td></tr>
+      <tr><td><b>Monitoreo</b></td><td>Contadores y estados por proceso, vía cola hacia un sink.</td><td>Profundidad de colas y flujos, vía cola hacia un sink.</td></tr>
+    </tbody>
+  </table>
+  <div class="examen">Preguntado en finales, dentro del ejercicio de diseño (punto 10, todas las fechas): la corrección espera que la vista física muestre explícitamente qué componentes están replicados y cuáles no, y que la explicación justifique cada cola y cada punto de serialización con el análisis de volumen del enunciado. Un diagrama sin justificación de escalabilidad no alcanza.</div>
+</section>

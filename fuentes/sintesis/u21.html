@@ -1,0 +1,555 @@
+<section class="unidad" id="u21" data-titulo="Sistemas de tiempo real">
+  <h2>U21. Sistemas de tiempo real</h2>
+  <p class="intro">Los sistemas de tiempo real (RT) son aquellos donde la correctitud depende no solo del resultado sino del momento en que se entrega: perder un deadline es un fallo. La unidad introduce la clasificación hard/soft, la previsibilidad como propiedad central, la comunicación determinista que estos sistemas exigen, y la teoria básica de sistemas de control (lazo abierto y cerrado). Cierra con casos de estudio reales de fallos catastroficos. Es tema fuera de programa práctico pero conceptualmente importante para el final.</p>
+
+  <h3 id="u21-definicion">Que es un sistema de tiempo real</h3>
+  <div class="def">
+    <b>Sistema de tiempo real (RT).</b> Sistema cuya evolución se específica en términos de requerimientos temporales impuestos por el entorno. Su correctitud depende de entregar respuestas correctas y en tiempo correcto: una respuesta valida pero tardia es un error. Un sistema es RT si tiene al menos un servicio RT (cualquier sistema que consume un servicio RT queda, por extensión, sujeto a esos parámetros temporales).
+  </div>
+  <p>La especificación de un sistema RT indica, paso a paso, cuanto tiempo hay para ejecutar cada acción. Esto conecta con <a href="#u17">tolerancia a fallos</a>: en un sistema RT, una respuesta fuera de plazo es un fallo tan grave como una respuesta incorrecta.</p>
+  <div class="ej">
+    <p>Ejemplos típicos, todos atados a implementaciones físicas:</p>
+    <ul>
+      <li><b>Lavarropas:</b> cada fase del ciclo de lavado dura una cantidad definida de ticks del reloj del microcontrolador; la temporalidad define el sistema. Nada lo interrumpe salvo un fallo irresoluble (falta agua), que termina en un mensaje de error.</li>
+      <li><b>Medidores de señales:</b> presión, pulsaciones, ritmo cardiaco. Un medidor certificado debe garantizar en que delta de tiempo toma cada medición: una frecuencia de muestreo no homogénea introduce variaciones anormales en la señal.</li>
+      <li><b>Automoviles y aeronaves:</b> control de navegación, presión de ruedas, cinturones; sistemas que pasaron de lógica analogica a software complejo dentro de la computadora principal.</li>
+      <li><b>Marcapasos:</b> debe decidir cuando emitir el pulso electrico dentro de ventanas temporales estrictas.</li>
+    </ul>
+  </div>
+  <div class="examen">Preguntado en finales, y de los más frecuentes de esta unidad: "Que es un sistema de Tiempo Real (Real-Time)? Describa sus características principales." La respuesta esperada cubre: correctitud que depende del resultado y del tiempo, previsibilidad (no performance), clasificación hard/soft con ejemplos, y comunicación determinista (Profibus/Profinet en lugar de TCP/IP).</div>
+
+  <h3 id="u21-hard-soft">Hard RT y Soft RT</h3>
+  <table>
+    <thead>
+      <tr><th></th><th>Hard RT</th><th>Soft RT</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Fallo temporal</td>
+        <td>Debe evitarse todo fallo de tiempo de delivery: perder un deadline es un fallo total (catastrofico).</td>
+        <td>Se admiten fallos de timing ocasionalmente, con una frecuencia documentada.</td>
+      </tr>
+      <tr>
+        <td>Utilidad del resultado tardio</td>
+        <td>Nula: la respuesta fuera de plazo desencadena manejo de errores, eventualmente un failure.</td>
+        <td>La utilidad del resultado disminuye tras el deadline, pero el sistema sigue operando.</td>
+      </tr>
+      <tr>
+        <td>Ejemplos</td>
+        <td>Control de alerones/flaps de un avion, marcapasos, misión crítica.</td>
+        <td>Streaming de video, sistemas web de gran escala, reproducción de medios a bordo.</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="ej">
+    <p>Tres escenarios dentro de una misma aeronave ilustran el espectro:</p>
+    <ul>
+      <li><b>Alerones:</b> si pido una actuación sobre los alerones y detecto que no ocurre en tiempo, reporto fallo para que alguien tome control manual. Admitir el problema de timing no es opción: hard RT.</li>
+      <li><b>Entretenimiento a bordo:</b> si al pasajero del asiento 28 le llega tarde un frame de la pelicula, el sistema bufferea y sigue; se degrada la calidad, no se detiene el avion: soft RT (sigue siendo RT porque se rige por parámetros temporales).</li>
+      <li><b>Marcapasos:</b> caso para pensar: si falla la información temporal, se lanza el shock por las dudas, no se lanza nada, se reporta alerta? La respuesta depende de la especificación; lo que define al sistema RT es que ese comportamiento este definido de antemano.</li>
+    </ul>
+  </div>
+  <p class="nota">Los dos ejemplos canónicos de hard RT tienen todas sus partes bajo requerimiento temporal. En la aeronave, las superficies de control son los alerones, los flaps de borde de ataque (L.E. flaps) y de borde de salida (T.E. flaps), el timón de dirección (rudder), los elevadores, el estabilizador horizontal (tailplane) y los aerofrenos o spoilers: cada una es un actuador que tiene que responder dentro de su plazo. En el marcapasos implantado, los electrodos (leads) van uno a la auricula derecha y otro al ventriculo derecho, y el dispositivo tiene que detectar la actividad en uno y estimular el otro dentro de la ventana temporal del ciclo cardiaco.</p>
+  <div class="warn">El término "real time" está sobrecargado en la industria: mostrar reportes "en tiempo real" desde una base de datos no es RT, porque no hay ninguna garantía de previsibilidad temporal, solo intención. Años atras se hablaba con más honestidad de "near real time" para esos casos. Si el sistema solo mide si cumplio sus objetivos de latencia (y no puede controlarlos), es a lo sumo un soft RT muy laxo, o directamente una definición de calidad de servicio.</div>
+
+  <h3 id="u21-previsibilidad">Previsibilidad, no performance</h3>
+  <div class="idea">
+    <b>RT implica previsibilidad, no velocidad.</b> Un sistema velocisimo pero impredecible no es RT; un sistema previsible con tiempos caracteristicos lentos si lo es. Lo central es que ante cualquier escenario se sepa exactamente que va a hacer el sistema y en que plazos.
+  </div>
+  <div class="ej">Monitorear latidos del corazon exige tiempos caracteristicos rápidos. Monitorear el nivel de agua de tanques industriales de cientos de miles de litros, que varía lentisimo, admite un tiempo caracteristico muy lento: ambos pueden ser sistemas RT perfectamente validos, porque lo que importa es cumplir siempre los deadlines previstos por diseño.</div>
+  <p>En consecuencia, el problema de ingenieria central de un sistema RT es el <b>scheduling</b>: planificar las tareas para que se cumplan los deadlines definidos en la especificación.</p>
+
+  <h3 id="u21-comunicacion">Comunicación en sistemas RT</h3>
+  <p>Un sistema RT que se comunica con otro es, por definición, un sistema RT distribuido, y requiere comunicación <b>fiable y sincrónica</b>, con deadlines bien definidos sobre la entrega de cada mensaje.</p>
+  <ul>
+    <li><b>TCP/IP no sirve:</b> es sincrónico solo en el sentido de esperar ACKs, pero no garantiza deadlines. Dos paquetes en la misma red local pueden tomar rutas distintas, uno llegar y otro perderse; el protocolo hace su mejor esfuerzo (incluso con QoS) pero no da garantías temporales.</li>
+    <li><b>Comunicación serial:</b> la conexión física está establecida y nadie la interrumpe, hay control total sobre envio y recepción de señales. Limitación: proximidad física entre equipos y poca interoperabilidad. Sobre esta base se construye <b>Profibus</b>, protocolo dominante en automatización industrial (equipos de industria pesada, PLCs).</li>
+    <li><b>Ethernet como capa física:</b> el medio físico de TCP/IP si sirve, si se reemplazan las capas superiores por una capa de transporte determinista: switching determinístico frente a colisiones, sin retransmisiones impredecibles. Ejemplo comercial: <b>Profinet</b>.</li>
+  </ul>
+  <div class="ej">En una fabrica automatizada (Siemens, ABB, Honeywell, Rockwell son los jugadores típicos) conviven sectores en Profibus, sectores en Profinet y sectores en Ethernet/TCP-IP comun: el piso de planta con PLCs y maquinaria exige RT, mientras que reporteria, monitoreo y sistemas contables usan protocolos normales. Proxies o bridges adaptan las señales entre ambos mundos. Lo mismo ocurre en la industria automotriz, donde el cableado interno del vehiculo migra a variantes deterministas de Ethernet.</div>
+
+  <h4 id="u21-red-industrial">Arquitectura de red en automatización industrial</h4>
+  <p>La forma canónica de esa convivencia es una red partida en dos mundos con un único punto de cruce. Arriba, la red corporativa (IT): mainframes de back-office y servidores con ERP, MES, CAPP y PDM, más las aplicaciones de oficina, la salida a internet, los data servers y el storage. Abajo, el piso de planta (OT), que es la parte RT. En el medio, un <b>gateway de red de control</b> que es el único camino entre ambas: todo lo que la red corporativa quiera saber de la planta pasa por ahí, y con eso el determinismo del piso queda aislado del tráfico impredecible de IT.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 660 335" role="img" aria-label="Arquitectura de red de automatización industrial: red corporativa arriba, gateway de red de control en el medio, y piso de planta abajo con control supervisorio, dos HMI con sus controladores, robótica, motores y sensores">
+      <!-- capa IT -->
+      <rect x="30" y="22" width="220" height="46" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <text x="140" y="40" fill="currentColor" font-size="10" text-anchor="middle">Mainframes de back-office</text>
+      <text x="140" y="56" fill="currentColor" font-size="10" text-anchor="middle">(ERP, MES, CAPP, PDM)</text>
+      <rect x="410" y="22" width="220" height="46" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <text x="520" y="40" fill="currentColor" font-size="10" text-anchor="middle">Aplicaciones de oficina, internet,</text>
+      <text x="520" y="56" fill="currentColor" font-size="10" text-anchor="middle">data servers, storage</text>
+      <line x1="250" y1="45" x2="410" y2="45" stroke="var(--linea)" stroke-width="1.5"/>
+      <text x="330" y="38" fill="currentColor" font-size="10" text-anchor="middle">Red corporativa</text>
+      <!-- separacion IT / OT -->
+      <line x1="10" y1="84" x2="650" y2="84" stroke="var(--acc2)" stroke-width="1.2" stroke-dasharray="5 4"/>
+      <text x="648" y="80" fill="currentColor" font-size="10" text-anchor="end">IT: sin garantias temporales</text>
+      <text x="648" y="98" fill="currentColor" font-size="10" text-anchor="end">OT: piso de planta, RT</text>
+      <!-- gateway -->
+      <line x1="330" y1="45" x2="330" y2="108" stroke="var(--linea)" stroke-width="1.5"/>
+      <rect x="250" y="108" width="160" height="36" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="330" y="131" fill="currentColor" font-size="11" text-anchor="middle">Gateway de red de control</text>
+      <!-- bus de planta -->
+      <line x1="330" y1="144" x2="330" y2="175" stroke="var(--acc)" stroke-width="1.5"/>
+      <line x1="105" y1="175" x2="555" y2="175" stroke="var(--acc)" stroke-width="1.8"/>
+      <text x="112" y="168" fill="currentColor" font-size="10">red de control determinista (Profibus / Profinet)</text>
+      <!-- rama izquierda: HMI + controlador -->
+      <line x1="170" y1="175" x2="170" y2="200" stroke="var(--acc)" stroke-width="1.5"/>
+      <rect x="125" y="200" width="90" height="30" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <text x="170" y="220" fill="currentColor" font-size="10" text-anchor="middle">Controlador</text>
+      <rect x="35" y="200" width="70" height="30" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <text x="70" y="220" fill="currentColor" font-size="10" text-anchor="middle">HMI</text>
+      <line x1="105" y1="215" x2="125" y2="215" stroke="var(--linea)" stroke-width="1.5"/>
+      <line x1="170" y1="230" x2="170" y2="268" stroke="var(--linea)" stroke-width="1.5"/>
+      <rect x="110" y="268" width="120" height="32" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="170" y="288" fill="currentColor" font-size="10" text-anchor="middle">Robótica</text>
+      <!-- rama central: control supervisorio -->
+      <line x1="330" y1="175" x2="330" y2="200" stroke="var(--acc)" stroke-width="1.5"/>
+      <rect x="265" y="200" width="130" height="30" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <text x="330" y="220" fill="currentColor" font-size="10" text-anchor="middle">Control supervisorio</text>
+      <line x1="330" y1="230" x2="330" y2="268" stroke="var(--linea)" stroke-width="1.5"/>
+      <rect x="255" y="268" width="150" height="32" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="330" y="288" fill="currentColor" font-size="10" text-anchor="middle">Motores, drives, actuadores</text>
+      <!-- rama derecha: HMI + controlador -->
+      <line x1="490" y1="175" x2="490" y2="200" stroke="var(--acc)" stroke-width="1.5"/>
+      <rect x="445" y="200" width="90" height="30" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <text x="490" y="220" fill="currentColor" font-size="10" text-anchor="middle">Controlador</text>
+      <rect x="555" y="200" width="70" height="30" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <text x="590" y="220" fill="currentColor" font-size="10" text-anchor="middle">HMI</text>
+      <line x1="535" y1="215" x2="555" y2="215" stroke="var(--linea)" stroke-width="1.5"/>
+      <line x1="490" y1="230" x2="490" y2="268" stroke="var(--linea)" stroke-width="1.5"/>
+      <rect x="420" y="268" width="180" height="32" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="510" y="284" fill="currentColor" font-size="10" text-anchor="middle">Sensores y otros</text>
+      <text x="510" y="296" fill="currentColor" font-size="10" text-anchor="middle">dispositivos de I/O</text>
+      <text x="330" y="322" fill="currentColor" font-size="10" text-anchor="middle">campo: cuanto más abajo, más estricto el requerimiento temporal</text>
+    </svg>
+    <figcaption>Separación IT / OT en una planta automatizada. La jerarquía baja de la red corporativa al gateway, del gateway al control supervisorio y a los controladores (cada uno con su HMI para el operador) y de ahí al campo: robots, motores, drives, actuadores, sensores y módulos de I/O. El gateway es el punto donde se corta la imprevisibilidad de IT.</figcaption>
+  </figure>
+
+  <h4 id="u21-red-automotriz">Arquitectura zonal en la industria automotriz</h4>
+  <p>El automovil moderno hace la misma jugada con otra topología. En lugar de tirar un mazo de cables desde cada componente hasta una computadora central (lo que llevaba a kilos de cableado), se reparten cuatro <b>zone switches</b>, uno por cuadrante del vehiculo; cada zona concentra los sistemas que le quedan físicamente cerca y se conecta al bloque de cómputo central (CPU/GPU) por un backbone rápido. El resultado es una jerarquía de velocidades: enlaces lentos y baratos en la periferia, enlaces de decenas de gigabits en el nucleo.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 660 345" role="img" aria-label="Arquitectura zonal automotriz: bloque central de CPU y GPU conectado por backbone de 10 Gbps a cuatro zone switches, cada uno con los sistemas de su cuadrante del vehiculo">
+      <!-- computo central -->
+      <rect x="290" y="122" width="80" height="32" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="330" y="142" fill="currentColor" font-size="11" text-anchor="middle">CPU/GPU</text>
+      <rect x="290" y="186" width="80" height="32" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="330" y="206" fill="currentColor" font-size="11" text-anchor="middle">CPU/GPU</text>
+      <line x1="330" y1="154" x2="330" y2="186" stroke="var(--acc)" stroke-width="2"/>
+      <text x="338" y="174" fill="currentColor" font-size="9">10 Gbps</text>
+      <!-- troncales a las zonas -->
+      <line x1="290" y1="138" x2="272" y2="138" stroke="var(--acc)" stroke-width="2"/>
+      <line x1="272" y1="87" x2="272" y2="253" stroke="var(--acc)" stroke-width="2"/>
+      <line x1="272" y1="87" x2="258" y2="87" stroke="var(--acc)" stroke-width="2"/>
+      <line x1="272" y1="253" x2="258" y2="253" stroke="var(--acc)" stroke-width="2"/>
+      <line x1="370" y1="138" x2="388" y2="138" stroke="var(--acc)" stroke-width="2"/>
+      <line x1="388" y1="87" x2="388" y2="253" stroke="var(--acc)" stroke-width="2"/>
+      <line x1="388" y1="87" x2="402" y2="87" stroke="var(--acc)" stroke-width="2"/>
+      <line x1="388" y1="253" x2="402" y2="253" stroke="var(--acc)" stroke-width="2"/>
+      <!-- zone switches -->
+      <rect x="175" y="70" width="83" height="34" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="216" y="91" fill="currentColor" font-size="10" text-anchor="middle">Zone switch 1</text>
+      <rect x="175" y="236" width="83" height="34" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="216" y="257" fill="currentColor" font-size="10" text-anchor="middle">Zone switch 2</text>
+      <rect x="402" y="70" width="83" height="34" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="443" y="91" fill="currentColor" font-size="10" text-anchor="middle">Zone switch 3</text>
+      <rect x="402" y="236" width="83" height="34" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="443" y="257" fill="currentColor" font-size="10" text-anchor="middle">Zone switch 4</text>
+      <text x="216" y="60" fill="currentColor" font-size="9" text-anchor="middle">delantera izquierda</text>
+      <text x="216" y="286" fill="currentColor" font-size="9" text-anchor="middle">trasera izquierda</text>
+      <text x="443" y="60" fill="currentColor" font-size="9" text-anchor="middle">delantera derecha</text>
+      <text x="443" y="286" fill="currentColor" font-size="9" text-anchor="middle">trasera derecha</text>
+      <!-- hojas de la zona 1 -->
+      <line x1="175" y1="76" x2="160" y2="76" stroke="var(--linea)" stroke-width="1.3"/>
+      <text x="156" y="79" fill="currentColor" font-size="9" text-anchor="end">dirección asistida, asientos</text>
+      <line x1="175" y1="87" x2="160" y2="87" stroke="var(--linea)" stroke-width="1.3"/>
+      <text x="156" y="90" fill="currentColor" font-size="9" text-anchor="end">luces adaptativas, frenos ABS</text>
+      <line x1="175" y1="98" x2="160" y2="98" stroke="var(--linea)" stroke-width="1.3"/>
+      <text x="156" y="101" fill="currentColor" font-size="9" text-anchor="end">infotainment</text>
+      <!-- hojas de la zona 2 -->
+      <line x1="175" y1="242" x2="160" y2="242" stroke="var(--linea)" stroke-width="1.3"/>
+      <text x="156" y="245" fill="currentColor" font-size="9" text-anchor="end">control de clima</text>
+      <line x1="175" y1="253" x2="160" y2="253" stroke="var(--linea)" stroke-width="1.3"/>
+      <text x="156" y="256" fill="currentColor" font-size="9" text-anchor="end">tren de potencia</text>
+      <line x1="175" y1="264" x2="160" y2="264" stroke="var(--acc2)" stroke-width="1.3" stroke-dasharray="3 3"/>
+      <text x="156" y="267" fill="currentColor" font-size="9" text-anchor="end">radar y lidar de estacionamiento</text>
+      <!-- hojas de la zona 3 -->
+      <line x1="485" y1="76" x2="500" y2="76" stroke="var(--linea)" stroke-width="1.3"/>
+      <text x="504" y="79" fill="currentColor" font-size="9">V2X (5G)</text>
+      <line x1="485" y1="87" x2="500" y2="87" stroke="var(--linea)" stroke-width="1.3"/>
+      <text x="504" y="90" fill="currentColor" font-size="9">asistencia de cambio de carril</text>
+      <line x1="485" y1="98" x2="500" y2="98" stroke="var(--acc2)" stroke-width="1.3" stroke-dasharray="3 3"/>
+      <text x="504" y="101" fill="currentColor" font-size="9">cámaras de espejos retrovisores</text>
+      <!-- hojas de la zona 4 -->
+      <line x1="485" y1="242" x2="500" y2="242" stroke="var(--linea)" stroke-width="1.3"/>
+      <text x="504" y="245" fill="currentColor" font-size="9">presión de neumáticos</text>
+      <line x1="485" y1="253" x2="500" y2="253" stroke="var(--acc2)" stroke-width="1.3" stroke-dasharray="3 3"/>
+      <text x="504" y="256" fill="currentColor" font-size="9">cámaras traseras</text>
+      <line x1="485" y1="264" x2="500" y2="264" stroke="var(--linea)" stroke-width="1.3"/>
+      <text x="504" y="267" fill="currentColor" font-size="9">asistencia de estacionamiento</text>
+      <!-- leyenda -->
+      <line x1="30" y1="312" x2="60" y2="312" stroke="var(--acc)" stroke-width="2"/>
+      <text x="66" y="315" fill="currentColor" font-size="9">backbone: 10 Gbps Automotive Ethernet</text>
+      <line x1="30" y1="330" x2="60" y2="330" stroke="var(--linea)" stroke-width="1.3"/>
+      <text x="66" y="333" fill="currentColor" font-size="9">enlaces de zona: CAN-FD o 10 Mbps, 100 Mbps y 1 Gbps Automotive Ethernet</text>
+      <line x1="330" y1="312" x2="360" y2="312" stroke="var(--acc2)" stroke-width="1.3" stroke-dasharray="3 3"/>
+      <text x="366" y="315" fill="currentColor" font-size="9">video: más de 10 Gbps (SerDes)</text>
+    </svg>
+    <figcaption>Topología zonal de un vehiculo. Cuatro zone switches, uno por cuadrante, concentran los sistemas cercanos y se cuelgan de un backbone de 10 Gbps que une el par de CPU/GPU centrales. La velocidad del enlace se elige por sistema: CAN-FD o 10 Mbps para control simple (asientos, luces, clima), 100 Mbps y 1 Gbps para infotainment, V2X y asistencias, y más de 10 Gbps por SerDes para las cámaras que reemplazan a los espejos.</figcaption>
+  </figure>
+  <p class="nota">Las dos arquitecturas ilustran la misma decisión de diseño: el tráfico RT se confina a un dominio propio, con protocolo y velocidad elegidos por criticidad, y se lo comunica con el mundo no determinista por un único punto controlado (el gateway en la planta, el bloque de cómputo central en el vehiculo).</p>
+
+  <h3 id="u21-fault-tolerance">Tolerancia a fallos temporales</h3>
+  <p>Un sistema RT debe ser tolerante a fallos de tiempo, y la estrategia depende del tipo:</p>
+  <ul>
+    <li><b>Soft RT (ej. sistema web de gran escala):</b> la especificación admite degradación cuantificada: "el 99% de los requests se responde en 2 segundos, el 1% restante en 10 segundos, se admite 1 outlier cada 1 millon de requests". Si no se cumple, no se deja de atender: se mide y se toma acción.</li>
+    <li><b>Hard RT (ej. misión crítica):</b> "el 100% de los requests debe resolverse en 1 segundo; frente a errores se asume fallo catastrofico y se recomienda hard reset". Aquí es clave el factor de <b>maintainability</b>: si el hard reset tarda medio segundo y es automático, el sistema se recupera y sigue siendo usable; si tarda 10 minutos y requiere que un operador cargue parámetros a mano, la especificación robusta vuelve al sistema inviable.</li>
+  </ul>
+  <div class="idea">Que un sistema declare "ante el mínimo fallo me detengo con error" alcanza para que sea RT (el comportamiento está especificado), pero puede hacerlo invendible o incertificable: un equipo medico que se detiene porque un tubo de luz metio ruido en la señal no pasa la certificación para trabajar con un paciente en riesgo. RT es previsibilidad; la utilidad práctica exige además recuperación barata, rápida y consistente.</div>
+
+  <h3 id="u21-paradigmas">Paradigmas de trabajo: event-triggered y time-triggered</h3>
+  <p>Los sistemas RT, distribuidos o no, se analizan bien con el modelo cliente-servidor: siempre hay alguien que inicia un pedido y otro que computa y responde (el "servidor" puede ser un sensor, un actuador, cualquier cosa que retorne o ejecute algo).</p>
+  <ul>
+    <li><b>Event-triggered:</b> el cliente está en modo activo y, cuando detecta un evento, dispara una comunicación cuya respuesta debe volver dentro del deadline. El diseño exige conocer el tiempo promedio y el tiempo máximo de cada ida y vuelta (medidos sobre los componentes reales) y dejar margen: en el peor caso, ninguna llamada debe exceder el máximo definido, o se pierde el próximo ciclo de control y hay que declarar fallo.</li>
+    <li><b>Time-triggered:</b> se arma una ventana de tiempo dividida en <b>time slots</b>; los eventos solo se emiten dentro de un slot y la respuesta debe llegar dentro del mismo slot o del siguiente, nunca más alla. Si el evento implica una acción física (arrancar un ventilador), la especificación define en cuantos slots se debe observar el efecto: con eso el sistema queda completamente especificado en el tiempo.</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 660 390" role="img" aria-label="Lineas de tiempo de los paradigmas event-triggered y time-triggered, con carriles de cliente y servidor, eventos e1 y e2, computos f1 a f4 y slots de tiempo delimitados por lineas verticales punteadas">
+      <!-- ================= Event-triggered ================= -->
+      <text x="8" y="24" fill="currentColor" font-size="13" font-weight="bold">Event-triggered: cada evento dispara la comunicación</text>
+      <text x="8" y="64" fill="currentColor" font-size="11">Cliente</text>
+      <text x="8" y="134" fill="currentColor" font-size="11">Servidor</text>
+      <!-- carril cliente: activo / inactivo mientras espera -->
+      <line x1="120" y1="60" x2="190" y2="60" stroke="currentColor" stroke-width="3"/>
+      <line x1="190" y1="60" x2="300" y2="60" stroke="var(--linea)" stroke-width="1.3"/>
+      <line x1="300" y1="60" x2="400" y2="60" stroke="currentColor" stroke-width="3"/>
+      <line x1="400" y1="60" x2="510" y2="60" stroke="var(--linea)" stroke-width="1.3"/>
+      <line x1="510" y1="60" x2="610" y2="60" stroke="currentColor" stroke-width="3"/>
+      <polygon points="620,60 610,55 610,65" fill="var(--linea)"/>
+      <text x="628" y="64" fill="currentColor" font-size="10">t</text>
+      <!-- carril servidor -->
+      <line x1="120" y1="130" x2="225" y2="130" stroke="var(--linea)" stroke-width="1.3"/>
+      <line x1="225" y1="130" x2="265" y2="130" stroke="currentColor" stroke-width="3"/>
+      <line x1="265" y1="130" x2="435" y2="130" stroke="var(--linea)" stroke-width="1.3"/>
+      <line x1="435" y1="130" x2="475" y2="130" stroke="currentColor" stroke-width="3"/>
+      <line x1="475" y1="130" x2="610" y2="130" stroke="var(--linea)" stroke-width="1.3"/>
+      <polygon points="620,130 610,125 610,135" fill="var(--linea)"/>
+      <text x="628" y="134" fill="currentColor" font-size="10">t</text>
+      <!-- pedido 1 -->
+      <circle cx="190" cy="60" r="4" fill="var(--acc)"/>
+      <text x="190" y="48" fill="currentColor" font-size="10" text-anchor="middle">e1</text>
+      <line x1="192" y1="64" x2="222" y2="126" stroke="var(--acc)" stroke-width="1.4"/>
+      <polygon points="225,130 216,127 221,121" fill="var(--acc)"/>
+      <circle cx="225" cy="130" r="4" fill="var(--acc)"/>
+      <text x="225" y="148" fill="currentColor" font-size="10" text-anchor="middle">f1</text>
+      <circle cx="265" cy="130" r="4" fill="var(--acc)"/>
+      <text x="265" y="148" fill="currentColor" font-size="10" text-anchor="middle">f2</text>
+      <line x1="267" y1="126" x2="297" y2="64" stroke="var(--acc2)" stroke-width="1.4" stroke-dasharray="5 3"/>
+      <polygon points="300,60 291,63 296,69" fill="var(--acc2)"/>
+      <circle cx="300" cy="60" r="4" fill="var(--acc2)"/>
+      <text x="300" y="48" fill="currentColor" font-size="10" text-anchor="middle">e1_resp</text>
+      <!-- pedido 2 -->
+      <circle cx="400" cy="60" r="4" fill="var(--acc)"/>
+      <text x="400" y="48" fill="currentColor" font-size="10" text-anchor="middle">e2</text>
+      <line x1="402" y1="64" x2="432" y2="126" stroke="var(--acc)" stroke-width="1.4"/>
+      <polygon points="435,130 426,127 431,121" fill="var(--acc)"/>
+      <circle cx="435" cy="130" r="4" fill="var(--acc)"/>
+      <text x="435" y="148" fill="currentColor" font-size="10" text-anchor="middle">f3</text>
+      <circle cx="475" cy="130" r="4" fill="var(--acc)"/>
+      <text x="475" y="148" fill="currentColor" font-size="10" text-anchor="middle">f4</text>
+      <line x1="477" y1="126" x2="507" y2="64" stroke="var(--acc2)" stroke-width="1.4" stroke-dasharray="5 3"/>
+      <polygon points="510,60 501,63 506,69" fill="var(--acc2)"/>
+      <circle cx="510" cy="60" r="4" fill="var(--acc2)"/>
+      <text x="510" y="48" fill="currentColor" font-size="10" text-anchor="middle">e2_resp</text>
+      <!-- deadline del primer ciclo -->
+      <line x1="330" y1="36" x2="330" y2="168" stroke="var(--acc2)" stroke-width="1.3" stroke-dasharray="4 3"/>
+      <text x="336" y="176" fill="currentColor" font-size="10">deadline de e1: e1_resp tiene que caer antes de esta linea</text>
+      <line x1="190" y1="172" x2="300" y2="172" stroke="var(--linea)" stroke-width="1"/>
+      <line x1="190" y1="166" x2="190" y2="178" stroke="var(--linea)" stroke-width="1"/>
+      <line x1="300" y1="166" x2="300" y2="178" stroke="var(--linea)" stroke-width="1"/>
+      <text x="245" y="192" fill="currentColor" font-size="10" text-anchor="middle">ida y vuelta e1 a e1_resp</text>
+
+      <!-- ================= Time-triggered ================= -->
+      <text x="8" y="216" fill="currentColor" font-size="13" font-weight="bold">Time-triggered: los eventos solo salen dentro de su slot</text>
+      <text x="8" y="256" fill="currentColor" font-size="11">Cliente</text>
+      <text x="8" y="326" fill="currentColor" font-size="11">Servidor</text>
+      <!-- fronteras de slot -->
+      <line x1="150" y1="234" x2="150" y2="340" stroke="var(--acc2)" stroke-width="1.2" stroke-dasharray="3 4"/>
+      <line x1="260" y1="234" x2="260" y2="340" stroke="var(--acc2)" stroke-width="1.2" stroke-dasharray="3 4"/>
+      <line x1="370" y1="234" x2="370" y2="340" stroke="var(--acc2)" stroke-width="1.2" stroke-dasharray="3 4"/>
+      <line x1="480" y1="234" x2="480" y2="340" stroke="var(--acc2)" stroke-width="1.2" stroke-dasharray="3 4"/>
+      <line x1="590" y1="234" x2="590" y2="340" stroke="var(--acc2)" stroke-width="1.2" stroke-dasharray="3 4"/>
+      <text x="205" y="356" fill="currentColor" font-size="10" text-anchor="middle">slot 1</text>
+      <text x="315" y="356" fill="currentColor" font-size="10" text-anchor="middle">slot 2</text>
+      <text x="425" y="356" fill="currentColor" font-size="10" text-anchor="middle">slot 3</text>
+      <text x="535" y="356" fill="currentColor" font-size="10" text-anchor="middle">slot 4</text>
+      <!-- carriles -->
+      <line x1="120" y1="252" x2="610" y2="252" stroke="currentColor" stroke-width="3"/>
+      <polygon points="620,252 610,247 610,257" fill="var(--linea)"/>
+      <text x="628" y="256" fill="currentColor" font-size="10">t</text>
+      <line x1="120" y1="322" x2="232" y2="322" stroke="var(--linea)" stroke-width="1.3"/>
+      <line x1="232" y1="322" x2="254" y2="322" stroke="currentColor" stroke-width="3"/>
+      <line x1="254" y1="322" x2="342" y2="322" stroke="var(--linea)" stroke-width="1.3"/>
+      <line x1="342" y1="322" x2="364" y2="322" stroke="currentColor" stroke-width="3"/>
+      <line x1="364" y1="322" x2="452" y2="322" stroke="var(--linea)" stroke-width="1.3"/>
+      <line x1="452" y1="322" x2="474" y2="322" stroke="currentColor" stroke-width="3"/>
+      <line x1="474" y1="322" x2="562" y2="322" stroke="var(--linea)" stroke-width="1.3"/>
+      <line x1="562" y1="322" x2="584" y2="322" stroke="currentColor" stroke-width="3"/>
+      <line x1="584" y1="322" x2="610" y2="322" stroke="var(--linea)" stroke-width="1.3"/>
+      <polygon points="620,322 610,317 610,327" fill="var(--linea)"/>
+      <text x="628" y="326" fill="currentColor" font-size="10">t</text>
+      <!-- eventos por slot -->
+      <circle cx="175" cy="252" r="4" fill="var(--acc)"/>
+      <text x="175" y="242" fill="currentColor" font-size="10" text-anchor="middle">e1</text>
+      <line x1="177" y1="256" x2="229" y2="318" stroke="var(--acc)" stroke-width="1.4"/>
+      <polygon points="232,322 223,319 228,313" fill="var(--acc)"/>
+      <circle cx="232" cy="322" r="4" fill="var(--acc)"/>
+      <text x="232" y="340" fill="currentColor" font-size="10" text-anchor="middle">f1</text>
+      <circle cx="285" cy="252" r="4" fill="var(--acc)"/>
+      <text x="285" y="242" fill="currentColor" font-size="10" text-anchor="middle">e2</text>
+      <line x1="287" y1="256" x2="339" y2="318" stroke="var(--acc)" stroke-width="1.4"/>
+      <polygon points="342,322 333,319 338,313" fill="var(--acc)"/>
+      <circle cx="342" cy="322" r="4" fill="var(--acc)"/>
+      <text x="342" y="340" fill="currentColor" font-size="10" text-anchor="middle">f2</text>
+      <circle cx="395" cy="252" r="4" fill="var(--acc)"/>
+      <text x="395" y="242" fill="currentColor" font-size="10" text-anchor="middle">e3</text>
+      <line x1="397" y1="256" x2="449" y2="318" stroke="var(--acc)" stroke-width="1.4"/>
+      <polygon points="452,322 443,319 448,313" fill="var(--acc)"/>
+      <circle cx="452" cy="322" r="4" fill="var(--acc)"/>
+      <text x="452" y="340" fill="currentColor" font-size="10" text-anchor="middle">f3</text>
+      <circle cx="505" cy="252" r="4" fill="var(--acc)"/>
+      <text x="505" y="242" fill="currentColor" font-size="10" text-anchor="middle">e4</text>
+      <line x1="507" y1="256" x2="559" y2="318" stroke="var(--acc)" stroke-width="1.4"/>
+      <polygon points="562,322 553,319 558,313" fill="var(--acc)"/>
+      <circle cx="562" cy="322" r="4" fill="var(--acc)"/>
+      <text x="562" y="340" fill="currentColor" font-size="10" text-anchor="middle">f4</text>
+      <!-- leyenda -->
+      <line x1="120" y1="376" x2="150" y2="376" stroke="currentColor" stroke-width="3"/>
+      <text x="156" y="380" fill="currentColor" font-size="10">activo</text>
+      <line x1="210" y1="376" x2="240" y2="376" stroke="var(--linea)" stroke-width="1.3"/>
+      <text x="246" y="380" fill="currentColor" font-size="10">inactivo (esperando)</text>
+      <line x1="380" y1="376" x2="410" y2="376" stroke="var(--acc2)" stroke-width="1.2" stroke-dasharray="3 4"/>
+      <text x="416" y="380" fill="currentColor" font-size="10">frontera de slot o deadline</text>
+    </svg>
+    <figcaption>Arriba, event-triggered: el cliente está activo, detecta el evento e1, lo emite y queda inactivo esperando; el servidor pasa a activo entre f1 y f2 (el cómputo) y devuelve e1_resp. Lo que el diseño tiene que acotar es la ida y vuelta completa e1 a e1_resp, que debe caer siempre antes del deadline. Abajo, time-triggered: el eje se parte en slots iguales, cada evento se emite dentro de su slot y su cómputo tiene que terminar dentro del mismo slot (o del siguiente, si la especificación lo permite); no hace falta acotar cada llamada por separado porque el slot ya es la cota.</figcaption>
+  </figure>
+  <div class="ej">Si le pido información a un sensor y el sensor demora más de lo previsto, o el canal de comunicación se degrada y el mensaje tarda de más, en ambos casos se incumple el deadline. El truco de diseño es el mismo: tiempo promedio versus tiempo máximo de cada llamada, con buffer para los errores posibles.</div>
+
+  <h3 id="u21-sistemas-de-control">Sistemas de control</h3>
+  <p>Un <b>sistema de control</b> intenta controlar, de forma manual o automática, alguna realidad del medio físico. Casi todo sistema de control termina siendo RT (tiene especificaciones temporales que cumplir), pero no todo sistema RT es un sistema de control.</p>
+  <p>Ejemplos: en la industria, esquemas de irrigación, transferencia termica, procesos quimicos, líneas de producción con robots y cintas; en la vida cotidiana, termostatos, ascensores, expendedores de liquidos, control de luminosidad, electrodomesticos.</p>
+
+  <h4 id="u21-nociones-de-control">Nociones y terminologia</h4>
+  <div class="def"><b>Control.</b> Capacidad de actuar para garantizar el comportamiento de un suceso.</div>
+  <div class="def"><b>Proceso.</b> Toda sucesión de operaciones que se desea controlar.</div>
+  <div class="def"><b>Variable controlada.</b> Cantidad o condición que se mide o controla; es la salida del sistema. En un aire acondicionado: la temperatura de la habitación (no la energía que consume ni la velocidad del ventilador).</div>
+  <div class="def"><b>Variable manipulada.</b> Cantidad o condición que se modifica para afectar el valor de la variable controlada. En el aire: la velocidad del ventilador o la tensión aplicada a sus terminales.</div>
+  <div class="def"><b>Perturbación.</b> Senial que afecta negativamente la salida del sistema y que el controlador no conoce: alguien dejo la ventana abierta, hay un horno prendido. No es constante ni predecible; no se sabe de antemano cuanto compensar.</div>
+  <div class="def"><b>Planta.</b> El sistema físico que se desea controlar.</div>
+  <div class="def"><b>Controlador.</b> Sistema que determina la actuación necesaria para conseguir el objetivo del proceso, tomando información de los sensores y comandando actuadores.</div>
+  <div class="def"><b>Actuador.</b> Contraparte del sensor: el sensor transforma el sistema físico en un dato; el actuador, dado un dato, opera sobre el sistema físico para modificar la planta.</div>
+
+  <h4 id="u21-lazo-abierto-cerrado">Lazo abierto y lazo cerrado</h4>
+  <div class="def"><b>Control a lazo abierto.</b> La salida del sistema no afecta la acción de control: es control manual, no automatizado. Si coloco A, obtengo A, sin retroalimentación.</div>
+  <div class="def"><b>Control a lazo cerrado (realimentado, feedback).</b> Se usa información sobre el estado del sistema (la salida medida se compara con la referencia y se calcula el error) para actuar y llevar la salida a los valores deseados.</div>
+  <figure class="diag">
+    <svg viewBox="0 0 640 300" role="img" aria-label="Diagramas de control a lazo abierto y lazo cerrado">
+      <!-- Lazo abierto -->
+      <text x="20" y="24" fill="currentColor" font-size="13" font-weight="bold">Lazo abierto</text>
+      <rect x="130" y="40" width="120" height="40" fill="none" stroke="var(--acc)" stroke-width="1.5"/>
+      <text x="190" y="65" fill="currentColor" font-size="12" text-anchor="middle">Controlador</text>
+      <rect x="330" y="40" width="120" height="40" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="390" y="65" fill="currentColor" font-size="12" text-anchor="middle">Planta</text>
+      <line x1="30" y1="60" x2="130" y2="60" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="130,60 122,56 122,64" fill="currentColor"/>
+      <text x="75" y="52" fill="currentColor" font-size="10" text-anchor="middle">Referencia</text>
+      <line x1="250" y1="60" x2="330" y2="60" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="330,60 322,56 322,64" fill="currentColor"/>
+      <text x="290" y="52" fill="currentColor" font-size="10" text-anchor="middle">Entrada</text>
+      <line x1="450" y1="60" x2="560" y2="60" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="560,60 552,56 552,64" fill="currentColor"/>
+      <text x="505" y="52" fill="currentColor" font-size="10" text-anchor="middle">Salida</text>
+      <line x1="390" y1="14" x2="390" y2="40" stroke="var(--linea)" stroke-width="1.2" stroke-dasharray="4 3"/>
+      <text x="390" y="10" fill="currentColor" font-size="10" text-anchor="middle">Perturbaciones</text>
+
+      <!-- Lazo cerrado -->
+      <text x="20" y="144" fill="currentColor" font-size="13" font-weight="bold">Lazo cerrado</text>
+      <circle cx="95" cy="190" r="14" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <text x="95" y="194" fill="currentColor" font-size="12" text-anchor="middle">&#8722;</text>
+      <line x1="20" y1="190" x2="81" y2="190" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="81,190 73,186 73,194" fill="currentColor"/>
+      <text x="48" y="182" fill="currentColor" font-size="10" text-anchor="middle">Referencia</text>
+      <rect x="160" y="170" width="120" height="40" fill="none" stroke="var(--acc)" stroke-width="1.5"/>
+      <text x="220" y="195" fill="currentColor" font-size="12" text-anchor="middle">Controlador</text>
+      <line x1="109" y1="190" x2="160" y2="190" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="160,190 152,186 152,194" fill="currentColor"/>
+      <text x="134" y="182" fill="currentColor" font-size="10" text-anchor="middle">Error</text>
+      <rect x="360" y="170" width="120" height="40" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="420" y="195" fill="currentColor" font-size="12" text-anchor="middle">Planta</text>
+      <line x1="280" y1="190" x2="360" y2="190" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="360,190 352,186 352,194" fill="currentColor"/>
+      <text x="320" y="182" fill="currentColor" font-size="10" text-anchor="middle">Entrada</text>
+      <line x1="480" y1="190" x2="600" y2="190" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="600,190 592,186 592,194" fill="currentColor"/>
+      <text x="540" y="182" fill="currentColor" font-size="10" text-anchor="middle">Salida</text>
+      <line x1="420" y1="144" x2="420" y2="170" stroke="var(--linea)" stroke-width="1.2" stroke-dasharray="4 3"/>
+      <text x="420" y="140" fill="currentColor" font-size="10" text-anchor="middle">Perturbaciones</text>
+      <!-- feedback -->
+      <line x1="545" y1="190" x2="545" y2="255" stroke="currentColor" stroke-width="1.2"/>
+      <line x1="545" y1="255" x2="95" y2="255" stroke="currentColor" stroke-width="1.2"/>
+      <line x1="95" y1="255" x2="95" y2="204" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="95,204 91,212 99,212" fill="currentColor"/>
+      <text x="320" y="270" fill="currentColor" font-size="10" text-anchor="middle">Realimentacion (medicion de la salida)</text>
+    </svg>
+    <figcaption>Lazo abierto: la salida no influye en el control. Lazo cerrado: la salida medida se resta de la referencia y el error gobierna la actuación.</figcaption>
+  </figure>
+  <div class="ej">
+    <p><b>Aire acondicionado.</b> Versión lazo abierto (equipos viejos): botonera con "frio, muy frio, super frio". Pongo "muy frio", la temperatura baja de 31 a 26 grados y se estanca; cambio a mano la referencia a "super frio" y llego a 24. Alguien abre la ventana, la pieza vuelve a 28 y el sistema no se entera: la corrección es siempre manual.</p>
+    <p>Versión lazo cerrado: fijo la referencia en 24 grados. El controlador mide 31, calcula error 7, enfria a fondo; mide 25, error 1, afloja; mide 23, se paso por 1, apaga; mide 24, error 0, prende y apaga de a poquito para sostenerlo. Si aparece la perturbación (ventana abierta), el error crece de inmediato y el sistema la cancela solo, inyectando más frio hasta volver a 24.</p>
+  </div>
+  <p>Existen otras variantes de lazos, pero para la materia alcanza con este concepto: usar (o no) información de la salida para decidir cuanto actuar.</p>
+
+  <h3 id="u21-programacion-rt">Programación y tiempo real</h3>
+  <p>Como se programan estos sistemas:</p>
+  <ul>
+    <li>Arquitecturas <a href="#u21-paradigmas">event-triggered o time-triggered</a>.</li>
+    <li><b>Scheduling</b> con esquemas non-preemptive, donde una tarea toma el control y no lo cede hasta terminar, y <b>esquemas de prioridades</b> diseñados para que los deadlines se cumplan. Puede que se cumplan los deadlines de un subsistema y no los de otro: eso también es parte de la definición del sistema.</li>
+    <li><b>Protocolos de comunicación específicos</b>, con determinismo en todas las capas.</li>
+    <li><b>Evitar algoritmos de backoff:</b> los reintentos con esperas variables (como los de TCP o los "reintente más tarde" de una API externa) introducen imprevisibilidad, exactamente lo que un sistema RT no puede tolerar. En RT son elementos prohibitivos.</li>
+  </ul>
+
+  <h3 id="u21-casos-de-estudio">Casos de estudio: fallos famosos</h3>
+  <p>La causa raiz de estos fallos es siempre alguna falencia de programación o del proceso de desarrollo, por no aplicar teoria de sistemas RT o de calidad de software.</p>
+
+  <h4 id="u21-mars-pathfinder">Mars Pathfinder: inversión de prioridades</h4>
+  <p>Primera misión a Marte con rovers. A los pocos días de aterrizar, el rover entra en un ciclo continuo de reinicios al intentar enviar datos a la Tierra. Causas detectadas:</p>
+  <ul>
+    <li>Un <b>watchdog</b> reiniciaba el sistema cuando una tarea crítica (envio de datos a la Tierra) perdia su deadline.</li>
+    <li><b>Inversión de prioridades:</b> enunciado corto, una tarea de alta prioridad terminaba postergada por tareas de prioridad media. El mecanismo fino es el que importa: la tarea de alta prioridad se bloquea esperando un lock que retiene una tarea de baja prioridad, y las tareas de prioridad media (que no necesitan ese lock) preemptan a la de baja prioridad, con lo cual está nunca llega a liberarlo.</li>
+  </ul>
+  <div class="def">
+    <b>Inversión de prioridades.</b> Situación en la que una tarea de alta prioridad queda a la espera de una tarea de menor prioridad, por un recurso compartido protegido con exclusión mutua (un mutex, lock o semáforo) que la de baja prioridad retiene. Es <b>no acotada</b> (unbounded priority inversión) cuando el tiempo de espera no tiene cota: cualquier tarea de prioridad intermedia que se vuelva ejecutable preempta a la de baja prioridad, alarga su sección crítica y, por transitividad, la espera de la de alta prioridad.
+  </div>
+  <figure class="diag">
+    <svg viewBox="0 0 660 315" role="img" aria-label="Diagrama de Gantt de inversión de prioridades no acotada: la tarea de baja prioridad toma el lock S, la de alta prioridad la preempta pero se bloquea al intentar tomar S, y las tareas de prioridad media preemptan a la de baja prioridad de forma indefinida">
+      <!-- etiquetas de carriles -->
+      <text x="8" y="76" fill="currentColor" font-size="11">Prioridad alta</text>
+      <text x="8" y="89" fill="currentColor" font-size="10">(tarea crítica)</text>
+      <text x="8" y="168" fill="currentColor" font-size="11">Prioridad media</text>
+      <text x="8" y="181" fill="currentColor" font-size="10">(no usan S)</text>
+      <text x="8" y="256" fill="currentColor" font-size="11">Prioridad baja</text>
+      <text x="8" y="269" fill="currentColor" font-size="10">(retiene S)</text>
+      <!-- lineas de base -->
+      <line x1="120" y1="98" x2="640" y2="98" stroke="var(--linea)" stroke-width="1.2"/>
+      <line x1="120" y1="190" x2="640" y2="190" stroke="var(--linea)" stroke-width="1.2"/>
+      <line x1="120" y1="278" x2="640" y2="278" stroke="var(--linea)" stroke-width="1.2"/>
+      <!-- baja prioridad: ejecuta sin S, luego reteniendo S -->
+      <rect x="170" y="254" width="50" height="24" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <rect x="220" y="254" width="45" height="24" fill="currentColor" fill-opacity="0.25" stroke="currentColor" stroke-width="1.5"/>
+      <rect x="325" y="254" width="40" height="24" fill="currentColor" fill-opacity="0.25" stroke="currentColor" stroke-width="1.5"/>
+      <text x="200" y="238" fill="currentColor" font-size="10" text-anchor="end">toma Lock S</text>
+      <line x1="203" y1="242" x2="224" y2="252" stroke="currentColor" stroke-width="1"/>
+      <!-- alta prioridad: corre un instante y se bloquea -->
+      <rect x="265" y="74" width="60" height="24" fill="var(--acc)" fill-opacity="0.25" stroke="var(--acc)" stroke-width="1.5"/>
+      <line x1="325" y1="94" x2="620" y2="94" stroke="var(--acc)" stroke-width="1.4" stroke-dasharray="5 4"/>
+      <text x="480" y="86" fill="currentColor" font-size="10" text-anchor="middle">alta prioridad bloqueada esperando S</text>
+      <text x="333" y="58" fill="currentColor" font-size="10">Intento de lock S: queda bloqueada</text>
+      <!-- prioridad media: cadena de tareas que preemptan a la baja -->
+      <rect x="365" y="166" width="52" height="24" fill="var(--acc2)" fill-opacity="0.25" stroke="var(--acc2)" stroke-width="1.5"/>
+      <rect x="420" y="166" width="50" height="24" fill="var(--acc2)" fill-opacity="0.25" stroke="var(--acc2)" stroke-width="1.5"/>
+      <rect x="473" y="166" width="45" height="24" fill="var(--acc2)" fill-opacity="0.25" stroke="var(--acc2)" stroke-width="1.5"/>
+      <rect x="521" y="166" width="54" height="24" fill="var(--acc2)" fill-opacity="0.25" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="586" y="184" fill="currentColor" font-size="14">...</text>
+      <text x="470" y="156" fill="currentColor" font-size="11" text-anchor="middle">Inversión de prioridad no acotada</text>
+      <!-- preempcion de la baja por la alta -->
+      <line x1="265" y1="278" x2="265" y2="98" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="265,98 261,108 269,108" fill="currentColor"/>
+      <text x="258" y="146" fill="currentColor" font-size="10" text-anchor="end">Preempt.</text>
+      <!-- bloqueo: vuelve a correr la baja -->
+      <line x1="325" y1="98" x2="325" y2="278" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="325,278 321,268 329,268" fill="currentColor"/>
+      <!-- preempcion de la baja por las medias -->
+      <line x1="365" y1="278" x2="365" y2="190" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="365,190 361,200 369,200" fill="currentColor"/>
+      <text x="373" y="232" fill="currentColor" font-size="10">Preempt.</text>
+      <!-- deadline perdido -->
+      <line x1="600" y1="32" x2="600" y2="284" stroke="var(--acc2)" stroke-width="1.4" stroke-dasharray="4 3"/>
+      <text x="636" y="26" fill="currentColor" font-size="10" text-anchor="end">deadline de la tarea crítica: se pierde y el watchdog reinicia</text>
+      <!-- eje de tiempo -->
+      <line x1="120" y1="300" x2="645" y2="300" stroke="var(--linea)" stroke-width="1.2"/>
+      <polygon points="645,300 637,296 637,304" fill="var(--linea)"/>
+      <text x="380" y="295" fill="currentColor" font-size="10" text-anchor="middle">tiempo</text>
+    </svg>
+    <figcaption>Inversión de prioridades no acotada. La caja vacia de la fila inferior es la tarea de baja prioridad ejecutando normalmente; las cajas sombreadas de esa misma fila son los tramos en los que retiene el lock S. La de alta prioridad la preempta, intenta tomar S y se bloquea, con lo cual la de baja prioridad vuelve a correr; ahí entran las tareas de prioridad media, que la preemptan una tras otra y estiran indefinidamente la sección crítica. La de alta prioridad pierde su deadline y el watchdog reinicia el sistema.</figcaption>
+  </figure>
+  <p>Los dos motivos se encadenan: la inversión hace que la tarea crítica pierda su deadline y el watchdog, al detectarlo, reinicia el rover, con lo cual el ciclo se repite en cada intento de envio de datos. El problema es trivial una vez descubierto (como estaban armadas las colas de tareas por prioridad), pero ilustra lo difícil que es razonar el scheduling de un sistema distribuido con tantos componentes.</p>
+  <div class="warn">La forma abreviada del fenómeno ("una tarea de prioridad media interrumpe a una de alta prioridad") tomada literalmente es imposible: un scheduler por prioridades nunca elige a la media si la alta está lista para ejecutar. La alta tiene que estar <b>bloqueada</b>, y lo que la bloquea es un recurso compartido en manos de una tarea de baja prioridad, a la que la media si puede preemptar. Sin recurso compartido con exclusión mutua no hay inversión de prioridades: es el dato que se pide precisar en el final.</div>
+  <details class="mas">
+    <summary>Como se acota la inversión (no lo desarrolla la clase)</summary>
+    <p>La cátedra se queda en el diagnóstico y no cubre la solución, pero conviene tenerla a mano. La familia de soluciones estándar consiste en elevar temporalmente la prioridad de quien retiene el lock, para que nadie de prioridad intermedia pueda preemptarlo: con <b>herencia de prioridad</b> la tarea de baja prioridad hereda la prioridad de la tarea más prioritaria que quedo bloqueada esperando el recurso, y la devuelve al liberarlo; con <b>priority ceiling</b> cada recurso lleva asociada de antemano la prioridad más alta de las tareas que pueden tomarlo, y quien lo toma sube directo a ese techo. En ambos casos la espera de la tarea de alta prioridad queda acotada por la duración de la sección crítica, que es una cota calculable, y el sistema vuelve a ser analizable.</p>
+  </details>
+
+  <h4 id="u21-therac-25">Therac-25: race conditions y overflow sin frenos de hardware</h4>
+  <p>Acelerador de electrones con control RT para tratamiento de pacientes por radiación. En dos años de uso se detectaron al menos 6 fallos con pacientes recibiendo hasta 100 veces la radiación recetada. Los bugs ya existian en el modelo anterior (Therac-20), pero ahí habia <b>topes de hardware</b> que frenaban la ejecución y devolvian el control al operador; por reducción de costos, el Therac-25 elimino esos controles y confio solo en el software:</p>
+  <ul>
+    <li><b>Race condition:</b> la UI mostraba al operador un modo erroneo durante el bootstrapping del magnetron, permitiendole elegir opciones que no correspondian.</li>
+    <li><b>Overflow:</b> el contador de chequeos fallidos usaba 1 byte; en el error número 256 desbordaba a 0, y si el operador tocaba enter justo en ese instante, se aplicaba la sobredosis.</li>
+  </ul>
+
+  <h4 id="u21-ariane-5">Ariane 5: cast overflow y redundancia sin diversidad</h4>
+  <p>Cohete de la Agencia Espacial Europea. En su despegue de junio de 1996 gira bruscamente, las fuerzas laterales lo quiebran y explota en el aire. Se habia heredado el sistema de navegación inercial del Ariane 4 casi sin modificaciones y casi sin testing. El análisis post-mortem encontro:</p>
+  <ul>
+    <li><b>Cast overflow:</b> el algoritmo de navegación casteaba valores de 64 bits a variables de 16 bits sin chequear overflow, con datos de los sensores de velocidad y aceleración.</li>
+    <li><b>Error en los sistemas redundantes:</b> el sistema redundante era un clon exacto (misma versión de código, mismos valores de sensores), así que reprodujo exactamente el mismo fallo. Con 50 réplicas iguales habría pasado lo mismo. La computadora principal, sin un else programado para ese caso, siguio adelante: un actuador se activo a fondo y la nave giro y exploto.</li>
+  </ul>
+  <p>El pipeline de navegación era corto y sin chequeos intermedios, y eso explica que un solo cast alcanzara para perder el cohete:</p>
+  <figure class="diag">
+    <svg viewBox="0 0 660 130" role="img" aria-label="Pipeline de navegación del Ariane 5: sensores de aceleración y velocidad, sistema de navegación inercial, computadora principal y actuadores de tobera">
+      <rect x="20" y="45" width="130" height="42" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <text x="85" y="62" fill="currentColor" font-size="10" text-anchor="middle">Sensores de aceleración</text>
+      <text x="85" y="76" fill="currentColor" font-size="10" text-anchor="middle">y velocidad</text>
+      <rect x="200" y="45" width="120" height="42" fill="none" stroke="var(--acc)" stroke-width="2"/>
+      <text x="260" y="62" fill="currentColor" font-size="10" text-anchor="middle">Navegación inercial</text>
+      <text x="260" y="76" fill="currentColor" font-size="10" text-anchor="middle">(INS)</text>
+      <rect x="370" y="45" width="120" height="42" fill="none" stroke="var(--linea)" stroke-width="1.5"/>
+      <text x="430" y="70" fill="currentColor" font-size="10" text-anchor="middle">Computadora principal</text>
+      <rect x="540" y="45" width="110" height="42" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
+      <text x="595" y="62" fill="currentColor" font-size="10" text-anchor="middle">Actuadores de</text>
+      <text x="595" y="76" fill="currentColor" font-size="10" text-anchor="middle">tobera</text>
+      <line x1="150" y1="66" x2="200" y2="66" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="200,66 192,62 192,70" fill="currentColor"/>
+      <line x1="320" y1="66" x2="370" y2="66" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="370,66 362,62 362,70" fill="currentColor"/>
+      <line x1="490" y1="66" x2="540" y2="66" stroke="currentColor" stroke-width="1.2"/>
+      <polygon points="540,66 532,62 532,70" fill="currentColor"/>
+      <line x1="260" y1="20" x2="260" y2="45" stroke="var(--acc)" stroke-width="1.3" stroke-dasharray="4 3"/>
+      <text x="268" y="18" fill="currentColor" font-size="10">acá ocurre el cast de 64 a 16 bits sin chequeo de overflow</text>
+      <text x="330" y="112" fill="currentColor" font-size="10" text-anchor="middle">el dato corrupto viaja hasta el actuador sin que nadie lo valide</text>
+    </svg>
+    <figcaption>Pipeline de navegación del Ariane 5. El overflow se produce dentro del INS, pero el diagrama muestra por que fue fatal: no hay ninguna etapa entre el INS y el actuador que valide rangos, así que la computadora principal toma el valor corrupto como valido y lo traduce en una actuación a fondo de la tobera.</figcaption>
+  </figure>
+  <div class="idea"><b>Redundancia sin diversidad no tolera fallos de software.</b> Réplicas identicas fallan identicamente ante el mismo error sembrado. Escribir versiones distintas del sistema (equipos de programación distintos) y buscar consenso entre sus salidas minimiza que los errores ocurran en el mismo punto. Es el mismo principio que evitar comprar hardware identico e instalarlo el mismo día: los elementos deben ser lo bastante variados para no fallar todos juntos.</div>
+
+  <h4 id="u21-mt-gox">Mt. Gox (caso no RT): errores sin mecanismo de detección</h4>
+  <p>Uno de los exchanges de Bitcoin más grandes del mundo. En 2011, un glitch en el software de generación de transacciones introdujo un hash erroneo de la dirección del receptor. Como las transacciones de Bitcoin pueden ser incobrables (unredeemable) por definición y no existe mecanismo de detección de errores en el protocolo, cerca de 2500 bitcoins se aplicaron a transacciones incobrables antes de detectar el problema. No es un fallo de tiempo real, pero muestra la misma lección: el costo de operar sin controles frente a errores de software.</p>
+  <p>El bug concreto se ve comparando el script de la transacción esperado contra el generado:</p>
+<pre><code>Esperado                          Generado por el glitch
+OP_DUP                            OP_DUP
+OP_HASH160                        OP_HASH160
+f2e63314c350094550c703fcdcd       0
+OP_EQUALVERIFY                    OP_EQUALVERIFY
+OP_CHECKSIG                       OP_CHECKSIG</code></pre>
+  <p>En el lugar donde tenia que ir el hash de la dirección del receptor, el software emitio el literal <code>0</code>. El script sigue siendo sintacticamente valido y la red lo acepta, pero ninguna clave puede satisfacer el <code>OP_EQUALVERIFY</code> contra ese valor: los fondos quedan gastados y nadie puede reclamarlos. Ninguna capa del protocolo puede detectar el error, porque desde su punto de vista la transacción es perfectamente legal.</p>
+
+  <div class="warn">La cátedra aclara que esta unidad está fuera del programa práctico (no hay TP ni ejercicios sobre RT) pero que a nivel conceptual es material de coloquio: saber diferenciar un sistema RT de uno que no lo es, hard de soft, y previsibilidad de performance, es lo que se evalua.</div>
+
+  <details class="mas">
+    <summary>Bibliografia de la unidad</summary>
+    <ul>
+      <li>P. Verissimo, L. Rodriguez: Distributed Systems for Systems Architects, Kluwer, 2001. Cap. 11 (Real Time System Foundations) y Cap. 12 (Paradigms of Real Time). Es el libro que la cátedra recomienda como el que mejor explica el tema.</li>
+      <li>Leveson, Turner: An investigation of the Therac-25 accidents, IEEE Computer, 1997.</li>
+      <li>El white paper sobre Ariane 5 esta escrito por Ben-Ari, el mismo autor clásico de teoria de programación concurrente.</li>
+      <li>Bob Martin: The Future of Programming, charla en .NET Oxford, 2019 (disponible en YouTube). Es la referencia con la que la cátedra cierra la unidad, sobre la responsabilidad profesional del programador a medida que el software pasa a gobernar sistemas físicos.</li>
+    </ul>
+  </details>
+</section>

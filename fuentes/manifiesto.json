@@ -1,0 +1,180 @@
+{
+ "u01": {
+  "titulo": "Introduccion a Sistemas Distribuidos",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 01 - Introduccion.txt",
+   "repo/clases--1_-_Introduccion.txt",
+   "notion/19-08-intro-sistemas-distribuidos.md"
+  ]
+ },
+ "u02": {
+  "titulo": "Multitasking, multithreading y comunicaciones",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 02 - Multitasking y Comunicaciones.txt",
+   "repo/clases--2_-_Multithreading_y_Multiprocessing.txt",
+   "notion/21-08-multithreading-multiprocessing-comunicaciones.md"
+  ]
+ },
+ "u03": {
+  "titulo": "Paralelizacion, multiprocessors y nombres; diagramas y documentacion tecnica",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 03 - Diagramas y documentación técnica.txt",
+   "diapositivas/Distribuidos - Clase 03 - Paralelización, Multiprocessors y Nombres.txt",
+   "repo/clases--3_-_Multiprocessors,_Multicomputing_y_Nombres.txt",
+   "repo/clases--6.1_-_Diagramas_y_documentación_técnica.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-4-video-2-documentacion-tecnica.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-4-video-3-diagramas-de-diseno.md",
+   "notion/26-08-paralelizacion-multiprocessors-multicomputing.md"
+  ]
+ },
+ "u04": {
+  "titulo": "Layers y tiers, interfaces, protocolos y REST",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 04 - Diapositivas.txt",
+   "repo/clases--4_-_Interfaces,_Protocolos.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-5-video-1-layers-and-tiers.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-5-video-2-interfaces.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-5-video-3-protocolos.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-5-video-4-restful.md"
+  ]
+ },
+ "u05": {
+  "titulo": "Mensajes, grupos, middlewares y MOMs; RabbitMQ",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 05 - MOM Centralizado - RabbitMQ.txt",
+   "diapositivas/Distribuidos - Clase 05 - Mensajes, Grupos, Middlewares y MOMs.txt",
+   "repo/clases--5.1_-_Mensajes,_Grupos,_Middlewares_y_MOMs.txt",
+   "repo/clases--6.2_-_MOM_Centralizado_-_RabbitMQ.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-4-video-1-middlewares.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-10-video-2-rabbitmq.md",
+   "notion/02-09-grupos-middlewares-mom.md"
+  ]
+ },
+ "u06": {
+  "titulo": "Practica de disenio multicomputing",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 06 - Práctica de Diseño Multicomputing (1).txt",
+   "diapositivas/Distribuidos - Clase 06 - Práctica de Diseño Multicomputing (2).txt",
+   "repo/clases--5.2_-_Practica_de_Arquitecturas_Paralelas_Multicomputing.txt",
+   "repo/clases--7.2_-_Practica_de_Arquitecturas_Paralelas_Multicomputing.txt",
+   "notion/09-09-patrones-comunicacion-mom-rabbitmq.md",
+   "notion/tp1-diseno.md"
+  ]
+ },
+ "u07": {
+  "titulo": "Patrones de comunicacion; ZeroMQ",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 07 - MOM Distribuido - ZeroMQ.txt",
+   "diapositivas/Distribuidos - Clase 07 - Patrones de Comunicación.txt",
+   "repo/clases--7.1_-_MOM_Distribuido_-_ZeroMQ.txt",
+   "repo/clases--7.3_-_Patrones_de_Comunicación.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-11-video-1-request-reply.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-11-video-2-publiser-subscriber.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-11-video-3-pipelines-y-dags.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-10-video-3-zeromq.md"
+  ]
+ },
+ "u09": {
+  "titulo": "Arquitecturas distribuidas simples: cliente-servidor, P2P, RPC, RMI",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 09 - Arquitecturas Distribuidas Simples.txt",
+   "repo/clases--8_-_Arquitecturas_Distribuidas_Simples.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-9-video-1-cliente-servidor.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-9-video-2-peer-to-peer.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-9-video-3-rpc.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-9-video-4-rmi.md"
+  ]
+ },
+ "u10": {
+  "titulo": "Distribucion y coordinacion de procesos: MapReduce, MPI, Flink y Beam",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 10 - Distribución y Coordinación de Procesos.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-12-video-1-coordinacion-y-openmpi.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-12-video-2-apache-flink-y-apache-beam.md",
+   "notion/mpi-apache-flink-apache-beam.md"
+  ]
+ },
+ "u11": {
+  "titulo": "Sistemas elasticos y de alta disponibilidad",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 11 - Sistemas elasticos y de alta disponibilidad.txt",
+   "repo/clases--14_-_Sistemas_elásticos_y_de_alta_disponibilidad_-_Arquitecturas_orientadas_a_servicio.txt",
+   "notion/23-09-sistemas-elasticos-alta-disponibilidad.md"
+  ]
+ },
+ "u13": {
+  "titulo": "Data intensive applications: particion, replicacion, DSM y DFS",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 13 - Data Intensive Applications.txt",
+   "repo/clases--13_-_Data_Intensive_Applications.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-14-video-1-datos-en-sistema-de-gran-escala.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-14-video-2-particion-y-replicacion.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-14-video-3-distributed-shared-memory.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-14-video-4-distributed-file-systems.md",
+   "notion/30-09-data-intensive-applications.md",
+   "bibliografia/kleppmann.txt"
+  ]
+ },
+ "u15": {
+  "titulo": "Disenio de arquitecturas de gran escala",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 15 - Diseño de Arquitecturas de Gran Escala.txt",
+   "repo/clases--18.2_-_Diseño_de_Arquitecturas_de_Gran_Escala.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-17-video-1-traffic-violation-detector.md"
+  ]
+ },
+ "u16": {
+  "titulo": "SOA, Cloud, PaaS, App Engine y BigTable",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 16 - Arquitecturas Orientadas a Servicios y Cloud.txt",
+   "repo/clases--15_-_Arquitecturas_Orientadas_a_Servicios_y_Cloud.txt",
+   "repo/clases--18.1_-_Big_Table.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-16-video-1-arquitecturas-orientadas-a-servicios.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-16-video-2-cloud.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-16-video-3-platform-as-a-service.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-16-video-4-google-app-engine-y-datastore.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-14-video-5-big-table.md"
+  ]
+ },
+ "u17": {
+  "titulo": "Tolerancia a fallos, confiabilidad, coordinacion y acuerdo",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 17 - Tolerancia a Fallos.txt",
+   "repo/clases--16_-_Tolerancia_a_Fallos.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-18-video-1-tolerancia-a-fallos.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-18-video-2-confiabilidad.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-18-video-3-coordinacion-y-acuerdo.md"
+  ]
+ },
+ "u19": {
+  "titulo": "Consenso: eleccion de lider, generales bizantinos, Paxos y Raft",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 19 - Algoritmos de Consenso.txt",
+   "repo/clases--17_-_Algoritmos_de_Consenso.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-19-video-1-eleccion-de-lider.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-19-video-2-consenso.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-19-video-3-generales-bizantinos.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-19-video-4-paxos.md"
+  ]
+ },
+ "u20": {
+  "titulo": "Tiempo, relojes, sincronismo, orden y cortes de estado",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 20 - Tiempo, Relojes, Sincronismo, Orden y Cortes de Estado.txt",
+   "repo/clases--10_-_Modelado_de_Computo_Distribuido,_Tiempo_y_Relojes.txt",
+   "repo/clases--12_-_Sincronismo,_Orden_y_Cortes_de_Estado.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-8-video-1-sincronismo.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-8-video-2-orden.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-8-video-3-estado-y-consistencia.md"
+  ]
+ },
+ "u21": {
+  "titulo": "Sistemas de tiempo real",
+  "fuentes": [
+   "diapositivas/Distribuidos - Clase 21 - Introducción a Sistemas de Tiempo Real.txt",
+   "repo/clases--19_-_Introducción_a_Sistemas_de_Tiempo_Real.txt",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-20-video-1-sistemas-de-tiempo-real.md",
+   "/home/lopez/fiuba/distribuidos/transcripts/clase-20-video-2-sistemas-de-control.md"
+  ]
+ }
+}

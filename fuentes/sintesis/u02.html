@@ -1,0 +1,531 @@
+<section class="unidad" id="u02" data-titulo="Multitasking y comunicaciones">
+  <h2>U02. Multitasking, multithreading y comunicaciones</h2>
+  <p class="intro">Antes de distribuir un sistema entre computadoras hay que dominar la concurrencia dentro de una sola: threads, procesos, sus mecanismos de sincronización y los IPCs que provee el sistema operativo. Esta unidad recorre los tres modelos de multiprogramación, las propiedades que debe garantizar todo programa concurrente, los problemas clásicos que los ejercitan, y cierra con la base de comunicaciones (TCP/IP, sockets, mensajes sincrónicos y asincrónicos) sobre la que se construye todo lo que sigue en la materia.</p>
+
+  <h3 id="u02-modelos">Modelos de multiprogramación</h3>
+  <p>Hay tres formas de tener varias unidades de ejecución trabajando a la vez, y se distinguen por qué recursos comparten:</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 660 190" role="img" aria-label="Tres modelos: threads compartiendo una memoria, procesos con memorias separadas en una maquina, computadoras separadas conectadas por red">
+      <g fill="none" stroke="currentColor">
+        <rect x="10" y="20" width="190" height="120" rx="8"/>
+        <rect x="40" y="35" width="130" height="30" rx="4" stroke="var(--acc)"/>
+        <text x="105" y="55" fill="currentColor" stroke="none" font-size="12" text-anchor="middle">Memoria</text>
+        <path d="M60 65 L60 120 M105 65 L105 120 M150 65 L150 120" stroke="var(--acc2)"/>
+        <text x="105" y="135" fill="currentColor" stroke="none" font-size="11" text-anchor="middle">threads</text>
+        <text x="105" y="165" fill="currentColor" stroke="none" font-size="12" text-anchor="middle">Multithreading</text>
+
+        <rect x="235" y="20" width="190" height="120" rx="8"/>
+        <rect x="248" y="35" width="50" height="80" rx="4" stroke="var(--acc)"/>
+        <rect x="305" y="35" width="50" height="80" rx="4" stroke="var(--acc)"/>
+        <rect x="362" y="35" width="50" height="80" rx="4" stroke="var(--acc)"/>
+        <text x="273" y="60" fill="currentColor" stroke="none" font-size="10" text-anchor="middle">Mem</text>
+        <text x="330" y="60" fill="currentColor" stroke="none" font-size="10" text-anchor="middle">Mem</text>
+        <text x="387" y="60" fill="currentColor" stroke="none" font-size="10" text-anchor="middle">Mem</text>
+        <text x="330" y="135" fill="currentColor" stroke="none" font-size="11" text-anchor="middle">procesos + IPC</text>
+        <text x="330" y="165" fill="currentColor" stroke="none" font-size="12" text-anchor="middle">Multiprocessing</text>
+
+        <rect x="460" y="20" width="85" height="55" rx="8" stroke="var(--acc)"/>
+        <rect x="565" y="20" width="85" height="55" rx="8" stroke="var(--acc)"/>
+        <rect x="512" y="90" width="85" height="55" rx="8" stroke="var(--acc)"/>
+        <text x="502" y="50" fill="currentColor" stroke="none" font-size="10" text-anchor="middle">Mem</text>
+        <text x="607" y="50" fill="currentColor" stroke="none" font-size="10" text-anchor="middle">Mem</text>
+        <text x="554" y="120" fill="currentColor" stroke="none" font-size="10" text-anchor="middle">Mem</text>
+        <path d="M545 47 L565 47 M525 75 L540 90 M585 75 L575 90" stroke="var(--linea)"/>
+        <text x="554" y="165" fill="currentColor" stroke="none" font-size="12" text-anchor="middle">Multicomputing</text>
+      </g>
+    </svg>
+    <figcaption>Multithreading comparte la memoria, multiprocessing la separa dentro de la misma máquina, multicomputing no comparte nada y se comunica por red.</figcaption>
+  </figure>
+
+  <table>
+    <thead>
+      <tr><th></th><th>Multithreading</th><th>Multiprocessing</th><th>Multicomputing</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Recursos compartidos</td>
+        <td>Heap, data segment, file descriptors, code segment (read only)</td>
+        <td>Code segment (read only), file descriptors abiertos pre fork</td>
+        <td>Ninguno</td>
+      </tr>
+      <tr>
+        <td>Sincronización</td>
+        <td>Soporte del SO (pthread mutex) o del runtime (threads de Java, .NET), IPCs</td>
+        <td>IPCs: signals, shared memory, sockets, pipes/fifos, semáforos, queues, locks</td>
+        <td>Mensajes ad hoc entre computadoras: cada sistema implementa sus propios mecanismos</td>
+      </tr>
+      <tr>
+        <td>Características</td>
+        <td>Compartir información es sencillo, pero alto acoplamiento; un thread defectuoso afecta todo el proceso; escalabilidad muy limitada</td>
+        <td>Compartir no es trivial; componentes separados y simples; más escalable y estable que threads; sin tolerancia a fallos de hardware o SO</td>
+        <td>Comunicación compleja y central al diseño (ancho de banda, latencia, pérdida de mensajes); alta escalabilidad y tolerancia a fallos</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="idea">La progresión es un trade off entre facilidad para compartir y robustez/escala. Cuanto más se comparte, más fácil es comunicarse y más frágil y acoplado queda el sistema. Multicomputing está en el extremo: no comparte nada, paga el costo de la red, y a cambio gana escalabilidad y tolerancia a fallos. Toda la materia es, en el fondo, aprender a vivir en esa columna.</div>
+
+  <div class="examen">Preguntado en finales: "¿Qué diferencia una arquitectura Multithreading de una Multiprocessing? Indique ventajas" (2022-08). Conviene responder con los recursos compartidos de cada una, y las ventajas cruzadas: threads comparten datos fácil pero se afectan entre sí; procesos aislan fallos y escalan mejor pero necesitan IPCs para comunicarse.</div>
+
+  <h3 id="u02-propiedades">Propiedades de programas concurrentes</h3>
+  <div class="def"><b>Safety property.</b> Propiedad que debe ser <i>siempre</i> verdadera durante toda la ejecución (un invariante). Las dos clásicas: exclusión mutua (nunca hay dos procesos a la vez en la sección crítica) y ausencia de deadlocks.</div>
+  <div class="def"><b>Liveness property.</b> Propiedad que debe ser <i>eventualmente</i> verdadera: algo bueno termina ocurriendo. Las clásicas: ausencia de starvation (todo proceso que quiere avanzar, en algún momento avanza) y fairness (el acceso a los recursos se reparte con justicia).</div>
+  <div class="idea">Safety dice "nunca pasa nada malo"; liveness dice "tarde o temprano pasa lo bueno". Un programa que no hace nada cumple todas las safety properties y ninguna liveness: por eso hacen falta las dos familias.</div>
+  <p>Asegurar las propiedades de safety es el pilar de la teoría de concurrencia, y hay dos caminos para lograrlo:</p>
+  <ul>
+    <li><b>Basado en algoritmos:</b> sin abstracciones especiales, solo condiciones lógicas sobre variables comunes que garantizan la sección crítica.</li>
+    <li><b>Basado en abstracciones:</b> primitivas provistas por el SO o el lenguaje (semáforos, monitores, operaciones atómicas), combinables para construir mecanismos más complejos.</li>
+  </ul>
+
+  <h4 id="u02-exclusion-algoritmos">Exclusión mutua basada en algoritmos</h4>
+  <ul>
+    <li><b>Busy waiting:</b> el proceso consulta una condición en un loop sin ceder el CPU. Es responsable de la mayoría de los problemas de performance en sistemas concurrentes.</li>
+    <li><b>Spin lock:</b> el caso más simple de busy wait: <code>while (flag): pass</code>.</li>
+    <li><b>Algoritmos de espera:</b> Dekker, Lamport (algoritmo del panadero), Peterson. Logran exclusión mutua entre procesos solo con variables compartidas y lógica.</li>
+  </ul>
+  <p>El algoritmo de Peterson para dos procesos: cada uno levanta su bandera de intención y le cede el turno al otro; solo entra a la sección crítica si el otro no quiere entrar o si el turno es propio.</p>
+  <pre><code># Estado compartido
+flag = [False, False]
+turn = 0
+
+# Proceso 0                          # Proceso 1
+flag[0] = True                       flag[1] = True
+turn = 1                             turn = 0
+while flag[1] and turn == 1:         while flag[0] and turn == 0:
+    pass                                 pass
+# ... seccion critica ...            # ... seccion critica ...
+flag[0] = False                      flag[1] = False</code></pre>
+
+  <h4 id="u02-atomicas-cas">Operaciones atómicas y CAS</h4>
+  <div class="def"><b>Operación atómica.</b> Mecanismo provisto por el lenguaje o el hardware para actualizar variables u objetos sin usar mecanismos de sincronización explícitos: por ejemplo, contadores atómicos de tipos POD (int, char, double).</div>
+  <div class="def"><b>CAS (Compare and Swap).</b> La operación atómica por excelencia para actualizar contenedores de forma segura en ambientes multithreading: compara el valor actual con el esperado y, solo si coinciden, escribe el valor nuevo. Todo en un único paso indivisible.</div>
+  <pre><code>def cas(p, old, new):     # atomico, provisto por hardware
+    if *p != old:
+        return False
+    *p = new
+    return True</code></pre>
+  <p>Ejemplo real: en Go, <code>atomic.CompareAndSwapUint32(addr, old, new)</code> devuelve si el swap se realizó. El patrón de uso es un loop: leer el valor, calcular el nuevo, intentar el CAS y reintentar si otro thread ganó la carrera.</p>
+
+  <h3 id="u02-sincronizacion">Mecanismos de sincronización</h3>
+
+  <h4 id="u02-semaforos">Semáforos y mutex</h4>
+  <div class="def"><b>Semáforo.</b> Variable entera usada para controlar el acceso a recursos compartidos, definida por el conjunto de valores que puede adoptar (por ejemplo S = {0,1,2}). Operaciones válidas: <code>wait</code> decrementa S (y bloquea si S es 0), <code>signal</code> incrementa S.</div>
+  <div class="idea">Pensarlo como un dispensador de tokens: hay S turnos disponibles; cada proceso que quiere el recurso toma un token (wait) y lo devuelve al salir (signal). Si no quedan tokens, se espera bloqueado, sin busy waiting.</div>
+  <div class="def"><b>Mutex.</b> Semáforo binario (S = {0,1}) usado para proteger secciones críticas: a lo sumo un proceso adentro a la vez.</div>
+  <div class="warn">La nomenclatura histórica P y V (de Dijkstra) confunde: clásicamente P es la operación que decrementa (wait, de "proberen") y V la que incrementa (signal, de "verhogen"). Lo importante para el examen es la semántica: wait decrementa y puede bloquear, signal incrementa y puede despertar a un proceso en espera.</div>
+
+  <h4 id="u02-monitores">Monitores</h4>
+  <div class="def"><b>Monitor.</b> Abstracción que encapsula en una única entidad las variables compartidas, las operaciones que las manipulan y el mecanismo de sincronización, con una cola de pedidos: solo un proceso ejecuta operaciones del monitor a la vez.</div>
+  <p>La ventaja sobre el semáforo suelto es que la exclusión mutua queda garantizada por construcción: el usuario del monitor no puede olvidarse de tomar el lock, porque el lock es implícito en cada operación.</p>
+  <p>En términos de flujo: los pedidos a un monitor se encolan y se sirven de a uno; cada llamada pasa primero por el mecanismo de sincronización interno antes de tocar las variables compartidas, así que nunca hay dos ejecuciones simultáneas dentro del monitor.</p>
+  <pre><code>monitor class Account:
+    balance = 0
+    def withdraw(amount):          # cada metodo se ejecuta
+        if balance &lt; amount:       # con exclusion mutua
+            return False           # garantizada por el monitor
+        balance = balance - amount
+        return True
+    def deposit(amount):
+        balance = balance + amount</code></pre>
+
+  <h4 id="u02-cond-variables">Condition variables</h4>
+  <p>Las condition variables son el ejemplo práctico de monitor: permiten que un proceso espere (sin busy waiting) hasta que se cumpla una condición sobre el estado compartido. El mutex asociado debe adquirirse antes de operar. Operaciones: <code>wait</code> bloquea al proceso hasta que otro lo despierte; <code>notify</code> despierta a un proceso en espera y <code>notify_all</code> a todos.</p>
+  <pre><code># Consumidor                       # Productor
+cv.acquire()                       cv.acquire()
+while not hay_item_disponible():   generar_item()
+    cv.wait()                      cv.notify()   # o notify_all()
+tomar_item()                       cv.release()
+cv.release()</code></pre>
+  <div class="warn">El <code>wait</code> va siempre dentro de un <code>while</code> que rechequea la condición, nunca un <code>if</code>: entre el notify y el despertar, otro proceso pudo haberse llevado el item (despertares espurios y carreras al despertar).</div>
+
+  <h4 id="u02-barrera">Barrera</h4>
+  <div class="def"><b>Barrera.</b> Punto de encuentro para N procesos o threads: cada uno que llega queda bloqueado hasta que llegaron todos; recién entonces la barrera "abre" y todos continúan a la vez.</div>
+  <p>Es el mecanismo natural para cómputos por rondas: N workers ejecutan cada uno su tarea de la ronda, esperan en la barrera a que sus pares terminen, y cuando todos llegaron arranca la ronda siguiente. Este ejercicio (N threads, M rondas de tareas) es el ejemplo canónico de la cátedra, y también se pide resolverlo con la abstracción <code>BlockingQueue</code> o con IPCs (shared memory con semáforos, o message queues).</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 560 220" role="img" aria-label="Linea de tiempo de la barrera: P1, P2 y P3 llegan en distintos momentos y quedan en espera (atenuados) hasta que llega el ultimo; recien ahi la barrera abre y los tres continuan a la vez">
+      <g fill="none" stroke="var(--linea)">
+        <path d="M40 50 L150 50" />
+        <path d="M150 50 L380 50" stroke-dasharray="4 4" opacity="0.5" />
+        <path d="M380 50 L540 50" />
+        <path d="M534 45 L540 50 L534 55" />
+
+        <path d="M90 110 L230 110" />
+        <path d="M230 110 L380 110" stroke-dasharray="4 4" opacity="0.5" />
+        <path d="M380 110 L540 110" />
+        <path d="M534 105 L540 110 L534 115" />
+
+        <path d="M150 170 L380 170" />
+        <path d="M380 170 L540 170" />
+        <path d="M534 165 L540 170 L534 175" />
+      </g>
+      <path d="M380 20 L380 200" fill="none" stroke="var(--acc)" />
+      <g fill="currentColor" stroke="none" font-size="12">
+        <text x="15" y="54">P1</text>
+        <text x="15" y="114">P2</text>
+        <text x="15" y="174">P3</text>
+        <text x="380" y="14" text-anchor="middle" font-size="11">GO</text>
+        <text x="380" y="212" text-anchor="middle" font-size="10">barrera abre</text>
+        <text x="150" y="42" text-anchor="middle" font-size="10">llega P1</text>
+        <text x="230" y="102" text-anchor="middle" font-size="10">llega P2</text>
+        <text x="380" y="162" text-anchor="middle" font-size="10">llega P3 (último)</text>
+      </g>
+    </svg>
+    <figcaption>Barrera con tres procesos: cada uno llega en un instante distinto y espera atenuado (gris punteado); cuando llega el último, la barrera abre (GO) y los tres continúan juntos.</figcaption>
+  </figure>
+
+  <h4 id="u02-rendezvous">Rendezvous</h4>
+  <div class="def"><b>Rendezvous.</b> Sincronización de a pares mediante pasaje de mensajes: dos procesos se encuentran en un punto de la ejecución; el que llega primero espera al otro, e intercambian el mensaje recién cuando ambos están presentes.</div>
+  <div class="idea">La barrera sincroniza a N procesos con un contador central; el rendezvous sincroniza de a dos con un mensaje. Cuando no hay memoria compartida (multicomputing), el rendezvous vía mensajes es el único tipo de sincronización posible, por eso es el puente conceptual entre esta unidad y el resto de la materia.</div>
+
+  <figure class="diag">
+    <svg viewBox="0 0 520 180" role="img" aria-label="Linea de tiempo del rendezvous: P1 llega primero y espera atenuado, P2 llega despues; ambos se encuentran mediante un mensaje y continuan juntos">
+      <g fill="none" stroke="var(--linea)">
+        <path d="M40 50 L200 50" />
+        <path d="M200 50 L280 50" stroke-dasharray="4 4" opacity="0.5" />
+        <path d="M280 50 L480 50" />
+        <path d="M474 45 L480 50 L474 55" />
+
+        <path d="M40 120 L280 120" />
+        <path d="M280 120 L480 120" />
+        <path d="M474 115 L480 120 L474 125" />
+      </g>
+      <path d="M280 62 L280 108" fill="none" stroke="var(--acc)" stroke-dasharray="3 3" />
+      <path d="M275 100 L280 108 L285 100" fill="none" stroke="var(--acc)" />
+      <g fill="currentColor" stroke="none" font-size="12">
+        <text x="10" y="54">P1</text>
+        <text x="10" y="124">P2</text>
+        <text x="284" y="90" font-size="11">Message</text>
+        <text x="284" y="103" font-size="11">Passing</text>
+        <text x="200" y="42" text-anchor="middle" font-size="10">P1 llega y espera</text>
+        <text x="280" y="140" text-anchor="middle" font-size="10">P2 llega: encuentro</text>
+      </g>
+    </svg>
+    <figcaption>Rendezvous entre dos procesos: el que llega primero (P1) espera atenuado hasta que el segundo (P2) llega y se produce el pasaje de mensaje; ambos continúan después del encuentro.</figcaption>
+  </figure>
+
+  <h3 id="u02-ipcs">IPCs: comunicación entre procesos</h3>
+  <div class="def"><b>IPC (Inter Process Communication).</b> Mecanismos provistos por el sistema operativo que permiten la comunicación entre dos o más procesos, que ya no comparten memoria.</div>
+  <p>Propiedades comunes a todos los IPCs:</p>
+  <ul>
+    <li>Su creación y destrucción <b>exceden la vida del proceso</b>: el usuario es responsable de su ciclo de vida. Un patrón habitual es tener un proceso <i>launcher</i> que los crea y un <i>terminator</i> que los libera.</li>
+    <li>Usualmente se identifican por nombre.</li>
+    <li>En Linux, todos los IPCs se ven como distintos tipos de archivos.</li>
+  </ul>
+  <p>Cada mecanismo de sincronización entre threads tiene un análogo (o no) como IPC entre procesos:</p>
+  <table>
+    <thead>
+      <tr><th>Mecanismo entre threads</th><th>IPC equivalente entre procesos</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Semáforo / mutex</td><td>Semáforo (System V / POSIX)</td></tr>
+      <tr><td>Heap compartido (implícito entre threads)</td><td>Shared memory (hay que pedirla explícitamente)</td></tr>
+      <tr><td>Monitor / lock</td><td>File lock</td></tr>
+      <tr><td>Barrera</td><td>Sin primitiva directa: se construye con semáforos o queues</td></tr>
+      <tr><td>Rendezvous / pasaje de mensajes</td><td>Signals, message queues, pipes/fifos, sockets</td></tr>
+    </tbody>
+  </table>
+
+  <div class="ej">Un ejemplo real de IPC a nivel kernel es el protocolo <b>Binder</b> de Android: cada proceso arma una transacción (<code>BC_TRANSACTION</code>) que el kernel entrega al proceso destino como <code>BR_TRANSACTION</code>, todo a través de una única llamada <code>ioctl()</code>, sin pasar por los mecanismos clásicos de System V (semáforos, shared memory o message queues).</div>
+
+  <h4 id="u02-signals">Signals</h4>
+  <ul>
+    <li>Existen 31 tipos distintos (<code>kill -l</code>). Cada proceso decide cuáles handlear, salvo <b>SIGSTOP y SIGKILL</b>, que no pueden capturarse ni ignorarse.</li>
+    <li>Signals estándar: <b>SIGINT y SIGTERM</b> para graceful quit, <b>SIGSEGV</b> por problemas de memoria, <b>SIGABRT</b> por assertions del código.</li>
+    <li>En procesos multithreaded, la propagación de signals se controla con máscaras por thread (mask setting).</li>
+  </ul>
+  <div class="ej"><code>docker stop</code> envía SIGTERM al proceso principal del contenedor: el proceso puede handlearla para cerrar ordenadamente (liberar IPCs, cerrar sockets, terminar hijos). Si en cambio recibe SIGKILL (señal 9, la que docker manda tras el timeout), termina sí o sí, sin posibilidad de handler. De ahí que el graceful shutdown de los TPs se implemente handleando SIGTERM. Otro caso real: libcURL usa <code>SIGALRM</code> para implementar sus timeouts de resolución DNS.</div>
+
+  <h4 id="u02-shm">Shared memory</h4>
+  <ul>
+    <li>Mecanismo del SO para compartir un bloque de memoria entre procesos: la abstracción que entre threads no hace falta, porque el heap ya es compartido.</li>
+    <li>Su tamanio se define al crearla.</li>
+    <li>Requiere sincronización externa (típicamente un semáforo/mutex) solo cuando dos procesos no pueden acceder a la vez, por ejemplo un contador compartido; una cache de slots independientes con un único escritor por slot puede no necesitarla.</li>
+  </ul>
+
+  <h4 id="u02-filelocks">File locks</h4>
+  <p>Control de acceso sobre un file descriptor: <code>flock(fd, operation)</code>. Dos tipos:</p>
+  <ul>
+    <li><b>Shared lock (R):</b> lock de solo lectura; múltiples read locks simultáneos permitidos.</li>
+    <li><b>Exclusive lock (W):</b> lock de lectura y escritura; solo uno a la vez por archivo, y excluye también a los shared.</li>
+  </ul>
+  <p>La regla de bloqueo: mientras haya al menos un shared lock activo, un exclusive lock pedido debe esperar a que todos se liberen; y mientras el exclusive lock esté activo, cualquier lock nuevo (shared o exclusive) espera a que se libere.</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 680 200" role="img" aria-label="Linea de tiempo de file locks: P1 y P2 sostienen locks compartidos R en simultaneo, P3 pide un lock exclusivo W y queda bloqueado hasta que ambos R se liberan; mientras P3 sostiene el W, un nuevo pedido de R queda bloqueado">
+      <g fill="none" stroke="var(--linea)">
+        <path d="M40 40 L140 40" />
+        <path d="M400 40 L654 40" />
+        <path d="M648 35 L654 40 L648 45" />
+        <path d="M40 100 L200 100" />
+        <path d="M400 100 L654 100" />
+        <path d="M648 95 L654 100 L648 105" />
+        <path d="M40 160 L280 160" />
+        <path d="M648 155 L654 160 L648 165" />
+      </g>
+      <rect x="140" y="32" width="260" height="16" fill="none" stroke="var(--acc)" />
+      <rect x="200" y="92" width="200" height="16" fill="none" stroke="var(--acc)" />
+      <rect x="280" y="152" width="120" height="16" stroke-dasharray="4 4" opacity="0.5" fill="none" stroke="var(--linea)" />
+      <rect x="400" y="152" width="80" height="16" fill="none" stroke="var(--acc)" />
+      <rect x="480" y="152" width="174" height="16" stroke-dasharray="4 4" opacity="0.5" fill="none" stroke="var(--linea)" />
+      <g fill="currentColor" stroke="none" font-size="12">
+        <text x="10" y="44">P1</text>
+        <text x="10" y="104">P2</text>
+        <text x="10" y="164">P3</text>
+        <text x="270" y="44" text-anchor="middle" font-size="11">R</text>
+        <text x="300" y="104" text-anchor="middle" font-size="11">R</text>
+        <text x="340" y="164" text-anchor="middle" font-size="10">W bloqueado</text>
+        <text x="440" y="164" text-anchor="middle" font-size="11">W</text>
+        <text x="567" y="164" text-anchor="middle" font-size="10">R bloqueado</text>
+      </g>
+    </svg>
+    <figcaption>P1 y P2 sostienen shared locks (R) al mismo tiempo. P3 pide un exclusive lock (W) y queda bloqueado hasta que ambos R se liberan; una vez que P3 tiene el W, un nuevo pedido de R queda bloqueado hasta que P3 lo libere.</figcaption>
+  </figure>
+
+  <h4 id="u02-pipes">Pipes y FIFOs</h4>
+  <ul>
+    <li>Pasaje de información directa entre 2 procesos, con la API de archivo de Linux para leer y escribir.</li>
+    <li><b>Unnamed pipes (pipes):</b> comunican padre e hijo; dejan de existir al terminar el proceso.</li>
+    <li><b>Named pipes (FIFOs):</b> comunican dos procesos cualesquiera; viven en el SO, exceden la vida del proceso.</li>
+  </ul>
+  <p>El buffer de un pipe es acotado (en Linux moderno, 64 KiB por defecto): escribir sobre un pipe lleno bloquea al escritor, leer de uno vacío bloquea al lector. Esa semántica de bloqueo es la que lo vuelve también un mecanismo de sincronización.</p>
+
+  <h4 id="u02-msgqueues">Message queues (System V)</h4>
+  <ul>
+    <li>Los procesos escriben y reciben bloques de bytes; los mensajes leídos se remueven de la cola. El tamanio del buffer se define en la creación.</li>
+    <li>Cada mensaje lleva un campo <code>mtype</code>: el sender debe enviar con <code>mtype &gt; 0</code>; el receptor que pide <code>mtype = 0</code> recibe cualquier mensaje sin importar el tipo; el caso esotérico <code>mtype &lt; 0</code> recibe el mensaje de menor tipo entre los que no superan el valor absoluto pedido.</li>
+  </ul>
+
+  <h4 id="u02-sockets-ipc">Sockets</h4>
+  <p>Comunican dos procesos a través de un canal con dos endpoints: <code>socket(domain, type, protocol)</code>. Es el único IPC que además funciona <b>entre máquinas</b>, por eso es la puerta al multicomputing.</p>
+  <ul>
+    <li><b>Domain:</b> <code>AF_UNIX</code> (Unix socket, local), <code>AF_INET</code> / <code>AF_INET6</code> (socket de red).</li>
+    <li><b>Type:</b> <code>SOCK_STREAM</code> (TCP), <code>SOCK_DGRAM</code> (UDP), <code>SOCK_RAW</code> (acceso crudo a la capa inferior, sin protocolo de transporte).</li>
+  </ul>
+
+  <h3 id="u02-problemas-clasicos">Problemas clásicos de concurrencia</h3>
+
+  <h4 id="u02-productor-consumidor">Productor consumidor</h4>
+  <p>Productores agregan paquetes a un buffer y consumidores los extraen. El acceso al buffer debe sincronizarse, y hay dos situaciones de bloqueo: el productor que intenta agregar con el buffer lleno y el consumidor que intenta extraer con el buffer vacío. Una decisión clave del enunciado es si el buffer es acotado o infinito: con buffer infinito solo bloquea el consumidor.</p>
+  <div class="idea">Este problema es el núcleo de casi todo sistema distribuido real: una work queue de RabbitMQ es exactamente un productor consumidor donde el buffer es el broker. Resolverlo con semáforos (uno contando lugares libres, otro contando items, más un mutex) es el ejercicio base.</div>
+
+  <h4 id="u02-lectores-escritores">Lectores escritores</h4>
+  <p>Dos tipos de procesos acceden a una memoria compartida: lectores (pueden coexistir) y escritores (necesitan exclusividad). Las variantes del problema se definen en función de fairness y starvation:</p>
+  <ul>
+    <li><b>Prioridad lectores:</b> los escritores esperan a que los lectores liberen el recurso (riesgo de starvation de escritores).</li>
+    <li><b>Prioridad escritores:</b> los lectores esperan a que los escritores liberen el recurso (riesgo de starvation de lectores).</li>
+    <li><b>Acceso por tiempo limitado:</b> ambos tipos acceden con turnos acotados, buscando fairness.</li>
+  </ul>
+  <p>Notar el paralelismo con los <a href="#u02-filelocks">file locks</a>: shared lock es el lector, exclusive lock es el escritor.</p>
+  <p>Otros problemas clásicos que la cátedra menciona para practicar: el barbero dormilón, los filósofos comensales y los fumadores de cigarrillos.</p>
+
+  <h3 id="u02-comunicaciones">Comunicaciones: modelos TCP/IP y OSI</h3>
+  <p>Para comunicar procesos entre máquinas hace falta una pila de protocolos. Dos modelos de referencia:</p>
+  <table>
+    <thead>
+      <tr><th>Capa OSI</th><th>Capa TCP/IP</th><th>Responsabilidad</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Application</td><td rowspan="3">Application</td><td>Aplicaciones de usuario</td></tr>
+      <tr><td>Presentation</td><td>Representación de datos</td></tr>
+      <tr><td>Sessión</td><td>Manejo de conexiones y sesión</td></tr>
+      <tr><td>Transport</td><td>Transport</td><td>Comunicación punto a punto entre procesos, transferencia confiable</td></tr>
+      <tr><td>Network</td><td>Internet</td><td>Lógica de transmisión de datos sobre la red (ruteo)</td></tr>
+      <tr><td>Data Link</td><td rowspan="2">Network Access</td><td>Sincronización, control de errores y envio de frames</td></tr>
+      <tr><td>Physical</td><td>Manejo del medio físico para transmitir bits</td></tr>
+    </tbody>
+  </table>
+  <p>El paquete IP (capa Internet) lleva en su header las direcciones de origen y destino, TTL, protocolo, checksum y campos de fragmentación. Sobre IP viven los dos protocolos de transporte que importan para la materia.</p>
+  <p class="nota">El header IP básico ocupa filas de 32 bits: versión e IHL comparten fila con Type of Service y Total Length; le siguen Identification con Flags y Frag Offset; luego TTL, Protocol y Header Checksum; y por último las direcciones de origen y destino, con Options opcional antes de los datos.</p>
+
+  <h3 id="u02-tcp-udp">TCP y UDP</h3>
+  <table>
+    <thead>
+      <tr><th></th><th>TCP</th><th>UDP</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Modelo</td><td>Orientado a conexión</td><td>Orientado a datos (datagramas), sin conexión</td></tr>
+      <tr><td>Garantías</td><td>Asegura entrega y orden (sequence numbers, acks, retransmisión, sliding window)</td><td>Sin garantías: best effort</td></tr>
+      <tr><td>Header</td><td>Pesado: sequence number, ack number, data offset, reserved, flags, window, checksum, urgent pointer, options, padding</td><td>Mínimo: puertos, length, checksum</td></tr>
+      <tr><td>Unidad</td><td>Stream de bytes continuo</td><td>Mensajes independientes</td></tr>
+    </tbody>
+  </table>
+  <div class="warn">TCP es orientado a <b>streams</b>, no a mensajes: garantiza que los bytes llegan completos y en orden, pero no respeta los límites de los <code>send()</code>. Un <code>recv()</code> puede devolver medio mensaje o dos mensajes juntos (short reads): delimitar donde empieza y termina cada mensaje (framing) es responsabilidad del programador. Este detalle se pregunta seguido cuando piden comparar TCP con abstracciones de mensajes discretos como los MOMs.</div>
+  <div class="examen">Preguntado en finales, de forma recurrente: "Suponga que debe implementar un protocolo de health-check de server a clientes mediante sockets. ¿Qué condiciones se deberian cumplir para que sea más conveniente utilizar UDP frente a TCP?" (2024-07, 2024-12). La respuesta esperada: si los mensajes son periódicos y toleran pérdida (basta que llegue alguno para dar por vivo al proceso), UDP conviene porque no paga conexión ni retransmisiones; TCP es contraproducente porque retransmite heartbeats viejos antes de entregar el nuevo, agregando latencia y hasta falsos negativos bajo congestion. Además UDP es más liviano si hay que chequear muchos procesos.</div>
+  <div class="examen">También preguntado: "Indique ventajas y desventajas de utilizar comunicación por sockets TCP frente al pasaje de mensajes por colas mediante MOM" (2025-02, 2025-07). Desde esta unidad aporta: TCP da entrega y orden solo mientras la conexión vive, es stream (framing manual) y es liviano y de baja latencia; las garantías ante desconexión y los mensajes discretos los agrega el MOM (ver unidad 5).</div>
+
+  <h3 id="u02-sockets-api">Programación con sockets</h3>
+  <p>Primitivas: <code>socket()</code>, <code>bind()</code>, <code>listen()</code>, <code>accept()</code>, <code>connect()</code>, <code>send()</code>, <code>recv()</code>, <code>close()</code>.</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 560 300" role="img" aria-label="Flujo de llamadas TCP: el server hace socket, bind, listen, accept; el cliente hace socket y connect; luego intercambian write y read y cierran">
+      <g fill="none" stroke="currentColor">
+        <text x="120" y="20" fill="currentColor" stroke="none" font-size="13" text-anchor="middle">Server</text>
+        <text x="440" y="20" fill="currentColor" stroke="none" font-size="13" text-anchor="middle">Cliente</text>
+        <path d="M120 30 L120 285" stroke="var(--linea)"/>
+        <path d="M440 30 L440 285" stroke="var(--linea)"/>
+        <g fill="currentColor" stroke="none" font-size="12">
+          <text x="60" y="50" text-anchor="end">socket()</text>
+          <text x="60" y="75" text-anchor="end">bind()</text>
+          <text x="60" y="100" text-anchor="end">listen()</text>
+          <text x="60" y="125" text-anchor="end">accept()</text>
+          <text x="60" y="185" text-anchor="end">read()</text>
+          <text x="60" y="215" text-anchor="end">write()</text>
+          <text x="60" y="275" text-anchor="end">close()</text>
+          <text x="500" y="75" text-anchor="start">socket()</text>
+          <text x="500" y="125" text-anchor="start">connect()</text>
+          <text x="500" y="170" text-anchor="start">write()</text>
+          <text x="500" y="230" text-anchor="start">read()</text>
+          <text x="500" y="255" text-anchor="start">close()</text>
+        </g>
+        <path d="M435 122 L128 128" stroke="var(--acc)"/>
+        <path d="M136 132 L128 128 L137 123" stroke="var(--acc)"/>
+        <text x="280" y="115" fill="currentColor" stroke="none" font-size="11" text-anchor="middle">establecimiento de conexión</text>
+        <path d="M435 168 L128 180" stroke="var(--acc2)"/>
+        <path d="M136 184 L128 180 L137 175" stroke="var(--acc2)"/>
+        <text x="280" y="163" fill="currentColor" stroke="none" font-size="11" text-anchor="middle">request</text>
+        <path d="M125 214 L432 226" stroke="var(--acc2)"/>
+        <path d="M424 221 L432 226 L423 230" stroke="var(--acc2)"/>
+        <text x="280" y="210" fill="currentColor" stroke="none" font-size="11" text-anchor="middle">response</text>
+      </g>
+    </svg>
+    <figcaption>Flujo TCP típico. El flujo de datos posterior al accept/connect depende del protocolo de aplicación que ambas partes acuerden.</figcaption>
+  </figure>
+
+  <ul>
+    <li><b>Flujo TCP:</b> el server hace <code>socket, bind, listen, accept</code>; el cliente hace <code>socket, connect</code>. El <code>accept</code> devuelve un <b>nuevo</b> file descriptor por cada conexión aceptada; el socket original sigue escuchando.</li>
+    <li><b>Backlog de listen:</b> limita las conexiones <i>pendientes de aceptar</i>, no las ya establecidas.</li>
+    <li><b>Flujo UDP:</b> sin conexión: el server hace <code>socket, bind</code> y luego <code>recvfrom/sendto</code>; el cliente directamente <code>sendto/recvfrom</code>. No hay listen ni accept.</li>
+  </ul>
+
+  <h3 id="u02-sinc-asinc">Mensajes sincrónicos vs asincrónicos</h3>
+  <div class="def"><b>Mensaje sincrónico.</b> El emisor envía el request y queda bloqueado (idle) hasta recibir la response: su línea de tiempo tiene un hueco de inactividad entre el envio y la respuesta.</div>
+  <div class="def"><b>Mensaje asincrónico.</b> El emisor envía el request y continúa activo con otro trabajo; la response llega más tarde y se procesa cuando llega.</div>
+  <div class="idea">El diagrama mental: dos líneas de tiempo (cliente y servidor) con flechas request y response. En el caso sincrónico el tramo del cliente entre ambas flechas esta "apagado"; en el asincrónico esta "prendido". La elección define cuanto desacopla el sistema: los MOMs y los patrones de mensajeria de las unidades siguientes explotan la asincronia.</div>
+
+  <figure class="diag">
+    <svg viewBox="0 0 620 270" role="img" aria-label="Dos casos de linea de tiempo cliente/servidor. Sincronico: el cliente envia el request en e1, queda inactivo (idle) hasta recibir la response en e2. Asincronico: mismo esquema de flechas request y response, pero el cliente permanece activo entre e1 y e2">
+      <g fill="currentColor" stroke="none" font-size="13">
+        <text x="300" y="15" text-anchor="middle">Sincrónico</text>
+        <text x="300" y="145" text-anchor="middle">Asincrónico</text>
+      </g>
+      <g fill="currentColor" stroke="none" font-size="11">
+        <text x="60" y="44" text-anchor="end">Cliente</text>
+        <text x="60" y="94" text-anchor="end">Servidor</text>
+        <text x="60" y="174" text-anchor="end">Cliente</text>
+        <text x="60" y="224" text-anchor="end">Servidor</text>
+      </g>
+
+      <g fill="none" stroke="var(--linea)">
+        <path d="M90 40 L180 40" />
+        <path d="M180 40 L480 40" stroke-dasharray="4 4" opacity="0.5" />
+        <path d="M480 40 L580 40" />
+        <path d="M574 35 L580 40 L574 45" />
+        <path d="M90 90 L580 90" />
+        <path d="M574 85 L580 90 L574 95" />
+
+        <path d="M90 170 L580 170" />
+        <path d="M574 165 L580 170 L574 175" />
+        <path d="M90 220 L580 220" />
+        <path d="M574 215 L580 220 L574 225" />
+      </g>
+
+      <path d="M180 40 L325 90" fill="none" stroke="var(--acc)" />
+      <path d="M316 83 L325 90 L318 94" fill="none" stroke="var(--acc)" />
+      <path d="M365 90 L480 40" fill="none" stroke="var(--acc2)" stroke-dasharray="4 4" />
+      <path d="M471 44 L480 40 L474 33" fill="none" stroke="var(--acc2)" />
+
+      <path d="M180 170 L325 220" fill="none" stroke="var(--acc)" />
+      <path d="M316 213 L325 220 L318 224" fill="none" stroke="var(--acc)" />
+      <path d="M365 220 L480 170" fill="none" stroke="var(--acc2)" stroke-dasharray="4 4" />
+      <path d="M471 174 L480 170 L474 163" fill="none" stroke="var(--acc2)" />
+
+      <g fill="currentColor" stroke="none" font-size="11">
+        <text x="180" y="30" text-anchor="middle">e1</text>
+        <text x="480" y="30" text-anchor="middle">e2</text>
+        <text x="313" y="106" text-anchor="middle">f1</text>
+        <text x="377" y="106" text-anchor="middle">f2</text>
+        <text x="248" y="58" text-anchor="middle">Request</text>
+        <text x="425" y="58" text-anchor="middle">Response</text>
+
+        <text x="180" y="160" text-anchor="middle">e1</text>
+        <text x="480" y="160" text-anchor="middle">e2</text>
+        <text x="313" y="236" text-anchor="middle">f1</text>
+        <text x="377" y="236" text-anchor="middle">f2</text>
+        <text x="248" y="188" text-anchor="middle">Request</text>
+        <text x="425" y="188" text-anchor="middle">Response</text>
+      </g>
+
+      <g fill="none" stroke="var(--linea)">
+        <path d="M90 250 L130 250" />
+        <path d="M220 250 L260 250" stroke-dasharray="4 4" opacity="0.5" />
+      </g>
+      <g fill="currentColor" stroke="none" font-size="11">
+        <text x="138" y="254">Active</text>
+        <text x="268" y="254">Idle</text>
+      </g>
+    </svg>
+    <figcaption>Sincrónico vs asincrónico: en ambos casos el cliente dispara el request en e1 (llega al servidor en f1) y recibe la response en e2 (el servidor la envía en f2, tras procesar). La diferencia es el tramo del cliente entre e1 y e2: inactivo (Idle, punteado) en el caso sincrónico, activo (Active, trazo lleno) en el asincrónico.</figcaption>
+  </figure>
+
+  <div class="examen">Relacionado en finales: "¿Cómo se garantiza que un algoritmo o protocolo sea sincrónico en el contexto de sistemas distribuidos?" (2025-07). La noción completa de sistema sincrónico (cotas conocidas de cómputo y comunicación) se desarrolla en la unidad de tiempo y sincronismo; desde aca conviene tener claro que sincrónico implica poder esperar la respuesta con un límite de tiempo conocido.</div>
+
+  <h3 id="u02-congestion">Congestion de red</h3>
+  <p>La red tiene capacidad finita. A medida que crece la carga ofrecida, el throughput crece linealmente hasta acercarse a la capacidad; ahí los buffers de los routers se llenan, aparecen retransmisiones y, sin control, el throughput <b>colapsa</b> (congestion collapse): más tráfico ofrecido resulta en menos datos útiles entregados. El delay se comporta peor: crece de forma explosiva cuando la utilización se acerca al 100%.</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 420 260" role="img" aria-label="Curva de throughput normalizado contra carga, con tres zonas: no congestion, moderate congestion y severe congestion, y los puntos A y B marcando los bordes de la zona de congestion moderada">
+      <g fill="none" stroke="var(--linea)">
+        <path d="M40 20 L40 220 L390 220" />
+        <path d="M180 20 L180 220" stroke-dasharray="4 4" opacity="0.5" />
+        <path d="M230 20 L230 220" stroke-dasharray="4 4" opacity="0.5" />
+      </g>
+      <path d="M40 220 L180 92 L230 60 C275 95 305 165 340 198" fill="none" stroke="var(--acc)" />
+      <circle cx="180" cy="92" r="3.5" fill="currentColor" stroke="none" />
+      <circle cx="230" cy="60" r="3.5" fill="currentColor" stroke="none" />
+      <g fill="currentColor" stroke="none" font-size="11">
+        <text x="105" y="35" text-anchor="middle">No congestion</text>
+        <text x="205" y="35" text-anchor="middle">Moderate</text>
+        <text x="310" y="35" text-anchor="middle">Severe congestion</text>
+        <text x="188" y="88" text-anchor="start">A</text>
+        <text x="238" y="56" text-anchor="start">B</text>
+        <text x="210" y="238" text-anchor="middle">Load</text>
+      </g>
+      <text x="16" y="130" text-anchor="middle" fill="currentColor" stroke="none" font-size="11" transform="rotate(-90 16 130)">Throughput normalizado</text>
+    </svg>
+    <figcaption>Throughput normalizado en función de la carga (Stallings): crece linealmente en la zona sin congestión, llega a su punto A al entrar en congestión moderada, alcanza el máximo en B y colapsa en la zona de congestión severa.</figcaption>
+  </figure>
+
+  <figure class="diag">
+    <svg viewBox="0 0 480 260" role="img" aria-label="Curva de delay contra carga con dos lineas: el delay promedio de todos los paquetes ofrecidos diverge cerca de la saturacion, mientras que el delay promedio de los paquetes efectivamente entregados se satura sin divergir">
+      <g fill="none" stroke="var(--linea)">
+        <path d="M40 20 L40 220 L440 220" />
+      </g>
+      <path d="M40 210 C150 200 250 150 300 60 C312 38 318 24 322 12" fill="none" stroke="var(--acc2)" stroke-dasharray="4 4" />
+      <path d="M40 210 C150 200 250 150 300 110 C335 88 365 82 405 80" fill="none" stroke="var(--acc)" />
+      <g fill="currentColor" stroke="none" font-size="10.5">
+        <text x="230" y="238" text-anchor="middle">Load</text>
+        <text x="330" y="20" text-anchor="start">todos los paquetes</text>
+        <text x="345" y="66" text-anchor="start">paquetes entregados</text>
+      </g>
+      <text x="16" y="130" text-anchor="middle" fill="currentColor" stroke="none" font-size="11" transform="rotate(-90 16 130)">Delay</text>
+    </svg>
+    <figcaption>Delay promedio en función de la carga (Stallings): el promedio sobre todos los paquetes ofrecidos diverge cerca de la saturación porque arrastra las retransmisiones; el promedio sobre los paquetes efectivamente entregados se satura pero no diverge.</figcaption>
+  </figure>
+
+  <ul>
+    <li><b>Throttling:</b> limitar deliberadamente la tasa de envio para operar antes del punto de colapso; es la base del control de congestion de TCP (sliding window).</li>
+    <li>Para el diseño de sistemas distribuidos la lección es directa: nunca planificar para operar la red al límite, porque cerca de la saturación la latencia se degrada mucho antes que el throughput.</li>
+    <li>Conviene distinguir el delay promedio de todos los paquetes ofrecidos, que diverge cerca de la saturación porque arrastra las retransmisiones, del delay promedio de los paquetes que efectivamente se entregan, que se satura pero no diverge.</li>
+  </ul>
+
+  <details class="mas">
+    <summary>Bibliografia de la unidad</summary>
+    <ul>
+      <li>McCool, Robison, Reinders, <i>Structured Parallel Programming</i> (2012): caps. 1 y 2.</li>
+      <li>Ben-Ari, <i>Principles of Concurrent and Distributed Programming</i>, 2da ed. (2006): caps. 2 (abstracción de programación concurrente), 3 (exclusión mutua), 4 (semaforos) y 5 (monitores).</li>
+      <li>Stallings, <i>Data and Computer Communications</i>, 8va ed.: curvas de throughput y delay bajo congestion.</li>
+    </ul>
+  </details>
+</section>

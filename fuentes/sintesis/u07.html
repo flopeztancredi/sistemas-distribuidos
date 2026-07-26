@@ -1,0 +1,641 @@
+<section class="unidad" id="u07" data-titulo="Patrones de comunicacion; ZeroMQ">
+  <h2>U07. Patrones de comunicación; ZeroMQ</h2>
+  <p class="intro">Esta unidad sistematiza los patrones de comunicación entre procesos de un sistema distribuido: Request-Reply, Producer-Consumer, Publisher-Subscriber, Pipelines y DAGs. Son el vocabulario con el que se diseña casi cualquier arquitectura de la materia (y de los TPs), y aparecen una y otra vez en los finales como consigna de diseño con pseudocódigo. La segunda parte presenta ZeroMQ, un MOM distribuido (brokerless) que implementa estos patrones directamente sobre sockets.</p>
+
+  <h3 id="u07-request-reply">Request-Reply</h3>
+  <div class="def"><b>Request-Reply.</b> Protocolo de comunicación del modelo cliente-servidor: el cliente envía un Request Message, el servidor lo recibe, procesa la operación y devuelve un Reply Message. Por defecto es sincrónico (bloqueante): el cliente queda bloqueado hasta recibir el Reply.</div>
+  <p>Quien inicia la comunicación es, por definición, el cliente. En este esquema los ACK son triviales: el Reply funciona como acuse de recibo, porque el servidor no responde nada que no le hayan pedido. El costo es que el tiempo de bloqueo del cliente depende de una operación que no controla: la lógica de negocio del servidor puede tardar poco o mucho, con alta variabilidad (no tarda lo mismo listar 20 mails que insertar mil registros).</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 560 240" role="img" aria-label="Topologia cliente servidor de Request-Reply: el cliente envia el Request Message y queda esperando hasta recibir el Reply Message">
+      <g fill="none" stroke="currentColor">
+        <rect x="10" y="15" width="230" height="210" rx="8"/>
+        <rect x="320" y="15" width="230" height="210" rx="8"/>
+        <rect x="30" y="45" width="190" height="34" rx="6"/>
+        <rect x="30" y="162" width="190" height="34" rx="6"/>
+        <rect x="340" y="45" width="190" height="34" rx="6"/>
+        <rect x="340" y="100" width="190" height="34" rx="6" stroke="var(--acc)"/>
+        <rect x="340" y="162" width="190" height="34" rx="6"/>
+      </g>
+      <line x1="220" y1="62" x2="331" y2="62" stroke="var(--linea)"/>
+      <polygon points="331,57 331,67 340,62" fill="currentColor"/>
+      <line x1="340" y1="179" x2="229" y2="179" stroke="var(--acc2)"/>
+      <polygon points="229,174 229,184 220,179" fill="var(--acc2)"/>
+      <circle cx="125" cy="100" r="3" fill="currentColor"/>
+      <circle cx="125" cy="113" r="3" fill="currentColor"/>
+      <circle cx="125" cy="126" r="3" fill="currentColor"/>
+      <g fill="currentColor" font-size="14" text-anchor="middle">
+        <text x="125" y="32">Cliente</text>
+        <text x="435" y="32">Servidor</text>
+      </g>
+      <g fill="currentColor" font-size="12" text-anchor="middle">
+        <text x="125" y="67">Enviar Request</text>
+        <text x="125" y="145">(espera)</text>
+        <text x="125" y="184">Recibir Reply</text>
+        <text x="435" y="67">Recibir Request</text>
+        <text x="435" y="122">Procesar operación</text>
+        <text x="435" y="184">Enviar Reply</text>
+      </g>
+      <g fill="currentColor" font-size="11" text-anchor="middle">
+        <text x="280" y="52">Request Message</text>
+        <text x="280" y="172">Reply Message</text>
+      </g>
+    </svg>
+    <figcaption>Request-Reply sincrónico: el cliente envía el Request Message y queda bloqueado (espera) hasta recibir el Reply Message; el servidor recibe, procesa y responde.</figcaption>
+  </figure>
+  <p class="nota">El mismo esqueleto sirve para las tres variantes de la unidad: en la <a href="#u07-rr-asincronico">operación asincrónica</a>, la 1° parte cambia las etiquetas a <b>Enviar Acción</b> / <b>Encolar acción</b> / <b>Enviar ACK</b>, y la 2° parte a <b>Preguntar Estado</b> / <b>Obtener Estado</b> / <b>Enviar Estado</b>. Cambia el payload, no la topología.</p>
+
+  <h4 id="u07-rr-asincronico">Operación asincrónica con dos Request-Reply</h4>
+  <p>Para no bloquear al cliente durante todo el procesamiento se arma una operación asincrónica encadenando dos Request-Reply sincrónicos:</p>
+  <ol>
+    <li><b>Encolar la acción:</b> el cliente envía la operación; el servidor no la procesa, solo la encola y responde un ACK inmediato. El contrato implícito es "tu operación fue registrada y eventualmente la voy a procesar", no que ya se ejecutó ni que va a salir bien.</li>
+    <li><b>Consultar el estado:</b> más tarde el cliente pregunta por su operación (polling) y el servidor responde el estado: pendiente, en proceso, error o éxito con el resultado.</li>
+  </ol>
+  <div class="idea">La gracia es reemplazar una espera larga y de duración impredecible (definida por la lógica de negocio) por dos esperas cortas, uniformes y de baja varianza: encolar y consultar estado son operaciones rápidas y parecidas entre sí, sin importar qué operación de negocio se pidió. El cliente queda libre para hacer trabajo útil entre medio.</div>
+  <div class="ej">En un TP de blockchain, si el envío de un chunk fuera sincrónico de punta a punta, cada cliente quedaría bloqueado hasta que su bloque se mine y persista (tiempo que crece con la dificultad). Con el patrón asincrónico el servidor encola el chunk, responde el ACK enseguida y el cliente consulta después si su bloque ya entró en la cadena.</div>
+  <p>Si el servidor está saturado (la cola de acciones llena), puede rechazar el Request: el cliente deberá reintentar más tarde. Que el ACK haya llegado garantiza que la acción fue encolada y será procesada.</p>
+
+  <h4 id="u07-rr-mensajes">Estructura de los mensajes</h4>
+  <p>Los mensajes de un protocolo Request-Reply suelen llevar estos campos obligatorios:</p>
+  <ul>
+    <li><code>messageID</code>: distingue Request (0) de Reply (1).</li>
+    <li><code>requestID</code>: identifica unívocamente al mensaje. Dos alternativas: <b>autoincremental</b> (simple con un solo generador, pero en cuanto hay varios nodos el contador pasa a ser un recurso compartido y se complica) o <b>UUID</b> (128 bits pseudoaleatorios; la probabilidad de colisión es tan baja que en la práctica se asume única, y cualquier cliente puede generarlo sin coordinación).</li>
+    <li><code>operationID</code>: qué acción u operación se pide.</li>
+    <li><code>args</code>: argumentos de la operación.</li>
+  </ul>
+  <p>El <code>requestID</code> es la pieza clave: permite consultar el estado de una operación asincrónica y filtrar duplicados. Si el sistema es externo (una API de pagos, por ejemplo), conviene que lo genere el cliente: si lo generara el servidor y el Reply se perdiera, el cliente nunca lo conocería y no podría reintentar de forma segura.</p>
+
+  <h4 id="u07-rr-fallos">Tolerancia a fallos: timeouts, retries, backoff y jitter</h4>
+  <p>¿Cuánto se espera por un Reply? La respuesta estándar es timeout con retries. Para no martillar a un servidor que ya está en problemas se usa <b>backoff exponencial</b>: el primer reintento al segundo, el siguiente a los 2, luego 4, 8, hasta una cota donde se corta y se asume caída. La lógica: una falla transitoria se resuelve con un retry rápido; si los retries se acumulan, probablemente el sistema está caído y no tiene sentido insistir seguido.</p>
+  <div class="idea">El <b>jitter</b> agrega ruido aleatorio a esos tiempos de backoff. Si diez clientes fueron rechazados en el mismo instante por un servidor sobrecargado y todos usan el mismo backoff determinístico, van a volver a pegarle todos juntos en cada reintento y a fracasar todos juntos otra vez. Dispersar los tiempos alrededor del valor medio rompe esa sincronización accidental (es la política que documenta, por ejemplo, el SDK de AWS).</div>
+
+  <h4 id="u07-rr-semanticas">Semánticas de entrega e idempotencia</h4>
+  <p>¿Qué pasa si se pierde un Request o un Reply? Ojo con el caso sutil: se pierde el <b>ACK</b>, no el Request. El servidor ya encoló la acción, el cliente hace timeout y reenvía, y la acción queda encolada dos veces. Según qué controles haya, la garantía que se obtiene es distinta:</p>
+  <table>
+    <thead>
+      <tr><th>Estrategia</th><th>Retry de Request</th><th>Filtro de duplicados</th><th>Garantía</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>#1 Sin control</td><td>No</td><td>No</td><td>Maybe (best effort)</td></tr>
+      <tr><td>#2 Re-ejecución</td><td>Sí</td><td>No</td><td>At Least Once</td></tr>
+      <tr><td>#3 Retransmisión</td><td>Sí</td><td>Sí</td><td>Exactly Once</td></tr>
+    </tbody>
+  </table>
+  <div class="def"><b>Operación idempotente.</b> Operación cuyo efecto sobre el estado del sistema es el mismo sin importar cuántas veces se ejecute. <code>edad = 40</code> es idempotente (ejecutarla dos veces deja el mismo estado); <code>saldo = saldo - 100</code> no lo es (cada ejecución descuenta de nuevo).</div>
+  <div class="warn">At Least Once con operaciones no idempotentes rompe la consistencia: si "extraer $100" queda duplicada en la cola, el cliente ve una sola respuesta pero el servidor descuenta $200. Exactly Once exige retry <b>más</b> filtro de duplicados (típicamente guardando los <code>requestID</code> ya procesados), y ese filtro no es trivial: hay que decidir cuántos IDs retener, por cuánto tiempo, y qué pasa si se pierde esa memoria. La alternativa barata es diseñar operaciones idempotentes, con lo cual At Least Once alcanza.</div>
+  <div class="ej">Qué garantía alcanza depende del caso: para un stream de video, Maybe es suficiente (un pixel perdido no se reintenta, ya pasó el frame); para un GET de lectura, At Least Once no molesta (leer dos veces no cambia el estado); para un pago, se necesita Exactly Once o una operación idempotente con ID de pago generado por el cliente.</div>
+  <div class="examen">Preguntado en finales, casi siempre como consigna de diseño: "Dada una librería basada en request-reply, desarrolle un sistema que distribuya la carga entre N servidores conocidos" (calcular el hash XOR de un archivo por bloques, 2024-07; filtrar logs de Nginx con RegEx entre N nodos, 2025-03), y "Utilizando request-reply, implemente una barrera para que 3 workers se sincronicen" (2024-12). También aparece la teórica "¿RPC resulta excluyente respecto de un modelo Request-Reply?" (2025-07): no, RPC es una abstracción de programación que típicamente se implementa sobre Request-Reply. Conviene tener aceitado el pseudocódigo cliente/servidor con envío, espera de Reply y reparto de trabajo.</div>
+
+  <h3 id="u07-producer-consumer">Producer-Consumer</h3>
+  <div class="def"><b>Producer-Consumer.</b> Modelo de comunicación <b>por tareas</b>: los producers generan información que es materia prima de un procesamiento posterior, y los consumers esperan la aparición de esa información para procesarla. Cada tarea la toma <b>un solo</b> consumidor.</div>
+  <p>Admite múltiples productores y múltiples consumidores sobre la misma cola de trabajo. La entrega busca ser equitativa (fairness); en ZeroMQ, por ejemplo, se resuelve con round robin entre consumidores (ver <a href="#u07-zmq-pushpull">Push-Pull</a>). Es el patrón de las working queues que ya se vieron con <a href="#u05">RabbitMQ</a>.</p>
+  <div class="examen">Preguntado en finales: "Defina cómo implementar un middleware distribuido que permita a 10 agentes de atención llamar al siguiente número en fila. ¿Dónde almacenaría el último número llamado?". La respuesta esperada es una working queue Producer-Consumer con ACK explícito del agente (si cae sin ACK, el número se re-encola: At Least Once) y persistencia del último número en un sink o base compartida, nunca en la cola, que es transitoria.</div>
+
+  <h3 id="u07-publisher-subscriber">Publisher-Subscriber</h3>
+  <div class="def"><b>Publisher-Subscriber.</b> Modelo de comunicación <b>por eventos</b>: los publishers generan elementos de interés y los subscribers esperan la aparición de eventos de su interés para reaccionar. A diferencia de Producer-Consumer, un mismo evento llega a <b>todos</b> los suscriptores interesados, cada uno con su copia.</div>
+  <p>Entre publishers y subscribers suele mediar un message broker. La ventaja central es el desacoplamiento: sin broker, N publishers y M subscribers necesitarían una malla de conexiones N por M y cada publisher debería conocer a cada interesado; con broker, todos conocen solo al broker, que hace de pasamanos según los intereses declarados. Eso simplifica la comunicación y permite escalar (un publisher puede alcanzar miles de suscriptores sin conocer a ninguno).</p>
+  <figure class="diag">
+    <svg viewBox="0 0 520 190" role="img" aria-label="Publishers conectados a un broker que reenvia eventos a subscribers segun topico">
+      <g fill="none" stroke="currentColor">
+        <rect x="10" y="15" width="90" height="34" rx="6"/>
+        <rect x="10" y="78" width="90" height="34" rx="6"/>
+        <rect x="10" y="141" width="90" height="34" rx="6"/>
+        <rect x="205" y="70" width="110" height="50" rx="8" stroke="var(--acc)"/>
+        <rect x="420" y="40" width="90" height="34" rx="6"/>
+        <rect x="420" y="116" width="90" height="34" rx="6"/>
+        <path d="M100 32 L205 85" stroke="var(--linea)"/>
+        <path d="M100 95 L205 95" stroke="var(--linea)"/>
+        <path d="M100 158 L205 105" stroke="var(--linea)"/>
+        <path d="M315 85 L420 57" stroke="var(--acc2)"/>
+        <path d="M315 105 L420 133" stroke="var(--acc2)"/>
+        <path d="M415 55 l7 2 -5 5" fill="currentColor" stroke="none"/>
+        <path d="M415 131 l7 2 -5 5" fill="currentColor" stroke="none"/>
+      </g>
+      <g fill="currentColor" font-size="13" text-anchor="middle">
+        <text x="55" y="36">Pub 1</text>
+        <text x="55" y="99">Pub 2</text>
+        <text x="55" y="162">Pub 3</text>
+        <text x="260" y="99">Broker</text>
+        <text x="465" y="61">Sub 1</text>
+        <text x="465" y="137">Sub 2</text>
+        <text x="367" y="75" font-size="11">tópico A</text>
+        <text x="367" y="128" font-size="11">tópico B</text>
+      </g>
+    </svg>
+    <figcaption>Arquitectura Pub-Sub con broker: los publishers publican sin conocer a los suscriptores; el broker enruta cada evento a quienes están suscriptos.</figcaption>
+  </figure>
+
+  <h4 id="u07-ps-topicos-canales">Tópicos vs canales</h4>
+  <ul>
+    <li><b>Basada en tópicos:</b> cada publicación lleva un tag o tópico (pensarlo como un hashtag) y cada suscriptor declara a qué tópicos se suscribe. El broker entrega cada mensaje a todos los suscriptos a ese tópico.</li>
+    <li><b>Basada en canales:</b> publicaciones y suscripciones se orientan a canales específicos (por ejemplo, un canal por destinatario). Quien quiere hablarle al suscriptor X publica en el canal de X.</li>
+  </ul>
+
+  <h4 id="u07-ps-moms">Implementación con MOMs</h4>
+  <p>El ejemplo canónico de la cátedra: Contabilidad (solo subscriber), Ventas (pub-sub: publica ventas, consume stock) y Control de Stock (pub-sub: publica stock, consume ventas).</p>
+  <ul>
+    <li><b>Con un message bus (tópicos):</b> cada mensaje se publica al bus con su tópico (venta o stock) y llega a todos los que escuchan ese tópico: los mensajes de venta llegan a Contabilidad y a Stock; los de stock, a Contabilidad y a Ventas.</li>
+    <li><b>Con colas (canales):</b> una cola por consumidor; el publicador deposita una copia del mensaje en la cola de cada interesado (el mensaje de venta va a la cola de Contabilidad y a la de Stock). Mismo dominio, modelado distinto: es lo que se hace con RabbitMQ y exchanges en el TP.</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 1020 300" role="img" aria-label="Comparacion de topologias para Contabilidad Ventas y Control de Stock: bus de topicos compartido a la izquierda, una cola por consumidor a la derecha">
+      <line x1="495" y1="15" x2="495" y2="295" stroke="var(--acc2)" stroke-dasharray="4 4"/>
+      <g fill="currentColor" font-size="14" text-anchor="middle">
+        <text x="250" y="22">Bus (tópicos)</text>
+        <text x="765" y="22">Colas (canales)</text>
+      </g>
+      <g fill="none" stroke="currentColor">
+        <rect x="30" y="48" width="150" height="44" rx="6"/>
+        <rect x="300" y="48" width="150" height="44" rx="6"/>
+        <rect x="30" y="158" width="420" height="36" rx="6" stroke="var(--acc)"/>
+        <rect x="165" y="244" width="150" height="44" rx="6"/>
+      </g>
+      <g stroke="var(--linea)" fill="none">
+        <line x1="365" y1="92" x2="365" y2="158"/>
+        <line x1="225" y1="244" x2="225" y2="194"/>
+      </g>
+      <g fill="currentColor">
+        <polygon points="359,150 371,150 365,158"/>
+        <polygon points="219,202 231,202 225,194"/>
+      </g>
+      <g stroke="var(--acc2)" fill="none">
+        <line x1="395" y1="158" x2="395" y2="92"/>
+        <line x1="255" y1="194" x2="255" y2="244"/>
+        <line x1="105" y1="158" x2="105" y2="92"/>
+      </g>
+      <g fill="var(--acc2)">
+        <polygon points="389,100 401,100 395,92"/>
+        <polygon points="249,236 261,236 255,244"/>
+        <polygon points="99,100 111,100 105,92"/>
+      </g>
+      <g fill="currentColor" font-size="12" text-anchor="middle">
+        <text x="105" y="66">Contabilidad</text>
+        <text x="375" y="66">Ventas</text>
+        <text x="240" y="262">Control Stock</text>
+        <text x="240" y="180">Message Bus</text>
+      </g>
+      <g fill="currentColor" font-size="10" text-anchor="middle">
+        <text x="105" y="82">(subscriber)</text>
+        <text x="375" y="82">(pub-sub)</text>
+        <text x="240" y="278">(pub-sub)</text>
+      </g>
+      <g fill="var(--acc2)" font-size="10" text-anchor="middle">
+        <text x="120" y="128">V, S</text>
+        <text x="350" y="128">V</text>
+        <text x="412" y="128">S</text>
+        <text x="205" y="221">S</text>
+        <text x="272" y="221">V</text>
+      </g>
+      <g fill="none" stroke="currentColor">
+        <rect x="520" y="48" width="150" height="44" rx="6"/>
+        <rect x="700" y="48" width="150" height="44" rx="6"/>
+        <rect x="870" y="48" width="140" height="44" rx="6"/>
+        <rect x="520" y="158" width="150" height="40" rx="6"/>
+        <rect x="700" y="158" width="150" height="40" rx="6"/>
+        <rect x="870" y="158" width="140" height="40" rx="6"/>
+      </g>
+      <g stroke="var(--acc2)" fill="none">
+        <line x1="595" y1="158" x2="595" y2="92"/>
+        <line x1="775" y1="158" x2="775" y2="92"/>
+        <line x1="940" y1="158" x2="940" y2="92"/>
+      </g>
+      <g fill="var(--acc2)">
+        <polygon points="589,100 601,100 595,92"/>
+        <polygon points="769,100 781,100 775,92"/>
+        <polygon points="934,100 946,100 940,92"/>
+      </g>
+      <g stroke="var(--linea)" fill="none">
+        <line x1="720" y1="92" x2="630" y2="158"/>
+        <line x1="890" y1="92" x2="660" y2="158"/>
+        <line x1="760" y1="92" x2="900" y2="158"/>
+        <line x1="910" y1="92" x2="800" y2="158"/>
+      </g>
+      <g fill="currentColor">
+        <polygon points="624,150 636,150 630,158"/>
+        <polygon points="654,150 666,150 660,158"/>
+        <polygon points="894,150 906,150 900,158"/>
+        <polygon points="794,150 806,150 800,158"/>
+      </g>
+      <g fill="currentColor" font-size="12" text-anchor="middle">
+        <text x="595" y="66">Contabilidad</text>
+        <text x="775" y="66">Control Stock</text>
+        <text x="940" y="66">Ventas</text>
+        <text x="595" y="175">q1</text>
+        <text x="775" y="175">q2</text>
+        <text x="940" y="175">q3</text>
+      </g>
+      <g fill="currentColor" font-size="10" text-anchor="middle">
+        <text x="595" y="82">(subscriber)</text>
+        <text x="775" y="82">(pub-sub)</text>
+        <text x="940" y="82">(pub-sub)</text>
+      </g>
+      <g fill="var(--acc2)" font-size="10" text-anchor="middle">
+        <text x="595" y="190">V, S</text>
+        <text x="775" y="190">V</text>
+        <text x="940" y="190">S</text>
+      </g>
+    </svg>
+    <figcaption>El ejemplo canónico (Contabilidad, Ventas, Control de Stock) modelado de dos formas: con un bus de tópicos (izquierda) los tres procesos comparten un canal y cada uno filtra por su tópico (V de venta, S de stock); con colas por canal (derecha) cada consumidor tiene su propia cola y los publishers depositan una copia en la de cada interesado.</figcaption>
+  </figure>
+  <div class="warn">No confundir los dos modelos de reparto: en Producer-Consumer los consumidores <b>compiten</b> por las tareas (cada mensaje lo procesa uno solo); en Publisher-Subscriber cada suscriptor del tópico recibe <b>su copia</b> del evento. En finales de diseño se puede usar Pub-Sub "como" productor-consumidor publicando con un tópico por nodo (solo el nodo suscripto a "nodo_i" consume esos mensajes); si se publica sin tópicos que particionen, todos reciben todo y se duplica el trabajo.</div>
+  <div class="examen">Preguntado en finales de forma recurrente: "Utilizando una arquitectura Publisher-Subscriber, calcule la suma de los enteros de un vector de tamaño N optimizando el uso de P procesos" (2022-08), "escriba un sistema que imprima la suma de un gran vector leído por entrada estándar, distribuyendo la carga entre N servidores conocidos" (2025-02) y "calcule el promedio de ventas recibidas en streaming con ventanas de 1M de registros" (2025-07), siempre con pseudocódigo. El truco típico: particionar con un tópico por worker y un tópico de resultados al que se suscribe quien agrega. También: "Describa cómo implementaría un middleware de comunicación de grupo con tres grupos fijos y membresía dinámica", que se resuelve con Pub-Sub por tópicos más un servicio de membresía.</div>
+
+  <h3 id="u07-pipelines">Pipelines</h3>
+  <div class="def"><b>Pipeline (Pipes and Filters).</b> Estilo en el que los datos de entrada forman un flujo que atraviesa una secuencia de filters (o processors) conectados entre sí: cada filter aplica una transformación y pasa el resultado al siguiente, desde un source hasta un sink.</div>
+  <p>Está inspirado en el procesamiento de señales y es la esencia de los pipes de Unix: <code>cat in | grep pattern | sort | uniq &gt; out</code> es un pipeline con un source (<code>cat</code>), tres etapas de transformación y un sink (la redirección a <code>out</code>).</p>
+
+  <h4 id="u07-pl-workers">Modelos de procesamiento: worker por filter vs worker por item</h4>
+  <ul>
+    <li><b>Worker por filter:</b> cada etapa tiene su propia unidad de procesamiento; los ítems se encolan entre etapas y cada worker procesa su etapa y pasa el ítem a la siguiente. Mejor throughput global: no hay una cota dada por la cantidad de workers "acompañando" ítems, y cada ítem espera solo a la etapa que tiene delante. Permite escalar horizontalmente la etapa que sea cuello de botella.</li>
+    <li><b>Worker por item:</b> un worker toma un ítem y lo acompaña por todo el pipeline aplicándole los filters paso a paso. Mantiene todo el contexto del ítem en la misma unidad de procesamiento (buena afinidad si el procesamiento depende fuertemente del contexto), pero con P workers no se procesan más de P ítems en simultáneo y la latencia por ítem incluye el pipeline entero.</li>
+  </ul>
+  <p>El throughput máximo del pipeline queda limitado por la etapa más lenta: una vez lleno, el pipeline avanza al ritmo del stage que más tarda. De ahí que el análisis de cuellos de botella indique qué etapa escalar.</p>
+
+  <h4 id="u07-pl-etapas">Etapas secuenciales y paralelas</h4>
+  <ul>
+    <li><b>Paralela:</b> cada ítem es independiente de anteriores y posteriores, así que la etapa admite varias instancias procesando a la vez (un map que multiplica por 2 no depende del orden).</li>
+    <li><b>Secuencial:</b> no puede procesar más de un ítem a la vez (importa el orden o hay estado compartido). Puede devolver los ítems ordenados o desordenados.</li>
+  </ul>
+
+  <h4 id="u07-pl-ventajas">Ventajas: algoritmos online e información infinita</h4>
+  <ul>
+    <li><b>Algoritmos online:</b> el procesamiento arranca antes de que estén todos los datos disponibles.</li>
+    <li><b>Información infinita:</b> permite trabajar con flujos ilimitados usando memoria constante: el procesamiento está encadenado y solo se necesita un buffer mínimo por etapa. Para streams sin fin se opera por <b>ventanas</b> (por ejemplo, cada 1000 elementos se emite un resultado parcial) o con algoritmos online que mantienen un estado acotado (un promedio que se actualiza incrementalmente aproxima el promedio de todo lo visto sin guardar los datos).</li>
+  </ul>
+
+  <h4 id="u07-pl-artefactos">Pipes y filters como artefactos de programación</h4>
+  <p>El patrón tiene solo dos conceptos, y la pregunta de final es siempre la misma: ¿en qué se traducen al escribir el sistema? La respuesta corta: el <b>filter</b> es una unidad de ejecución (proceso, thread o contenedor) que corre una función de transformación, y el <b>pipe</b> es un canal de comunicación con buffer entre dos de esas unidades. Todo lo demás son variantes de implementación de esos dos artefactos.</p>
+
+  <p><b>Filter, en artefactos:</b></p>
+  <ul>
+    <li>Una <b>función de transformación</b> pura: recibe un ítem, devuelve cero, uno o varios ítems de salida. Es la unidad conceptual (un <code>map</code>, un <code>filter</code> en el sentido de descartar, un <code>flatMap</code> que abre un ítem en varios).</li>
+    <li>Una <b>unidad de ejecución</b> que hostea esa función y corre un loop <code>recibir, transformar, emitir</code>: un thread, un proceso, o un contenedor. En la práctica de la materia es un <b>worker</b>, y una etapa es un pool de workers idénticos (ver <a href="#u07-pl-workers">worker por filter</a>).</li>
+    <li>Visto desde la comunicación, cada filter es al mismo tiempo <b>consumidor de la cola de entrada y productor de la cola de salida</b>: producer-consumer encadenado. Los extremos son casos degenerados: el <b>source</b> solo produce (lee de un archivo, un socket, un stream externo) y el <b>sink</b> solo consume (persiste en una base, escribe un archivo, dispara una alerta).</li>
+    <li>En Unix el filter es literalmente <b>un programa que lee de stdin y escribe en stdout</b>: <code>grep</code>, <code>sort</code>, <code>uniq</code>. Esa es la definición original y sigue siendo la mejor intuición.</li>
+  </ul>
+  <pre><code># filter tipico: worker de una etapa, stateless
+entrada = mom.consumidor("reviews.norm")
+salida  = mom.productor("reviews.scored")
+for msg in entrada:
+    r = deserializar(msg)
+    r.score = puntuar(r.texto)          # la funcion de transformacion
+    salida.enviar(serializar(r), clave=hash(r.producto))
+    entrada.ack(msg)                    # ack recien despues de emitir</code></pre>
+  <div class="idea">Conviene que el filter sea <b>stateless</b> (todo lo que necesita viene en el ítem) por tres razones: cualquier réplica puede procesar cualquier ítem, así que el pipe puede repartir por round robin y la etapa <b>escala horizontalmente</b> sumando instancias; si una instancia muere no hay estado que recuperar, alcanza con que el ítem sin ACK vuelva a la cola y lo tome otra; y el ítem se vuelve la unidad de reintento, con lo cual la etapa es fácil de hacer idempotente (ver <a href="#u07-rr-semanticas">semánticas de entrega</a>). Cuando la etapa necesita estado (contar, promediar, joinear), la salida barata es <b>particionar por clave</b>: cada instancia es dueña exclusiva de un subconjunto de claves, y así una etapa con estado se sigue paralelizando.</div>
+
+  <p><b>Pipe, en artefactos:</b> cualquier canal unidireccional con buffer que desacople la velocidad de las dos etapas que conecta. Las opciones concretas, de menos a más garantías:</p>
+  <table>
+    <thead>
+      <tr><th>Concepto</th><th>Artefacto</th><th>Ejemplo</th><th>Garantías</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Filter</td><td>Proceso, thread o contenedor con loop recibir, transformar, emitir (worker)</td><td><code>grep pattern</code>; un contenedor <code>parser</code> replicado 5 veces</td><td>Si es stateless, replicable y reiniciable sin recuperar nada</td></tr>
+      <tr><td>Filter con estado</td><td>Worker con estado local más particionado por clave del ítem</td><td>Agregador que promedia por producto</td><td>No se puede replicar libremente: hay que rutear cada clave siempre a la misma instancia</td></tr>
+      <tr><td>Pipe</td><td><b>Pipe del sistema operativo</b> (anonymous pipe o FIFO, ver <a href="#u02-ipcs">IPCs</a>)</td><td><code>cat in | grep pattern | sort &gt; out</code></td><td>Buffer en memoria del kernel, una máquina, sin persistencia: si un proceso muere se pierde lo que estaba en vuelo</td></tr>
+      <tr><td>Pipe</td><td><b>Cola de un MOM</b> (working queue de <a href="#u05-rabbitmq">RabbitMQ</a>)</td><td>Cola <code>reviews.raw</code> entre el ingestor y los normalizadores</td><td>Cruza la red, cola durable y ACK explícito: At Least Once, sobrevive a la caída de productor y consumidor</td></tr>
+      <tr><td>Pipe</td><td><b>Socket PUSH/PULL de ZeroMQ</b> (ver <a href="#u07-zmq-pushpull">Push-Pull</a>)</td><td>Ventilator a workers a sink</td><td>Cruza la red sin broker, buffer en memoria del proceso y round robin estricto: si el proceso muere, se pierde su buffer</td></tr>
+      <tr><td>Pipe</td><td><b>Stream de un framework de dataflow</b> (<a href="#u10-flink">Flink</a>, <a href="#u10-beam">Beam</a>)</td><td><code>DataStream</code> entre dos operadores</td><td>El framework maneja el canal, los checkpoints y el replay: Exactly Once dentro del pipeline, al costo de atarse al framework</td></tr>
+    </tbody>
+  </table>
+  <div class="warn">Error típico en el final: contestar "los pipes son los pipes de Unix" y quedarse ahí. Un pipe del SO no cruza la frontera de la máquina, así que en un sistema <b>distribuido</b> el pipe es siempre otra cosa: una cola de un MOM, un socket, o un stream de un framework. Y la elección no es cosmética: cambia las garantías. Con un pipe del SO, si el proceso de la etapa 2 muere, lo que estaba en el buffer se perdió y el pipeline se corta; con una cola durable de un MOM, los ítems siguen ahí cuando la etapa se relevanta, y otro worker los toma.</div>
+
+  <div class="ej">
+    <p><b>Sistema supuesto: análisis de reseñas de un e-commerce en streaming.</b> Entran reseñas <code>(producto, usuario, texto, estrellas)</code> por un stream infinito y hay que publicar, cada 100.000 reseñas, el promedio de sentimiento por producto. Pipeline de cinco etapas, todas en contenedores, todos los pipes son colas durables de un MOM:</p>
+    <ul>
+      <li><b>Ingestor (source, 1 instancia):</b> recibe las reseñas del front, valida el formato mínimo, serializa a JSON y produce a la cola <code>reviews.raw</code>. No es replicable sin más porque es el punto de entrada, pero tampoco hace trabajo pesado.</li>
+      <li><b>Normalizador (filter stateless, N instancias):</b> consume <code>reviews.raw</code>, baja el texto a minúsculas, saca HTML y emojis, descarta reseñas vacías (un filter que además filtra en el sentido literal) y produce a <code>reviews.norm</code>.</li>
+      <li><b>Clasificador de sentimiento (filter stateless, M instancias):</b> consume <code>reviews.norm</code>, calcula un score en el rango -1 a 1 y produce a <code>reviews.scored</code> usando <code>hash(producto)</code> como clave de ruteo. Es CPU bound y la etapa más lenta, así que es la que define el throughput del pipeline entero.</li>
+      <li><b>Agregador (filter con estado, K instancias particionadas):</b> cada instancia recibe solo los productos cuyo hash le corresponde, mantiene <code>(suma, cuenta)</code> por producto en memoria y cada 100.000 reseñas emite los promedios de su partición a <code>reviews.out</code>. Es la única etapa que no se puede escalar simplemente sumando instancias: escalarla implica repartir de nuevo las claves.</li>
+      <li><b>Sink (1 o pocas instancias):</b> consume <code>reviews.out</code> y persiste el ranking en la base que sirve al dashboard.</li>
+    </ul>
+    <p><b>Cómo escala cada etapa por separado:</b> se mide la profundidad de cada cola. Si <code>reviews.norm</code> crece sin parar, el cuello está en el clasificador: se levantan más instancias de <b>esa sola etapa</b> (de 4 a 12 contenedores) sin tocar una línea del resto, porque ninguna etapa conoce cuántas instancias tienen las demás: solo conocen el nombre de sus colas. Si crece <code>reviews.raw</code>, el cuello es el normalizador. Si crece <code>reviews.out</code>, el problema es la base y hay que mirar el sink. El pipeline no puede ir más rápido que su etapa más lenta, así que el único escalado que sirve es el de la etapa que está saturada.</p>
+    <p><b>Qué pasa si muere un worker:</b> las etapas stateless no pierden nada, el ítem sin ACK vuelve a la cola y otra instancia lo reprocesa (At Least Once). El agregador sí pierde su ventana parcial, y ahí hay que decidir: aceptar la pérdida de una ventana, checkpointear el estado periódicamente, o delegar el problema a un framework como Flink, que hace exactamente eso.</p>
+  </div>
+
+  <figure class="diag">
+    <svg viewBox="0 0 780 170" role="img" aria-label="Pipeline de analisis de resenias: ingestor, normalizador, clasificador, agregador y sink, conectados por colas">
+      <defs>
+        <marker id="u07-pl-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor">
+        <rect x="8" y="62" width="96" height="42" rx="6" stroke="var(--acc)"/>
+        <rect x="170" y="56" width="104" height="42" rx="6" stroke="var(--linea)"/>
+        <rect x="176" y="62" width="104" height="42" rx="6" stroke="var(--linea)"/>
+        <rect x="346" y="56" width="104" height="42" rx="6" stroke="var(--linea)"/>
+        <rect x="352" y="62" width="104" height="42" rx="6" stroke="var(--linea)"/>
+        <rect x="522" y="62" width="104" height="42" rx="6" stroke="var(--linea)"/>
+        <rect x="686" y="62" width="86" height="42" rx="6" stroke="var(--acc2)"/>
+        <line x1="104" y1="83" x2="166" y2="83" marker-end="url(#u07-pl-arr)"/>
+        <line x1="280" y1="83" x2="342" y2="83" marker-end="url(#u07-pl-arr)"/>
+        <line x1="456" y1="83" x2="518" y2="83" marker-end="url(#u07-pl-arr)"/>
+        <line x1="626" y1="83" x2="682" y2="83" marker-end="url(#u07-pl-arr)"/>
+      </g>
+      <g fill="currentColor" text-anchor="middle">
+        <text x="56" y="88" font-size="12">Ingestor</text>
+        <text x="228" y="88" font-size="12">Normalizador</text>
+        <text x="404" y="88" font-size="12">Clasificador</text>
+        <text x="574" y="82" font-size="12">Agregador</text>
+        <text x="574" y="96" font-size="10">(por clave)</text>
+        <text x="729" y="88" font-size="12">Sink</text>
+        <text x="135" y="48" font-size="10">reviews.raw</text>
+        <text x="311" y="48" font-size="10">reviews.norm</text>
+        <text x="487" y="48" font-size="10">reviews.scored</text>
+        <text x="654" y="48" font-size="10">reviews.out</text>
+        <text x="228" y="128" font-size="10">N réplicas</text>
+        <text x="404" y="128" font-size="10">M réplicas (cuello)</text>
+        <text x="574" y="128" font-size="10">K particiones</text>
+      </g>
+    </svg>
+    <figcaption>Los filters son los contenedores (cajas apiladas donde la etapa está replicada); los pipes son las colas nombradas de las flechas. Cada etapa solo conoce el nombre de su cola de entrada y de salida, y por eso se escala sola.</figcaption>
+  </figure>
+
+  <div class="examen">Preguntado en finales de forma casi literal: "En una arquitectura de 'Pipes and Filters', ¿cómo se implementan sus 2 conceptos principales (pipes y filters) en artefactos de programación? Dé un ejemplo concreto dentro de un sistema distribuido supuesto" (2025-07-03). Lo que se espera: <b>filters</b> como componentes de procesamiento independientes (funciones o servicios que toman un input, lo transforman y emiten un output, hosteados en procesos, threads o contenedores) y <b>pipes</b> como los canales que los conectan (colas de mensajes, streams o buffers), más un ejemplo desarrollado de punta a punta. Un ejemplo mínimo y fácil de recordar: procesamiento de video, donde un filter decodifica, un pipe pasa los frames crudos al filter que aplica la marca de agua, y otro pipe lleva el resultado al filter de compresión.</div>
+
+  <h3 id="u07-dags">DAGs</h3>
+  <div class="def"><b>DAG (Directed Acyclic Graph).</b> Grafo dirigido sin ciclos que modela un flujo de datos: los nodos son tareas y las aristas el flujo de información (una arista de A a B significa que B necesita el resultado de A). Acíclico: ningún nodo tiene un camino que salga de él y vuelva a él.</div>
+  <figure class="diag">
+    <svg viewBox="0 0 420 160" role="img" aria-label="DAG de cinco tareas: A alimenta a B y D, B a C, y C y D convergen en E">
+      <g fill="none" stroke="currentColor">
+        <circle cx="45" cy="80" r="20"/>
+        <circle cx="150" cy="35" r="20"/>
+        <circle cx="255" cy="35" r="20"/>
+        <circle cx="150" cy="125" r="20"/>
+        <circle cx="360" cy="80" r="20" stroke="var(--acc)"/>
+        <path d="M62 70 L131 44" stroke="var(--linea)"/>
+        <path d="M62 90 L131 116" stroke="var(--linea)"/>
+        <path d="M170 35 L235 35" stroke="var(--linea)"/>
+        <path d="M272 45 L344 70" stroke="var(--linea)"/>
+        <path d="M170 118 L342 87" stroke="var(--linea)"/>
+        <path d="M127 42 l8 -4 -2 9" fill="currentColor" stroke="none"/>
+        <path d="M127 118 l6 -7 3 9" fill="currentColor" stroke="none"/>
+        <path d="M230 31 l9 4 -9 4" fill="currentColor" stroke="none"/>
+        <path d="M339 66 l9 3 -7 6" fill="currentColor" stroke="none"/>
+        <path d="M337 90 l9 -4 -3 9" fill="currentColor" stroke="none"/>
+      </g>
+      <g fill="currentColor" font-size="14" text-anchor="middle">
+        <text x="45" y="85">A</text>
+        <text x="150" y="40">B</text>
+        <text x="255" y="40">C</text>
+        <text x="150" y="130">D</text>
+        <text x="360" y="85">E</text>
+      </g>
+    </svg>
+    <figcaption>DAG de tareas: D solo depende de A, así que puede correr en paralelo con B; E espera a C y D. El camino crítico es A, B, C, E.</figcaption>
+  </figure>
+  <p>Ventajas de modelar el cómputo como DAG:</p>
+  <ul>
+    <li><b>Representación natural de dataflows:</b> el pipeline es un caso particular (lineal) de DAG.</li>
+    <li><b>Paralelización:</b> las dependencias explícitas muestran qué tareas pueden correr en simultáneo. Con dos procesos, en el DAG de la figura A corre primero, luego B y D en paralelo, y E cuando C y D terminan. Conecta con el modelo work-span y el <b>camino crítico</b> (la cadena secuencial más larga de tareas, que acota el speedup) vistos en <a href="#u03">paralelización</a>.</li>
+    <li><b>Lazy loading:</b> solo se ejecutan los nodos requeridos por dependencias del resultado pedido. Si solo interesa E, las ramas que no llegan a E no se computan; si B falla, no tiene sentido ejecutar lo que dependía de B.</li>
+    <li><b>Reutilización:</b> un resultado intermedio compartido por varias ramas se calcula una sola vez.</li>
+  </ul>
+
+  <h4 id="u07-dags-deadlock">Dependencias, wait-for y deadlocks</h4>
+  <p>Los DAGs también sirven para modelar dependencias entre procesos (grafos wait-for: una arista de P<sub>i</sub> a P<sub>j</sub> significa que P<sub>i</sub> espera un recurso que tiene P<sub>j</sub>). Toda dependencia implica posibilidad de bloqueo; si el grafo de espera tiene un <b>ciclo</b>, hay posibilidad de <b>deadlock</b>: P<sub>i</sub> espera a P<sub>j</sub>, P<sub>j</sub> a P<sub>k</sub> y P<sub>k</sub> a P<sub>i</sub>, nadie avanza. Mientras el grafo de espera siga siendo un DAG (sin ciclos), el deadlock es imposible; detectar un ciclo permite recuperarse (matar un proceso, soltar un lock) o rediseñar el sistema para prevenirlo.</p>
+
+  <details class="mas"><summary>Ejemplo: TensorFlow como constructor de DAGs</summary>
+    <p>TensorFlow es un framework donde el programa no ejecuta operaciones al escribirlas: las declara y construye un DAG. <code>b = tf.negative(a)</code>, <code>c = tf.abs(b)</code>, <code>d = b * c</code>, <code>e = tf.abs(d)</code> arman un grafo donde cada operación es un nodo que depende de sus insumos; recién <code>session.run(e)</code> dispara la ejecución, y solo de los nodos que E necesita. La sesión puede correr ese mismo DAG en una máquina o en un cluster: el usuario define las operaciones y el framework decide dónde ejecutarlas. Además el enfoque es reactivo: si <code>a</code> es un stream que va generando valores, los nodos aguas abajo van actualizando sus resultados a medida que llegan datos, como un pipeline.</p>
+  </details>
+
+  <h3 id="u07-zeromq">ZeroMQ: MOM distribuido</h3>
+  <div class="def"><b>ZeroMQ (ZMQ).</b> Librería de mensajería descripta por sus autores como "sockets on steroids": sockets de alto nivel, altamente performantes (núcleo optimizado en C), pensados para construir <b>middlewares brokerless</b> (descentralizados, sin broker central obligatorio). La serialización de los mensajes queda a cargo del usuario, y provee soporte nativo para los patrones de esta unidad: Request-Reply, Publisher-Subscriber, Parallel Pipeline y patrones avanzados.</div>
+  <p>Existen alternativas más modernas de los mismos autores (nanomsg, NSQ, NNG), pero con los mismos conceptos. En ZMQ cada socket tiene un <b>tipo</b> que define su rol en un patrón, y los sockets de un proceso comparten un <b>contexto</b> (el contexto es, entre otras cosas, el nexo que permite que dos threads del mismo proceso se comuniquen).</p>
+
+  <h4 id="u07-zmq-conexiones">Tipos de conexiones</h4>
+  <table>
+    <thead>
+      <tr><th>Transporte</th><th>Escenario</th><th>Mecanismo</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>tcp</code></td><td>Multicomputing</td><td>Unicast punto a punto sobre TCP</td></tr>
+      <tr><td><code>ipc</code></td><td>Multiprocessing</td><td>Unix sockets entre procesos de una máquina</td></tr>
+      <tr><td><code>inproc</code></td><td>Multithreading</td><td>Queue entre threads del mismo proceso</td></tr>
+      <tr><td>Otras (PGM)</td><td>Multicast</td><td>Protocolo PGM</td></tr>
+    </tbody>
+  </table>
+  <div class="idea">El mismo programa sirve para los tres mundos: pasar de multicomputing a multiprocessing o multithreading es cambiar <code>tcp://host:5555</code> por <code>ipc://nombre</code> o <code>inproc://nombre</code> en el bind/connect, sin tocar el resto del código. Esa abstracción de la complejidad es el argumento de venta del middleware (con el costo de que, cuando algo se rompe, debuggear la magia es más difícil).</div>
+
+  <h4 id="u07-zmq-reqrep">Request-Reply en ZMQ (REQ/REP)</h4>
+  <p>Es el cliente-servidor convencional, "aunque no tanto":</p>
+  <ul>
+    <li>No existe la primitiva <code>accept</code>: el <code>bind</code> del servidor funciona como bind + accept. No hay un socket por cliente; el servidor hace <code>recv</code> y le llegan mensajes de cualquier cliente conectado.</li>
+    <li><code>send</code> es no bloqueante, y el cliente <b>no necesita que el servidor esté corriendo</b> para enviar: ZMQ buferea. Under the hood hay I/O threads (1 thread por GB/s de tráfico) que despachan los mensajes cuando el canal está disponible. Si el servidor se levanta más tarde, la comunicación fluye sola.</li>
+  </ul>
+  <pre><code># servidor                          # cliente
+context = zmq.Context()             context = zmq.Context()
+socket = context.socket(zmq.REP)    socket = context.socket(zmq.REQ)
+socket.bind("tcp://*:5555")         socket.connect("tcp://server:5555")
+while True:                         for i in range(10):
+    msg = socket.recv()                 socket.send(b"Hello")
+    socket.send(b"World")               reply = socket.recv()</code></pre>
+  <div class="warn">El buffering tiene límites y la magia no es simétrica: si el servidor muere abruptamente mientras un cliente espera su Reply, al relevantarse el servidor ese socket cliente no se restablece solo; ese caso hay que manejarlo a mano. Y el buffer del emisor es finito: acumular mensajes sin receptor termina explotando.</div>
+
+  <h4 id="u07-zmq-pushpull">Producer-Consumer y Pipeline (PUSH/PULL)</h4>
+  <p>Los sockets PUSH y PULL marcan el rol de cada extremo en la comunicación por tareas: PUSH envía, PULL recibe. Admite 1 PUSH hacia N PULL (repartir trabajo) y N PUSH hacia 1 PULL (juntar resultados); encadenando productores-consumidores se arma un pipeline completo.</p>
+  <figure class="diag">
+    <svg viewBox="0 0 540 190" role="img" aria-label="Pipeline ZeroMQ: ventilator hace push a tres workers que hacen push al sink">
+      <g fill="none" stroke="currentColor">
+        <rect x="10" y="70" width="100" height="44" rx="6" stroke="var(--acc)"/>
+        <rect x="220" y="10" width="100" height="36" rx="6"/>
+        <rect x="220" y="74" width="100" height="36" rx="6"/>
+        <rect x="220" y="138" width="100" height="36" rx="6"/>
+        <rect x="430" y="70" width="100" height="44" rx="6" stroke="var(--acc2)"/>
+        <path d="M110 82 L220 30" stroke="var(--linea)"/>
+        <path d="M110 92 L220 92" stroke="var(--linea)"/>
+        <path d="M110 102 L220 154" stroke="var(--linea)"/>
+        <path d="M320 30 L430 82" stroke="var(--linea)"/>
+        <path d="M320 92 L430 92" stroke="var(--linea)"/>
+        <path d="M320 154 L430 102" stroke="var(--linea)"/>
+        <path d="M214 28 l8 -2 -4 7" fill="currentColor" stroke="none"/>
+        <path d="M214 88 l8 4 -8 4" fill="currentColor" stroke="none"/>
+        <path d="M214 150 l8 2 -4 7" fill="currentColor" stroke="none"/>
+        <path d="M424 78 l8 4 -8 4" fill="currentColor" stroke="none"/>
+        <path d="M424 88 l8 4 -8 4" fill="currentColor" stroke="none"/>
+        <path d="M424 100 l8 2 -6 6" fill="currentColor" stroke="none"/>
+      </g>
+      <g fill="currentColor" font-size="13" text-anchor="middle">
+        <text x="60" y="88">Ventilator</text>
+        <text x="60" y="104" font-size="11">PUSH</text>
+        <text x="270" y="33">Worker (PULL/PUSH)</text>
+        <text x="270" y="97">Worker (PULL/PUSH)</text>
+        <text x="270" y="161">Worker (PULL/PUSH)</text>
+        <text x="480" y="88">Sink</text>
+        <text x="480" y="104" font-size="11">PULL</text>
+      </g>
+    </svg>
+    <figcaption>Pipeline clásico de ZMQ: el ventilator reparte tareas entre N workers (1 PUSH a N PULL) y el sink junta los resultados (N PUSH a 1 PULL). Ninguno conoce cuántos son los demás.</figcaption>
+  </figure>
+  <p>Lo poderoso del patrón: el ventilator no sabe cuántos workers hay ni el sink cuántos le escriben. Pasar de 3 a 20 workers no cambia una línea de código, y el speedup se observa directo (una carga de 5 segundos de trabajo se completa en unos 2 con 3 workers).</p>
+  <div class="warn">"Fairness" en ZMQ significa <b>round robin estricto</b>: primer mensaje al primer worker, segundo al segundo, y así. No hay balanceo por carga ni por disponibilidad: si un worker es 10 veces más lento, igual le siguen llegando mensajes y frena la simulación entera. Comparar con RabbitMQ, donde el prefetch y los ACKs permiten que cada worker tome trabajo según su disponibilidad.</div>
+
+  <figure class="diag">
+    <svg viewBox="0 0 480 240" role="img" aria-label="Ejemplo de fair queuing con tres sockets PUSH convergiendo en un PULL: los mensajes se intercalan en round robin estricto entre origenes">
+      <g fill="none" stroke="currentColor">
+        <rect x="10" y="15" width="140" height="48" rx="6"/>
+        <rect x="170" y="15" width="140" height="48" rx="6"/>
+        <rect x="330" y="15" width="140" height="48" rx="6"/>
+        <rect x="170" y="150" width="140" height="48" rx="6" stroke="var(--acc)"/>
+      </g>
+      <g stroke="var(--linea)" fill="none">
+        <line x1="80" y1="63" x2="205" y2="149"/>
+        <line x1="240" y1="63" x2="240" y2="149"/>
+        <line x1="400" y1="63" x2="275" y2="149"/>
+      </g>
+      <g fill="currentColor">
+        <polygon points="199,141 211,141 205,150"/>
+        <polygon points="234,141 246,141 240,150"/>
+        <polygon points="269,141 281,141 275,150"/>
+      </g>
+      <g fill="currentColor" font-size="12" text-anchor="middle">
+        <text x="80" y="35">PUSH A</text>
+        <text x="240" y="35">PUSH B</text>
+        <text x="400" y="35">PUSH C</text>
+        <text x="240" y="170">PULL</text>
+      </g>
+      <g fill="currentColor" font-size="10" text-anchor="middle">
+        <text x="80" y="52">R1, R2, R3</text>
+        <text x="240" y="52">R4</text>
+        <text x="400" y="52">R5, R6</text>
+      </g>
+      <text x="240" y="186" font-size="10" text-anchor="middle" fill="var(--acc2)">round robin estricto entre orígenes</text>
+      <text x="240" y="222" font-size="11" text-anchor="middle" fill="currentColor">orden recibido: R1, R4, R5, R2, R6, R3</text>
+    </svg>
+    <figcaption>Fair queuing con N PUSH a 1 PULL: cada origen aporta su tanda de mensajes y el PULL los recibe intercalados en round robin estricto entre orígenes (no por carga ni disponibilidad), completando el caso inverso al 1 PUSH a N PULL de la <a href="#u07-zmq-pushpull">figura anterior</a>.</figcaption>
+  </figure>
+
+  <h4 id="u07-zmq-pubsub">Publisher-Subscriber en ZMQ (PUB/SUB y XPUB/XSUB)</h4>
+  <ul>
+    <li>Un socket PUB publica mensajes con el patrón <code>id campo1 campo2 ... campoN</code>: el primer token es el ID del evento (el tópico).</li>
+    <li>N sockets SUB se suscriben a los IDs que quieren recibir (<code>setsockopt(SUBSCRIBE, id)</code>); la suscripción funciona por prefijo del mensaje y puede cancelarse en cualquier momento.</li>
+    <li>Cada mensaje se entrega a <b>todos</b> los sockets suscriptos a ese ID.</li>
+    <li>Semántica invertida respecto de REQ/REP: el PUB hace <code>bind</code> (actúa como servidor) y además es quien envía.</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 480 230" role="img" aria-label="Topologia PUB SUB directa de ZeroMQ sin broker: el publisher hace bind y tres subscribers hacen connect directamente a el">
+      <g fill="none" stroke="currentColor">
+        <rect x="20" y="88" width="130" height="54" rx="6" stroke="var(--acc)"/>
+        <rect x="320" y="10" width="140" height="54" rx="6"/>
+        <rect x="320" y="88" width="140" height="54" rx="6"/>
+        <rect x="320" y="166" width="140" height="54" rx="6"/>
+      </g>
+      <g stroke="var(--linea)" fill="none">
+        <line x1="150" y1="115" x2="316" y2="39"/>
+        <line x1="150" y1="115" x2="316" y2="115"/>
+        <line x1="150" y1="115" x2="316" y2="191"/>
+      </g>
+      <g fill="currentColor">
+        <polygon points="308,32 320,35 313,44"/>
+        <polygon points="308,110 320,115 308,120"/>
+        <polygon points="308,186 320,189 313,198"/>
+      </g>
+      <g fill="currentColor" font-size="13" text-anchor="middle">
+        <text x="85" y="108">Publisher</text>
+      </g>
+      <g fill="currentColor" font-size="11" text-anchor="middle">
+        <text x="85" y="124">PUB</text>
+        <text x="390" y="30">Subscriber 1</text>
+        <text x="390" y="108">Subscriber 2</text>
+        <text x="390" y="186">Subscriber 3</text>
+      </g>
+      <g fill="currentColor" font-size="10" text-anchor="middle">
+        <text x="390" y="45">SUB</text>
+        <text x="390" y="123">SUB</text>
+        <text x="390" y="201">SUB</text>
+      </g>
+      <g fill="var(--acc2)" font-size="9" text-anchor="middle">
+        <text x="85" y="138">bind</text>
+        <text x="390" y="58">connect</text>
+        <text x="390" y="136">connect</text>
+        <text x="390" y="214">connect</text>
+      </g>
+      <text x="230" y="55" font-size="11" fill="currentColor" text-anchor="middle">updates</text>
+    </svg>
+    <figcaption>PUB/SUB directo de ZeroMQ, sin broker: el Publisher hace bind y envía; cada Subscriber hace connect directamente a él y filtra por prefijo del mensaje. Contrastar con la arquitectura Pub-Sub con broker de la <a href="#u07-publisher-subscriber">figura anterior</a>.</figcaption>
+  </figure>
+  <div class="ej">El ejemplo de la cátedra publica mediciones de clima con un zip code (1, 2 o 3) como ID; cada subscriber se suscribe a un zip code y solo recibe los mensajes de su zona, calcula un promedio tras 5 mensajes y termina.</div>
+  <div class="warn">Si nadie está suscripto, los mensajes publicados <b>se pierden</b>: un subscriber que se conecta tarde no ve lo publicado antes, y uno que se cae y vuelve no recupera los mensajes intermedios. Estos edge cases (¿bloqueo al recibir?, ¿se encolan mensajes sin suscriptores?) varían de framework a framework y hay que verificarlos en la documentación.</div>
+  <p>¿Múltiples publishers y múltiples subscribers? Patrón <b>XPUB-XSUB</b>: un proxy con un socket XSUB (que se suscribe a todos los publishers) y un XPUB (al que se suscriben todos los subscribers) redirige de uno a otro, mimetizando el message broker centralizado del modelo Pub-Sub.</p>
+
+  <h4 id="u07-zmq-routerdealer">Router-Dealer: construir un broker</h4>
+  <p>Para enrutar múltiples clientes contra múltiples servidores Request-Reply, ZMQ ofrece los sockets ROUTER y DEALER, con los que se construye un broker centralizado cuando el diseño lo pide:</p>
+  <ul>
+    <li><b>ROUTER</b> (frontend, mira a los clientes): agrega al mensaje recibido un ID de destinatario, taggeando de dónde vino cada mensaje para poder devolver el Reply al cliente correcto.</li>
+    <li><b>DEALER</b> (backend, mira a los servidores): rutea los mensajes de forma fair entre los servidores y propaga el ID de origen.</li>
+    <li>Ambos reciben de múltiples sockets a la vez y son asincrónicos: el proxy usa un <b>poller</b> (abstracción de la syscall <code>poll</code>, equivalente al <code>select</code> de las primeras clases) para esperar mensajes de frontend y backend y reenviar en ambas direcciones.</li>
+  </ul>
+  <figure class="diag">
+    <svg viewBox="0 0 560 310" role="img" aria-label="Topologia Router Dealer: tres clientes REQ conectan contra un proxy ROUTER Broker DEALER que reenvia a tres servicios REP">
+      <g fill="none" stroke="currentColor">
+        <rect x="15" y="15" width="110" height="50" rx="6"/>
+        <rect x="225" y="15" width="110" height="50" rx="6"/>
+        <rect x="435" y="15" width="110" height="50" rx="6"/>
+        <rect x="205" y="110" width="150" height="90" rx="8" stroke="var(--acc)"/>
+        <rect x="15" y="245" width="110" height="50" rx="6"/>
+        <rect x="225" y="245" width="110" height="50" rx="6"/>
+        <rect x="435" y="245" width="110" height="50" rx="6"/>
+      </g>
+      <g stroke="var(--linea)" fill="none">
+        <line x1="70" y1="65" x2="222" y2="109"/>
+        <line x1="280" y1="65" x2="280" y2="108"/>
+        <line x1="490" y1="65" x2="338" y2="109"/>
+      </g>
+      <g fill="currentColor">
+        <polygon points="216,101 227,105 220,113"/>
+        <polygon points="274,100 286,100 280,110"/>
+        <polygon points="333,105 344,101 340,113"/>
+      </g>
+      <g stroke="var(--acc2)" fill="none">
+        <line x1="222" y1="201" x2="70" y2="244"/>
+        <line x1="280" y1="202" x2="280" y2="243"/>
+        <line x1="338" y1="201" x2="490" y2="244"/>
+      </g>
+      <g fill="var(--acc2)">
+        <polygon points="64,236 76,236 70,246"/>
+        <polygon points="274,235 286,235 280,245"/>
+        <polygon points="484,236 496,236 490,246"/>
+      </g>
+      <g fill="currentColor" font-size="12" text-anchor="middle">
+        <text x="70" y="33">Cliente 1</text>
+        <text x="280" y="33">Cliente 2</text>
+        <text x="490" y="33">Cliente 3</text>
+        <text x="70" y="261">Servicio A</text>
+        <text x="280" y="261">Servicio B</text>
+        <text x="490" y="261">Servicio C</text>
+        <text x="280" y="128">ROUTER</text>
+        <text x="280" y="160">Broker</text>
+        <text x="280" y="175">DEALER</text>
+      </g>
+      <g fill="currentColor" font-size="10" text-anchor="middle">
+        <text x="70" y="48">REQ</text>
+        <text x="280" y="48">REQ</text>
+        <text x="490" y="48">REQ</text>
+        <text x="70" y="276">REP</text>
+        <text x="280" y="276">REP</text>
+        <text x="490" y="276">REP</text>
+      </g>
+      <g fill="var(--acc2)" font-size="9" text-anchor="middle">
+        <text x="70" y="60">connect</text>
+        <text x="280" y="60">connect</text>
+        <text x="490" y="60">connect</text>
+        <text x="280" y="141">bind</text>
+        <text x="280" y="190">bind</text>
+        <text x="70" y="289">connect</text>
+        <text x="280" y="289">connect</text>
+        <text x="490" y="289">connect</text>
+      </g>
+    </svg>
+    <figcaption>Router-Dealer: clientes y servicios hacen connect contra el proxy; el proxy hace bind tanto en el ROUTER (frontend, agrega el ID de quien envía) como en el DEALER (backend, reparte fair y propaga ese ID). Así se arma un broker centralizado a mano.</figcaption>
+  </figure>
+  <pre><code>frontend = context.socket(zmq.ROUTER); frontend.bind("tcp://*:5559")
+backend  = context.socket(zmq.DEALER); backend.bind("tcp://*:5560")
+poller = zmq.Poller()
+poller.register(frontend, zmq.POLLIN)
+poller.register(backend, zmq.POLLIN)
+while True:
+    socks = dict(poller.poll())
+    if frontend in socks: backend.send_multipart(frontend.recv_multipart())
+    if backend in socks:  frontend.send_multipart(backend.recv_multipart())</code></pre>
+  <p>Clientes y servidores hacen ambos <code>connect</code> al proxy (los dos actúan "de cliente" del broker) y el taggeo de IDs queda enmascarado: para ellos es transparente que hay un router-dealer en el medio. Como el proxy lee cada mensaje, también se puede reemplazar el ruteo fair por un ruteo propio basado en tags del mensaje.</p>
+</section>

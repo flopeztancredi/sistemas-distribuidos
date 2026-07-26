@@ -1,0 +1,318 @@
+<section class="unidad" id="u17" data-titulo="Tolerancia a fallos">
+  <h2>U17. Tolerancia a fallos, confiabilidad, coordinación y acuerdo</h2>
+  <p class="intro">Un sistema distribuido convive con el fallo parcial: algun componente siempre puede fallar sin que falle el resto. Esta unidad formaliza que es un fallo, como se clasifica y con que estrategias se maneja (recuperación, redundancia y consenso), define las propiedades de un sistema confiable (dependable), y presenta los primeros algoritmos de coordinación y acuerdo: votación simple, exclusión mutua distribuida (servidor central, token ring, Ricart &amp; Agrawala) y two-phase commit. Es una de las zonas más preguntadas en finales.</p>
+
+  <h3 id="u17-fallo-error-averia">Fallo, error y averia</h3>
+  <p>La tolerancia a fallos estudia como construir sistemas confiables (dependable): sistemas que se ejecutan y comportan según lo esperado por el usuario en distintas condiciones, y que previenen que las fallas lleguen a ser visibles de cara al usuario. Permite decidir cuanta inversión y que nivel de tolerancia necesita cada tipo de sistema. Las herramientas principales son tres: <a href="#u17-recuperacion">recuperación</a>, <a href="#u17-redundancia">redundancia</a> (por ejemplo replicación) y <a href="#u17-consenso">consenso</a> (algoritmos de coordinación y acuerdo, como la votación).</p>
+
+  <div class="def"><b>Fallo parcial.</b> Situación en la que un componente de un sistema distribuido incurre en error mientras el resto sigue operando. Es la característica distintiva de los sistemas distribuidos frente a los centralizados, y puede generar una reacción en cadena que afecta al comportamiento del sistema total.</div>
+
+  <p>Hay una cadena causal entre tres términos que suelen confundirse:</p>
+
+  <div class="def"><b>Fallo (fault).</b> Una condición no cumplida: la causa raiz. Puede ser física (un bit que se corrompe, un cable desconectado) o algorítmica (un bug).</div>
+  <div class="def"><b>Error.</b> El estado incorrecto del sistema que el fallo provoca (por ejemplo, una variable apuntando a una dirección de memoria invalida). Es interno: todavia no se observa desde afuera.</div>
+  <div class="def"><b>Falla o averia (failure).</b> El comportamiento incorrecto observable: el sistema deja de cumplir el servicio para el que fue diseñado.</div>
+
+  <figure class="diag">
+    <svg viewBox="0 0 640 110" role="img" aria-label="Cadena causal fallo, error, averia">
+      <rect x="10" y="30" width="170" height="50" rx="8" fill="none" stroke="var(--acc)"/>
+      <text x="95" y="50" text-anchor="middle" fill="currentColor" font-size="13">Fallo (fault)</text>
+      <text x="95" y="68" text-anchor="middle" fill="currentColor" font-size="11">condicion no cumplida</text>
+      <line x1="180" y1="55" x2="230" y2="55" stroke="var(--linea)"/>
+      <polygon points="230,55 220,50 220,60" fill="var(--linea)"/>
+      <text x="205" y="45" text-anchor="middle" fill="currentColor" font-size="11">causa</text>
+      <rect x="235" y="30" width="170" height="50" rx="8" fill="none" stroke="var(--acc)"/>
+      <text x="320" y="50" text-anchor="middle" fill="currentColor" font-size="13">Error</text>
+      <text x="320" y="68" text-anchor="middle" fill="currentColor" font-size="11">estado incorrecto</text>
+      <line x1="405" y1="55" x2="455" y2="55" stroke="var(--linea)"/>
+      <polygon points="455,55 445,50 445,60" fill="var(--linea)"/>
+      <text x="430" y="45" text-anchor="middle" fill="currentColor" font-size="11">causa</text>
+      <rect x="460" y="30" width="170" height="50" rx="8" fill="none" stroke="var(--acc2)"/>
+      <text x="545" y="50" text-anchor="middle" fill="currentColor" font-size="13">Averia (failure)</text>
+      <text x="545" y="68" text-anchor="middle" fill="currentColor" font-size="11">comportamiento incorrecto</text>
+    </svg>
+    <figcaption>Cadena causal: un fallo causa un error, y el error causa una averia observable. Tolerar fallos es cortar está cascada antes de que llegue a averia.</figcaption>
+  </figure>
+
+  <div class="ej">
+    <p><b>Ejemplo 1:</b> un rayo cosmico cambia un bit en la RAM (<i>fault</i>); una variable del heap queda apuntando a una dirección invalida (<i>error</i>); el programa accede a memoria corrupta y muere (<i>failure</i>).</p>
+    <p><b>Ejemplo 2:</b> el programa Y no puede comunicarse con el programa X (<i>fault</i>); Y hace polling infinito con un timeout chico a X, que no responde, dejando conexiones abiertas (<i>error</i>); Y llega al límite de conexiones abiertas y muere (<i>failure</i>). Notese que el fault original pudo ser un cable pateado, un mapeo de IP transitoriamente mal hecho o dos líneas de código mal puestas: cualquiera cascadea igual.</p>
+  </div>
+
+  <div class="idea">La teoria dice que evitar los fallos por completo es imposible: se puede prevenir, pero no eliminar. Por eso el área se llama <b>tolerancia</b>: aceptar que los fallos van a ocurrir y diseñar el sistema para que, cuando un componente entre en estado de error, ese error quede encapsulado y no arrastre al sistema completo a la averia. En un sistema distribuido, que un nodo muera no debe implicar que el sistema total falle: otro lo reemplaza, o una votación lo deja afuera y el resto avanza mientras alguien lo restaura.</div>
+
+  <div class="def"><b>Tolerancia a fallos.</b> "En presencia de fallos, el sistema distribuido continúa operando en forma aceptable". Aceptable es lo que se haya definido: puede ser seguir dando servicio completo, degradarse, o incluso cerrarse de forma controlada (mostrar un error y cerrar terminales, o abrir las garras del brazo mecanico antes de apagarse). Lo esencial es que en todo momento exista una definición del siguiente paso, incluso ante situaciones fuera del control del algoritmo.</div>
+
+  <div class="examen">Preguntado en finales de forma recurrente: "Explique los términos falla (fault), error y averia (failure) y como se relacionan con el concepto de tolerancia a fallos" (2023-07, 2024-07, 2025-03, 2025-07). La clave: dar las tres definiciones, la relación causal fault causa error causa failure, y decir que la tolerancia a fallos busca enmascarar el fallo (vía redundancia y detección) para que el error no se propague hasta ser una averia visible al usuario.</div>
+
+  <h3 id="u17-clasificacion">Clasificación de fallos y condiciones de operación</h3>
+  <p>Por su persistencia en el tiempo, los fallos se clasifican en:</p>
+  <ul>
+    <li><b>Transientes:</b> ocurren una vez y desaparecen; si se repite la operación, el fallo no reaparece (alguien pateo el cable de red y lo volvio a enchufar).</li>
+    <li><b>Intermitentes:</b> aparecen y desaparecen en forma recurrente; son los más difíciles de diagnosticar (todos los días a las 22 la memoria se va al 100% y no se puede reproducir a voluntad).</li>
+    <li><b>Permanentes:</b> existen hasta que el componente defectuoso se reemplaza (un disco que agoto sus ciclos de escritura y no responde más).</li>
+  </ul>
+  <div class="warn">Distinguir fallos <b>improbables</b> de <b>imposibles</b>. Que una moneda caiga de canto tiene probabilidad prácticamente nula, pero no es imposible; que quede suspendida en el aire si lo es. Un rayo cosmico que cambia un bit es improbable, no imposible: en una central nuclear puede tener sentido blindar la computadora con plomo para volverlo imposible. Siempre depende del contexto donde vive el sistema: no todo es una página web con una base de datos.</div>
+
+  <p>Por el tipo de comportamiento observable (tipo de failure que producen):</p>
+  <table>
+    <thead><tr><th>Tipo</th><th>Descripción</th></tr></thead>
+    <tbody>
+      <tr><td>Crash</td><td>El servicio se detiene por completo; hay que ver si se relevanta o alguien toma su lugar.</td></tr>
+      <tr><td>Omisión</td><td>El servicio falla al responder solicitudes entrantes: no entrega el dato o no lo deja donde debia.</td></tr>
+      <tr><td>Timing</td><td>La respuesta llega fuera de los tiempos aceptables (se demora o se adelanta). Ej.: un sensor de pulsaciones que responde tan tarde que ya no se sabe a que intervalo pertenece la medición.</td></tr>
+      <tr><td>Respuesta</td><td>La respuesta es incorrecta: valor erroneo o desvio en el flujo (se le ordeno abrir el brazo mecanico y prendio un LED amarillo).</td></tr>
+      <tr><td>Arbitraria o bizantina</td><td>Arbitraria en tiempos y respuestas; puede dar información diferente a diferentes consumidores, incluso con intención maliciosa. El nombre viene de la fabula de los generales bizantinos que responden 0 a uno y 1 a otro.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Para definir el nivel de tolerancia a fallos de un sistema hay que indicar en que <b>condiciones</b> trabaja: condiciones del entorno (entorno físico del hardware: temperatura, vibraciones, polvo, ubicación; interferencia y ruido; clock drift) y condiciones operacionales (especificaciones, valores límite y tiempos de respuesta de sensores, ancho de banda y latencia de red, protocolos soportados). Un sensor con un límite de temperatura excedido plantea preguntas de diseño: se clava en el máximo, deja de responder, o queda con un fallo permanente.</p>
+
+  <h3 id="u17-estrategias">Estrategias de manejo de fallos</h3>
+  <table>
+    <thead><tr><th>Estrategia</th><th>Idea</th><th>Ejemplo</th></tr></thead>
+    <tbody>
+      <tr><td>Fault prevention / avoidance</td><td>Evitar las condiciones que llevan a la generación de errores.</td><td>Componentes que impiden fallos: relojes atómicos, hardware military grade.</td></tr>
+      <tr><td>Fault removal</td><td>Remover los errores antes de que desencadenen la averia.</td><td>Memoria ECC que detecta y corrige errores de hardware; un job que detecta IDs nulos en la base y los corrige antes de que un cliente los toque.</td></tr>
+      <tr><td>Fault forecasting</td><td>Determinar la probabilidad de que un componente falle y actuar antes.</td><td>Reemplazo de piezas de avion por horas de uso; recambio de discos al superar las horas que indica la estadística.</td></tr>
+      <tr><td>Fault tolerance</td><td>Aceptar que los errores van a ocurrir y procesarlos, llevando el sistema a un lugar adecuado cuando pasen.</td><td>Lo que más se maneja a nivel software: timeouts, reintentos, réplicas, failover.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="u17-resiliencia">Resiliencia y degradación suave</h3>
+  <div class="def"><b>Resiliencia.</b> Mantener un nivel aceptable de servicio en presencia de fallos y desafios a la operación normal: errores de configuración u operacionales, desastres naturales (terremotos, inundaciones, huracanes), factores politicos, economicos, sociales o del negocio, y ataques maliciosos. Un sistema resiliente no solo tolera el fallo: sigue operando y se sobrepone.</div>
+  <div class="def"><b>Degradación suave (graceful degradation).</b> Ante fallos, el comportamiento difiere del comportamiento normal pero sigue siendo aceptable, en lugar de pasar de "todo funciona" a "error total".</div>
+  <div class="ej">Si en una agencia de viajes online se rompe el módulo de hoteles, no tiene sentido dejar de vender pasajes de avion: se oculta el módulo en la interfaz y el usuario a lo sumo piensa que cambio el diseño ese día. Definir por escrito que casos degradados se aceptan y que hace el sistema en cada uno es parte del diseño.</div>
+
+  <h3 id="u17-recuperacion">Recuperación</h3>
+  <p>Recuperarse es llevar el sistema desde un estado de error de vuelta a un estado correcto. Técnicas:</p>
+  <ul>
+    <li><b>Almacenamiento estable:</b> la base de todo: un lugar seguro donde la información no queda solo en RAM, de modo que ante un fallo haya de donde recuperar.</li>
+    <li><b>Checkpointing:</b> guardar periódicamente el estado completo del sistema en almacenamiento estable (análogo al patrón memento: un recuerdo desde el cual restaurar).</li>
+    <li><b>Message logging:</b> partir del último checkpoint (costoso de crear, se toma cada tanto) y re-aplicar todos los mensajes registrados en el log desde ese punto. La restauración es lenta, pero es mucho mejor que no tener restauración: cualquiera prefiere una base que tarde cinco minutos en volver diciendo "estoy restaurando" a una que vuelve enseguida avisando que perdio los últimos 100 registros. Por eso casi nadie desactiva estas técnicas para que "la base vuele": mejor un sistema constante y un poco más lento que uno que vuela pero se estrella sin sobrevivientes.</li>
+    <li><b>Consenso:</b> cuando el sistema ya es distribuido, acordar entre los componentes que quedaron vivos (o que se despiertan) cual es el estado correcto.</li>
+  </ul>
+
+  <h3 id="u17-redundancia">Redundancia y replicación</h3>
+  <p>Los fallos se toleran mediante redundancia, que puede ser <b>física</b> (replicación de componentes), <b>de información</b> (valores redundantes que permiten detectar o corregir) o <b>de tiempo</b> (reintentos: tolerar fallos temporales repitiendo la operación antes del timeout).</p>
+  <div class="idea">El ejemplo de la vida real es la rueda de auxilio: para ir al supermercado a tres cuadras quizá no haga falta; para 300 km de ruta, si; en el desierto la pregunta ya no es si llevar sino cuantas (y cubiertas y llantas de repuesto); y un camion de carga directamente usa de forma activa ruedas que parecian redundantes. El sistema de cada uno es un vehiculo: cuanta redundancia lleva depende de a donde va.</div>
+  <p>Frente a un punto único de fallo la técnica es replicar. Hay tres esquemas, que se distinguen por <b>donde se toman las decisiones</b>:</p>
+
+  <h4 id="u17-replicacion-pasiva">Replicación pasiva</h4>
+  <p>Una réplica primaria (master) y varias secundarias o de backup (mirrors). El cliente le habla al master, que procesa el request y cambia su estado; luego el master envía las <b>actualizaciones de estado ya resueltas</b> a los backups, estos actualizan, y recien entonces el master responde al cliente. Los backups no deciden nada: reciben la orden de que grabar.</p>
+  <div class="ej">Una base de datos con mirroring: la base principal computa todas las validaciones (foreign keys, chequeos), decide "se graba esto en tal archivo" y les pasa esa operación a los backups. Ellos no re-chequean, pero si muere el master cualquiera tiene la información exacta para ocupar su lugar.</div>
+
+  <h4 id="u17-replicacion-activa">Replicación activa</h4>
+  <p>Múltiples réplicas de la misma máquina de estados ejecutan <b>las mismas operaciones en el mismo orden</b> (requiere orden total). Un balanceador recibe el request del cliente y lo empuja a todas las réplicas; cada una procesa y actualiza su estado; las respuestas se comparan y se responde al cliente. Las operaciones deben ser determinísticas: ante el mismo request, A y B deben responder igual.</p>
+  <div class="warn">El balanceador pasa a ser el nuevo punto único de fallo. La diferencia es que no tiene estado (el estado vive en las réplicas), así que es rápidamente intercambiable por otro con un proceso de disaster recovery.</div>
+
+  <h4 id="u17-replicacion-semiactiva">Replicación semi-activa (leader-follower)</h4>
+  <p>Todas las réplicas ejecutan los comandos, pero <b>las decisiones no determinísticas</b> (un número random, una invocación externa, un if cuyo resultado podría divergir) las toma una sola: el líder. Los followers, al llegar a ese punto, le preguntan al líder que decidio (o le mandan información para que decida), el líder confirma, y todos avanzan su estado en conjunto. Todos reciben el request entero, a diferencia de la pasiva donde los backups reciben solo la orden de que grabar.</p>
+
+  <table>
+    <thead><tr><th>Esquema</th><th>Quien procesa el request</th><th>Quien decide</th><th>Requisito clave</th></tr></thead>
+    <tbody>
+      <tr><td>Pasiva</td><td>Solo el master; los backups aplican updates</td><td>El master</td><td>Propagar el estado antes de responder</td></tr>
+      <tr><td>Activa</td><td>Todas las réplicas</td><td>Cada réplica (todo determinístico)</td><td>Mismas operaciones en el mismo orden (orden total)</td></tr>
+      <tr><td>Semi-activa</td><td>Todas las réplicas</td><td>El líder, para lo no determinístico</td><td>Followers consultan al líder en cada decisión</td></tr>
+    </tbody>
+  </table>
+
+  <h4 id="u17-replicacion-comparacion">Ventajas y desventajas de cada esquema</h4>
+  <p>La consigna típica del final no pide solo las diferencias, pide las ventajas. Conviene tenerlas ordenadas por el eje que las explica: cuánto cómputo cuesta y cuánto tarda en recuperarse.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Esquema</th><th>Ventajas</th><th>Desventajas</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Pasiva</b></td>
+        <td>Consume el cómputo de una sola réplica: las demás solo aplican updates, así que N réplicas no cuestan N veces el procesamiento. No exige determinismo (el master puede usar random, hora local o llamadas externas) ni orden total entre réplicas. Más simple de implementar y de razonar.</td>
+        <td>El failover no es instantáneo: hay que <b>detectar</b> la caída (heartbeats, con su ventana de detección) y después <b>promover</b> un backup, y durante ese lapso el servicio no responde. Se puede perder lo que el master procesó y no llegó a propagar, salvo que la propagación sea sincrónica, que encarece cada respuesta.</td>
+      </tr>
+      <tr>
+        <td><b>Activa</b></td>
+        <td>Failover instantáneo: como todas las réplicas ya procesaron todo y tienen el estado al día, si una cae las otras siguen respondiendo sin interrupción ni promoción. Permite además <b>detectar réplicas erróneas</b> comparando las respuestas entre sí (voting), que es la base para tolerar fallos bizantinos y no solo caídas.</td>
+        <td>Cuesta N veces el cómputo, porque cada réplica ejecuta cada request. Exige <b>determinismo estricto</b>: cualquier fuente de no determinismo hace divergir los estados. Y exige <b>orden total</b> en la entrega, que es la garantía más cara de implementar.</td>
+      </tr>
+      <tr>
+        <td><b>Semi-activa</b></td>
+        <td>Punto intermedio: mantiene el failover rápido de la activa (todas tienen el estado) pero <b>tolera operaciones no determinísticas</b>, porque el líder resuelve esos puntos y los demás lo siguen.</td>
+        <td>Sigue pagando el cómputo de todas las réplicas, y agrega una ida y vuelta con el líder en cada decisión no determinística, que suma latencia. Si cae el líder hay que elegir uno nuevo.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="idea">El criterio para elegir: si lo que duele es el <b>costo de cómputo</b> y podés tolerar unos segundos de indisponibilidad, pasiva. Si lo que duele es la <b>indisponibilidad</b> y el cómputo sobra, activa. Si el servicio tiene no determinismo inevitable pero necesitás failover rápido, semi-activa.</div>
+  <div class="examen">Preguntado en finales: "Explique las diferencias entre replicación activa y pasiva. Indique ventajas de cada modelo" (2022-08). Ojo que la pregunta tiene dos mitades: contestar solo quién procesa el request deja afuera la mitad del puntaje.</div>
+
+  <p>Dos observaciones que conectan con el resto de la materia: los <a href="#u19">algoritmos de consenso</a> permiten elegir cual componente queda activo (o quien es el nuevo líder); y si la red se particiona en subgrupos que siguen trabajando en paralelo creyendo que el resto murio, reconciliar el estado automáticamente cuando se reencuentran es muy dificultoso.</p>
+
+  <div class="examen">Preguntado en finales: "Indique las diferencias entre los modelos de Replicación Activa y Pasiva. Indique ventajas de cada uno" (2022-08); "Explique el beneficio de la replicación de datos y desarrolle una estrategia de implementación" (2024-07, 2025-03); "Describa dos estrategias útiles para garantizar tolerancia a fallos en una arquitectura distribuida. De un ejemplo de arquitectura donde dichas estrategias deben ser utilizadas" (2024-12, 2025-02). Para esta última sirven replicación + checkpointing, o replicación + idempotencia/reintentos, con un ejemplo tipo NFS o sistema bancario (transacciones atómicas con <a href="#u17-2pc">2PC</a>).</div>
+
+  <h3 id="u17-confiabilidad">Confiabilidad: propiedades de un sistema dependable</h3>
+  <div class="def"><b>Dependability (confianza).</b> Medida de la confianza que merece un sistema. Se descompone en propiedades: disponibilidad, fiabilidad, durabilidad, seguridad y mantenibilidad. Es una taxonomia: otras clasificaciones son posibles.</div>
+  <ul>
+    <li><b>Availability (disponibilidad):</b> probabilidad de que el sistema este operando correctamente en un momento dado. Se busca alta disponibilidad medida en "nueves" (99,9%, 99,99%, ...).</li>
+    <li><b>Reliability (fiabilidad):</b> capacidad de dar servicio <b>correcto</b> en forma continuada. No es lo mismo estar disponible que responder bien: un sistema que nunca se cae pero responde a dos consultas consecutivas con datos inconsistentes (uno recien grabado, otro viejo) tiene alta availability y baja reliability.</li>
+    <li><b>Durability:</b> probabilidad de que un dato persistido se pueda recuperar.</li>
+    <li><b>Safety (seguridad):</b> en presencia de fallos no ocurre nada catastrofico. No habla de que el sistema sea inhackeable, sino de que su falla no genere más problemas ni se propague a otros sistemas.</li>
+    <li><b>Maintainability (mantenibilidad):</b> cuanto tiempo se requiere para recuperar el sistema (repararlo o actualizarlo).</li>
+  </ul>
+  <div class="ej">Cuanta reliability se necesita lo dicta el negocio: en cuentas bancarias no se tolera baja reliability (el saldo tiene que ser exacto), pero en un reporte estadistico interno poco importa si el valor era 20.001 o 19.999 mientras converja (consistencia eventual): ahí se prefiere disponibilidad y velocidad.</div>
+
+  <h4 id="u17-disponibilidad-calculo">Calculo de disponibilidad</h4>
+  <p>Los componentes <b>en serie</b> (todos necesarios) multiplican sus disponibilidades. Un sistema con tres clusters (web, DB, reportes), cada uno con P = 0,999, tiene P(available) = 0,999 x 0,999 x 0,999 = 0,997: encadenar componentes degrada la disponibilidad total. La redundancia <b>en paralelo</b> dentro de una capa la mejora: si una capa tiene n réplicas de probabilidad p, la capa cae solo si caen todas, así que P(capa) = 1 - (1-p)^n.</p>
+  <div class="ej">Sistema con 2 frontends identicos y 2 backends identicos, P = 0,95 por nodo, balanceadores transparentes que no fallan. Cada capa: P = 1 - 0,05 x 0,05 = 0,9975. Las capas en serie: P(sistema) = 0,9975 x 0,9975 = 0,995. Regla: primero resolver la redundancia de cada capa (paralelo), después combinar las capas (serie). Nunca sumar probabilidades de fallo de capas distintas sin más.</div>
+  <p>La mejor combinación de réplicas depende de costos y presupuesto, necesidades de performance y escalabilidad, y de las necesidades heterogéneas de cada componente. Y no todo es hardware: al estudiar el origen de los fallos, aproximadamente un 20% son de hardware, un 40% de software y un 40% errores humanos de operación y configuración. De poco sirve comprar componentes de grado militar si después alguien opera mal el sistema.</p>
+  <div class="examen">Preguntado en finales: "El estudio de sistemas confiables (dependable) implica la revisión de varias propiedades que impactan en la tolerancia a fallos del sistema. Detalle los conceptos clave de al menos una de ellas" (2024-07, 2024-12), y como ejercicio: "Como se calculan los 9s de disponibilidad de un sistema con 2 frontends y 2 backends, P(availability) = 0,95 por nodo" (2025-02): resolver paralelo por capa y luego serie, como en el ejemplo de arriba.</div>
+
+  <h4 id="u17-maintainability">Maintainability en la práctica: infraestructura inmutable</h4>
+  <p>Hoy la mantenibilidad se garantiza con un paradigma de despliegue basado en <b>inmutabilidad</b>: en lugar de servidores mutables donde alguien entra y "toquetea" (y después nadie recuerda que hizo, así que el servidor restaurado funciona mal), se construye una <b>imagen</b> (docker image, AMI, snapshot) por cada cambio a deployar: nueva versión de un paquete implica nueva imagen. El proceso es automatizado (sin humanos tocando el server): el código se sube al repositorio, una herramienta de CI (por ejemplo Jenkins) construye la imagen y la sube a un registry; esa misma imagen, considerada <b>golden image</b>, inalterable y verificable por checksum, se despliega en testing, UAT y producción, cambiando solo configuración inyectada (variables de entorno). Las imagenes viejas se conservan para rollback.</p>
+  <p>La distinción de fondo es <b>mutable vs immutable infrastructure</b>: en el paradigma mutable, actualizar significa reiniciar la misma instancia con el paquete nuevo instalado encima del viejo, arrastrando el riesgo de residuos de la versión anterior (archivos de configuración que quedaron de la versión vieja, procesos que no se reiniciaron bien); en el paradigma inmutable, en cambio, se aprovisiona una instancia nueva a partir de la imagen nueva y se destruye la vieja, sin tocar jamás una instancia existente.</p>
+  <p>Esto da <b>trazabilidad</b> (de que commit exacto salio lo desplegado), <b>upgrades inmediatos</b> (desplegar es instanciar un container y cambiar el mapeo del proxy, con el container viejo terminando en paralelo), <b>resiliencia</b> (health checks que detectan containers con error y los relanzan, que es baratisimo) y <b>desacoplamiento</b> de servicios (SaaS), plataforma (PaaS) e infraestructura (IaaS).</p>
+
+  <h4 id="u17-safety-dr">Safety y disaster recovery</h4>
+  <p>"El sistema debe poder ser recuperado, automática o manualmente, ante cualquier tipo de falla". Las fallas catastroficas son improbables, no imposibles, así que hace falta un <b>proceso de disaster recovery</b> para infraestructura y datos, con tiempo conocido para poder garantizar SLAs. La herramienta moderna es <b>Infrastructure as Code</b> (por ejemplo Terraform): la infraestructura entera (máquinas, redes, IPs, ambientes de test y producción) se define en código versionado, y un <code>terraform apply</code> la recrea desde cero. El eslabon restante es respaldar el propio repositorio: snapshots periódicos en otra nube, con otras credenciales y sin acceso de vuelta, solo para escenarios de desastre.</p>
+  <p>Los escenarios catastroficos además deben <b>testearse</b>: que pasa si cae cada componente (tenga o no replicación), que pasa con la integridad de los datos. Las empresas maduras agendan simulacros (war rooms) donde tiran servidores a propósito: una caída programada cuesta menos que la no programada que tarde o temprano va a ocurrir, y el simulacro descubre todo lo que no estaba automatizado (ese fix manual que alguien escribio a mano sobre el servidor y que se pierde al recrearlo). Tener backups sin haber probado nunca el restore no es un plan.</p>
+
+  <h3 id="u17-consenso">Coordinación y acuerdo: consenso</h3>
+  <div class="def"><b>Consenso.</b> Procedimiento para que un conjunto de procesos distribuidos acuerden el mismo valor dado un punto de decisión compartido. Implica coordinación más un algoritmo de acuerdo: un proceso puede haber decidido distinto al resto, pero al llegar al punto de consenso descubre que quedo en minoría y todos avanzan al siguiente estado con la decisión comun.</div>
+  <p>Los objetivos de la coordinación y el acuerdo son: lograr que un conjunto de procesos realice tareas siguiendo una secuencia, garantizar la consistencia de la información (permitir replicarla) y evitar puntos únicos de fallo. Los problemas a resolver: sincronización entre procesos (un proceso espera a otro; un recurso compartido requiere acceso exclusivo), elección de un proceso coordinador (líder) y determinación del valor correcto de una propiedad.</p>
+  <p>El consenso es un problema tan complejo que se acotan variables con supuestos:</p>
+  <ul>
+    <li>Los canales de comunicación son confiables (lo que entra por un extremo sale igual por el otro).</li>
+    <li>Todos los procesos pueden comunicarse entre si: <b>no hay particionamiento de red</b>. Si no encuentro a un proceso, es porque murio.</li>
+    <li>La única falla a considerar es la caída de un proceso (a un proceso en error se lo empuja a fallar y caerse, y el consenso recupera la situación global).</li>
+    <li>La caída de un proceso no ocasiona la caída de otro: los fallos son independientes, no correlacionados (están en máquinas distintas; no es el caso de muchos procesos en la misma máquina que caen todos juntos por un pico de memoria).</li>
+  </ul>
+  <div class="warn">En la vida real los dos primeros supuestos se violan constantemente: los canales no son perfectamente confiables y las redes se particionan. Un protocolo que en el papel está bien fundamentado puede quedar flojo justamente ahí. Tenerlo presente al evaluar cualquier algoritmo de esta familia.</div>
+
+  <h4 id="u17-votacion">Algoritmo de consenso simple (votación por rondas)</h4>
+  <p>Con esos supuestos, un esquema genérico de votación alcanza consenso en <code>f+1</code> rondas, donde <code>f</code> es la cantidad de fallos (caídas) a tolerar. Cada proceso arranca proponiendo su valor y en cada ronda difunde a todos los demas los valores nuevos que conocio en la ronda anterior, acumulando todo lo recibido:</p>
+  <pre><code># proceso i
+# inicializacion
+values[0] = {}
+values[1] = { valor_propuesto }
+
+for r in 1 .. f+1:
+    broadcast(values[r] - values[r-1])   # difundo solo lo nuevo
+    values[r+1] = values[r]
+    while ronda r abierta:
+        recibir values_j de cada proceso j
+        values[r+1] = values[r+1] + values_j
+
+# tras f+1 rondas
+decidir d = funcion_de_agregacion(values[f+1])</code></pre>
+  <p>Al cabo de <code>f+1</code> rondas todos los procesos tienen el mismo conjunto de valores (quizá en distinto orden) y aplican la misma función de agregación, por lo que deciden lo mismo. La agregación típica es mayoría: con cantidad impar de procesos y decisión binaria, la mayoría garantiza valor único; si puede haber empate se agrega una regla de desempate (por ejemplo, el valor más bajo, o el voto de un proceso designado).</p>
+  <div class="ej">Tres procesos deben decidir en conjunto si encender la alarma de incendios: P1 propone T, P2 propone T, P3 propone F. Tras las rondas de intercambio, los tres terminan con {T, T, F} y por mayoría todos deciden T: o suenan todas las chicharras o ninguna, nadie da un paso en falso sin acuerdo.</div>
+
+  <h3 id="u17-exclusion-mutua">Exclusión mutua distribuida</h3>
+  <p>Es el equivalente distribuido del mutex de multithreading: un algoritmo que permite pedir y obtener acceso exclusivo a un recurso disponible en la red, usando solo pasaje de mensajes (sin memoria compartida). Todo algoritmo candidato debe garantizar tres propiedades:</p>
+  <ul>
+    <li><b>Safety:</b> solo un proceso puede tener el recurso en todo momento.</li>
+    <li><b>Liveness:</b> nadie espera eternamente mensajes que no van a llegar; se evita la starvation.</li>
+    <li><b>Fairness:</b> todos los procesos tienen la misma prioridad para obtener el recurso; una vez obtenido, se libera en un tiempo conocido; procesamiento en orden (in-order).</li>
+  </ul>
+
+  <h4 id="u17-servidor-central">Servidor central</h4>
+  <p>La versión naive: un proceso del sistema se elige como coordinador de la sección crítica. El recurso se identifica de una forma conocida de antemano (un string o ID, igual en el código de todos los procesos). El flujo es <code>Request(R)</code> del proceso al server, <code>Grant(R)</code> del server, y <code>Release(R)</code> al terminar. Si el recurso está tomado, el server encola los requests en una cola FIFO y los procesos esperan; el acceso a la sección crítica es time-bounded.</p>
+  <ul>
+    <li><b>Ventajas:</b> requests procesados en orden; fácil de entender e implementar; los procesos solo necesitan conocer al server (no entre si); cantidad mínima de conexiones y mensajes (pedir, conceder, liberar).</li>
+    <li><b>Desventajas:</b> el server es punto único de fallo; un proceso no puede distinguir si el server esta caído o simplemente no le responde aun; es cuello de botella si muchos procesos piden muchos recursos.</li>
+  </ul>
+
+  <h4 id="u17-token-ring">Token ring</h4>
+  <p>Sin coordinador: se construye un anillo lógico ordenando los procesos por algun atributo (MAC, IP, PID). El proceso de menor orden crea un token, que circula por el anillo de vecino en vecino. Al recibir el token, cada proceso chequea si necesita la sección crítica: si no, lo pasa al siguiente; si si, retiene el token mientras accede al recurso, y al terminar lo vuelve a pasar.</p>
+  <ul>
+    <li><b>Ventajas:</b> fácil de implementar y entender; no hace falta elegir coordinador; la exclusión mutua está garantizada por la unicidad del token.</li>
+    <li><b>Desventajas:</b> crear el anillo dinamicamente requiere un protocolo en si mismo; la caída de un proceso implica regenerar el anillo (y decidir si el token sigue en juego); el token puede perderse y alguien debe reinyectarlo. Además nada impide que un proceso retenga el token más tiempo del debido: hay liveness (el token llega a todos) pero la fairness depende de la buena conducta de cada uno.</li>
+  </ul>
+
+  <h4 id="u17-ricart-agrawala">Ricart &amp; Agrawala</h4>
+  <p>Algoritmo totalmente distribuido que usa multicast confiable y <a href="#u20">relojes lógicos</a>. Cuando un proceso quiere entrar a la sección crítica, arma un request <code>&lt;T, Pi, R&gt;</code> (timestamp, ID de proceso, nombre del recurso), lo envía a todos los procesos del grupo, y espera el OK de <b>todos</b> antes de entrar.</p>
+  <p>Cuando un proceso recibe un request ajeno:</p>
+  <ul>
+    <li>Si no está interesado en el recurso, responde OK inmediatamente.</li>
+    <li>Si posee la sección crítica, no responde: encola el request.</li>
+    <li>Si el también la pidio, se comparan los timestamps: gana el menor (el que pidio antes). Si el receptor pierde, envía OK; si gana, encola el request ajeno.</li>
+    <li>Al salir de la sección crítica, envía OK a todos los requests encolados.</li>
+  </ul>
+  <pre><code># inicializacion
+state = RELEASED
+
+# para entrar a la seccion critica (proceso Pi)
+state = WANTED
+T = timestamp_del_request()
+multicast_request(T, Pi)
+esperar OK de todos
+state = HELD
+
+# al recibir &lt;Tj, Pj&gt; en Pi (i != j)
+if state == HELD or (state == WANTED and (T, Pi) &lt; (Tj, Pj)):
+    encolar request de Pj sin responder
+else:
+    responder OK a Pj
+
+# para salir de la seccion critica
+state = RELEASED
+for request in cola:
+    enviar OK</code></pre>
+  <div class="ej">P3 está en HELD (T=9). P1 pide con T=10: P3 no responde y encola &lt;T=10, P1&gt;; P2 (que quiere con T=15) responde OK a P1 porque 10 &lt; 15. Luego P2 pide con T=15: P1 no responde (está en WANTED con T=10, menor) y P3 lo encola. Cuando P3 libera, manda OK a los encolados: P1 completa sus OKs, entra (HELD), y al salir le da el OK que le faltaba a P2. El timestamp menor ordena totalmente los accesos.</div>
+  <ul>
+    <li><b>Ventaja:</b> no hay coordinador ni punto único de fallo... aunque es tramposo: ahora <b>todos</b> son un punto de fallo para el total, porque si un proceso cae, el resto queda bloqueado esperando su OK.</li>
+    <li><b>Desventajas:</b> mesh de conexiones (todos los procesos deben conocerse entre si; agregar un nodo multiplica conexiones); alta cantidad de mensajes por acceso: <code>2(N-1)</code> (N-1 requests + N-1 OKs), contra los 3 mensajes del servidor central; imposible distinguir entre proceso caído y proceso dentro de la sección crítica: la detección queda afuera del algoritmo, delegada a health checks externos.</li>
+  </ul>
+
+  <table>
+    <thead><tr><th></th><th>Servidor central</th><th>Token ring</th><th>Ricart &amp; Agrawala</th></tr></thead>
+    <tbody>
+      <tr><td>Coordinador</td><td>Si (el server)</td><td>No</td><td>No</td></tr>
+      <tr><td>Mensajes por acceso</td><td>3</td><td>0 a N (depende de donde este el token)</td><td>2(N-1)</td></tr>
+      <tr><td>Quienes se conocen</td><td>Cada proceso conoce solo al server</td><td>Cada proceso, a su vecino</td><td>Todos con todos (mesh)</td></tr>
+      <tr><td>Punto debil</td><td>SPOF y cuello de botella</td><td>Regenerar anillo, token perdido</td><td>Cualquier caída bloquea al resto</td></tr>
+    </tbody>
+  </table>
+
+  <div class="examen">Tema muy frecuente en finales: "Explique un algoritmo de exclusión mutua distribuida. Indique ventajas y desventajas del mismo en un caso concreto" (2023-07, 2024-07, 2025-12), "Describa un algoritmo de exclusión mutua distribuida que no utilice un servidor central" (2024-07: token ring o Ricart &amp; Agrawala) y "Explique el algoritmo de exclusión mutua distribuida de Ricart &amp; Agrawala" (2025-02). Conviene saber los tres, sus propiedades (safety, liveness, fairness) y la comparación de la tabla.</div>
+
+  <h3 id="u17-2pc">Two-phase commit (2PC)</h3>
+  <div class="def"><b>Two-phase commit.</b> Algoritmo por rondas que garantiza transacciones atómicas (todo o nada) entre nodos distribuidos, bajo ciertas condiciones. Roles: un <b>coordinador</b> que controla las rondas para iniciar y finalizar la transacción, y <b>nodos</b> (participantes) que instrumentan los pedidos del coordinador.</div>
+  <p>Las dos fases:</p>
+  <ol>
+    <li><b>Prepare:</b> el coordinador envía <code>prepare</code> a todos los participantes; cada uno verifica si puede ejecutar su parte de la transacción y responde OK (queda preparado) o no.</li>
+    <li><b>Commit / Abort:</b> si todos respondieron OK, el coordinador envía <code>commit</code> a todos; si alguno no pudo, envía <code>abort</code> y la transacción se deshace en todos.</li>
+  </ol>
+  <figure class="diag">
+    <svg viewBox="0 0 640 190" role="img" aria-label="Fases de two-phase commit">
+      <text x="160" y="18" text-anchor="middle" fill="currentColor" font-size="12" font-weight="bold">Fase 1: prepare</text>
+      <rect x="90" y="30" width="140" height="36" rx="8" fill="none" stroke="var(--acc)"/>
+      <text x="160" y="53" text-anchor="middle" fill="currentColor" font-size="12">Coordinador</text>
+      <rect x="20" y="130" width="120" height="36" rx="8" fill="none" stroke="var(--linea)"/>
+      <text x="80" y="153" text-anchor="middle" fill="currentColor" font-size="12">Servicio 1</text>
+      <rect x="180" y="130" width="120" height="36" rx="8" fill="none" stroke="var(--linea)"/>
+      <text x="240" y="153" text-anchor="middle" fill="currentColor" font-size="12">Servicio N</text>
+      <line x1="130" y1="66" x2="85" y2="130" stroke="var(--linea)"/>
+      <polygon points="85,130 87,119 95,125" fill="var(--linea)"/>
+      <line x1="195" y1="66" x2="238" y2="130" stroke="var(--linea)"/>
+      <polygon points="238,130 228,126 236,119" fill="var(--linea)"/>
+      <text x="80" y="100" text-anchor="middle" fill="currentColor" font-size="11">prepare</text>
+      <text x="248" y="100" text-anchor="middle" fill="currentColor" font-size="11">prepare</text>
+      <text x="480" y="18" text-anchor="middle" fill="currentColor" font-size="12" font-weight="bold">Fase 2: commit / abort</text>
+      <rect x="410" y="30" width="140" height="36" rx="8" fill="none" stroke="var(--acc2)"/>
+      <text x="480" y="53" text-anchor="middle" fill="currentColor" font-size="12">Coordinador</text>
+      <rect x="340" y="130" width="120" height="36" rx="8" fill="none" stroke="var(--linea)"/>
+      <text x="400" y="153" text-anchor="middle" fill="currentColor" font-size="12">Servicio 1</text>
+      <rect x="500" y="130" width="120" height="36" rx="8" fill="none" stroke="var(--linea)"/>
+      <text x="560" y="153" text-anchor="middle" fill="currentColor" font-size="12">Servicio N</text>
+      <line x1="450" y1="66" x2="405" y2="130" stroke="var(--linea)"/>
+      <polygon points="405,130 407,119 415,125" fill="var(--linea)"/>
+      <line x1="515" y1="66" x2="558" y2="130" stroke="var(--linea)"/>
+      <polygon points="558,130 548,126 556,119" fill="var(--linea)"/>
+      <text x="392" y="100" text-anchor="middle" fill="currentColor" font-size="11">commit/abort</text>
+      <text x="576" y="100" text-anchor="middle" fill="currentColor" font-size="11">commit/abort</text>
+    </svg>
+    <figcaption>2PC: primero el coordinador junta la aprobación de todos (prepare), recien después ordena commit o abort a todos.</figcaption>
+  </figure>
+  <p>Supuestos: conexiones confiables, nodos no maliciosos ni arbitrarios (sin fallos bizantinos), y el compromiso clave: <b>una vez que un nodo respondio OK al prepare, no puede fallar en el commit</b>. Si existe probabilidad de fallo entre el prepare y el commit, se necesita el three-phase commit (3PC), que agrega una fase intermedia; la cátedra lo menciona pero no lo cubre en profundidad.</p>
+  <div class="examen">2PC aparece en finales como parte de "Describa dos estrategias útiles para garantizar tolerancia a fallos..." (2024-12, 2025-02): las transacciones atómicas vía 2PC son la estrategia canonica para integridad ante fallos parciales, con el ejemplo del sistema bancario distribuido (que el debito en A y el credito en B se hagan ambos o ninguno).</div>
+</section>

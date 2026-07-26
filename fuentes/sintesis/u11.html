@@ -1,0 +1,381 @@
+<section class="unidad" id="u11" data-titulo="Sistemas elasticos y de alta disponibilidad">
+  <h2>U11. Sistemas elásticos y de alta disponibilidad</h2>
+  <p class="intro">Esta unidad estudia cómo se hace crecer un sistema distribuido (escalabilidad), cómo ese crecimiento puede automatizarse en función de la carga (elasticidad) y cómo se mide y se mejora la probabilidad de que el sistema esté disponible (alta disponibilidad, teorema CAP). Cierra con la evolución histórica de las arquitecturas orientadas a servicios: de la monolítica a SOA, microservicios y serverless. Es una de las unidades más preguntadas en finales, tanto en teoría como en el ejercicio de diseño de arquitectura escalable.</p>
+
+  <h3 id="u11-escalabilidad">Escalabilidad</h3>
+
+  <div class="def"><b>Escalabilidad.</b> Capacidad de un sistema para adaptarse a diferentes ambientes modificando sus recursos. El objetivo de la escalabilidad es el crecimiento en tres dimensiones: respecto del <b>tamaño</b> (agregar usuarios o recursos a controlar), respecto de la <b>distribución geográfica</b> (permitir dispersión de nodos y usuarios) y respecto de los <b>objetivos administrativos</b> del sistema (incorporar nuevas sintaxis, semánticas y servicios ofrecidos).</div>
+
+  <h4 id="u11-plataformas">Plataformas: alta concurrencia vs. ad-hoc</h4>
+  <p>Antes de comparar plataformas conviene distinguir dos términos que la cátedra remarca: la <b>arquitectura</b> es el conjunto de decisiones difíciles de revertir; la <b>infraestructura</b> es el soporte físico sobre el que corre esa arquitectura, y sí puede cambiarse con relativa facilidad.</p>
+  <ul>
+    <li><b>Plataformas para alta concurrencia</b> (cloud gestionado): aplican patrones ya conocidos y probados, ofrecen escalamiento automático (con ciertos límites) y generan una vinculación fuerte con una infraestructura o producto (lock-in).</li>
+    <li><b>Arquitecturas ad-hoc y personalizadas</b>: requieren configuración y soporte en el tiempo (muy costoso), el escalamiento es manual o automatizado por humanos, pero permiten migrar entre plataformas.</li>
+  </ul>
+
+  <h4 id="u11-patrones-carga">Patrones de carga de aplicaciones web</h4>
+  <p>La estrategia de escalamiento depende de la forma en que llega la carga. Los patrones típicos son:</p>
+  <ul>
+    <li><b>Predictable burst</b>: picos esperables en momentos conocidos (Black Friday, software escolar en horario de clase). Se puede aprovisionar de antemano.</li>
+    <li><b>Unpredictable burst</b>: la carga sube de forma súbita y sin patrón previo (noticia de último momento, video viral). Es el caso que más justifica <a href="#u11-elasticidad">elasticidad</a>.</li>
+    <li><b>Periodic processing</b>: aumentos cíclicos por tareas programadas (reportes nocturnos, cierres de mes).</li>
+    <li><b>Start small, grow fast</b>: crecimiento exponencial desde una base chica, típico de startups o lanzamientos exitosos.</li>
+  </ul>
+  <p>Visualmente, el burst predecible es una única joroba suave que vuelve al nivel base; el burst impredecible es una sucesión de subas y bajas irregulares con tendencia creciente en el tiempo; el procesamiento periódico alterna tramos de uso promedio con períodos de inactividad entre pico y pico; y el crecimiento de arranque chico es una curva exponencial sin vuelta al nivel base.</p>
+
+  <h4 id="u11-limitantes">Limitantes de la escalabilidad</h4>
+  <ul>
+    <li><b>Presupuesto</b>: escalar cuesta plata, siempre.</li>
+    <li><b>Arquitectura y algoritmos</b>: ¿el diseño admite crecer? ¿hasta dónde? Un algoritmo secuencial o un componente centralizado ponen un techo.</li>
+    <li><b>Datos (las 4 V)</b>: volumen (cantidad y tamaño), velocidad, veracidad y variedad.</li>
+    <li><b>Red</b>: latencia y ancho de banda.</li>
+    <li><b>Restricciones de negocio y legales</b>: por ejemplo, un hospital argentino no puede alojar datos médicos en servidores de otro país.</li>
+  </ul>
+  <div class="idea">En la práctica, el presupuesto no es una limitante más de la lista: atraviesa a las otras cuatro (arquitectura, datos, red, restricciones legales), porque cualquier decisión sobre ellas termina traducida en costo.</div>
+
+  <h4 id="u11-tecnicas">Técnicas para escalar</h4>
+  <ul>
+    <li><b>Escalamiento vertical</b> (scale up): agregar recursos a un nodo (CPU, memoria, hardware). Está limitado por la capacidad máxima de una sola máquina y no mejora la disponibilidad ante fallos de esa máquina.</li>
+    <li><b>Escalamiento horizontal</b> (scale out): agregar nodos. Se apoya en redundancia, balanceadores de carga y proximidad geográfica. Permite una expansión teóricamente ilimitada y es la base de las arquitecturas elásticas.</li>
+    <li><b>Fragmentación de datos</b>: fraccionar para optimizar (paralelizar), manteniendo juntos los datos "cercanos". En general es necesaria para poder escalar horizontalmente.</li>
+    <li><b>Componentización</b>: separar servicios para escalarlos de forma independiente.</li>
+    <li><b>Optimizar algoritmos</b>: performance de cómputo y de mensajería.</li>
+    <li><b>Asincronismo</b>: mantener sincrónico solo lo estrictamente necesario; el límite lo pone el negocio (hay operaciones que el usuario necesita ver confirmadas).</li>
+  </ul>
+
+  <div class="warn">Componentizar de más puede ser perjudicial: cada separación agrega latencia de red, mensajería y complejidad operativa. La separación de servicios se justifica cuando habilita escalar o desplegar de forma independiente, no como fin en sí mismo.</div>
+
+  <div class="examen">Preguntado en finales: "Elija 2 patrones de carga de aplicaciones Web e indique cómo funcionaría una estrategia de escalamiento Horizontal para mitigar efectos negativos. Compare con un escalamiento Vertical." También es recurrente el ejercicio de diseño: "Diseñe una arquitectura que asegure la escalabilidad para un sistema con los siguientes requisitos... Resuelva mediante lista de endpoints, análisis de volumen y vista física con su explicación" (aparece como pregunta 10 en casi todos los integradores: 2022-08, 2023-07, 2024-07, 2024-12, 2025-02, 2025-03, 2025-07).</div>
+
+  <h3 id="u11-elasticidad">Elasticidad</h3>
+
+  <div class="def"><b>Elasticidad.</b> Capacidad de un sistema para modificar <b>dinámicamente</b> sus recursos adaptándose a los patrones de carga. Es un término propio de arquitecturas cloud y requiere soporte de la infraestructura.</div>
+
+  <div class="idea">Escalable significa que el sistema se puede adaptar a otro tamaño; elástico significa que ese cambio de tamaño ocurre solo, en tiempo real y según la demanda: crece en el pico y se achica cuando el pico pasa (lo que además ahorra costos). Elasticidad = escalar de forma automática según la demanda.</div>
+
+  <h4 id="u11-componentes-elasticidad">Los tres componentes de una arquitectura elástica</h4>
+  <ul>
+    <li><b>Application Load Balancer</b>: punto de entrada que reparte tráfico solo entre instancias sanas. Las instancias nuevas empiezan a recibir tráfico; las dadas de baja, caídas o degradadas dejan de recibirlo. El problema clave es cómo detectar el estado de cada instancia (health checks).</li>
+    <li><b>Autoscaler</b>: decide <b>scale out</b> (incrementar instancias) o <b>scale in</b> (decrementar instancias) en función de las métricas recolectadas y de políticas predefinidas.</li>
+    <li><b>Monitoring automático</b>: recolecta métricas de CPU, memoria, I/O y networking por cada servicio o instancia. Sin estas métricas ni el autoscaler ni el load balancer pueden operar.</li>
+  </ul>
+
+  <h4 id="u11-elasticidad-aws">Ejemplo 1: AWS</h4>
+  <ul>
+    <li><b>Elastic Load Balancer</b>: redirecciona tráfico a instancias EC2, incluso en diferentes zonas, y verifica su estado consultando un endpoint del estilo <code>/status</code>.</li>
+    <li><b>Amazon Autoscaling</b>: el autoscaling group define instancias mínimas, deseadas y máximas, con distintas policies (dynamic vs. manual scaling).</li>
+    <li><b>CloudWatch</b>: métricas globales automatizadas, admite métricas propias.</li>
+  </ul>
+
+  <figure class="diag">
+    <svg viewBox="0 0 700 380" role="img" aria-label="Arquitectura elastica de referencia en AWS: cliente y ELB Owner IAM hacia el Elastic Load Balancer, que reparte trafico entre instancias de dos zonas de disponibilidad dentro de una region, con CloudWatch monitoreando y Auto Scaling ajustando instancias">
+      <g fill="none" stroke="var(--linea)">
+        <rect x="250" y="5" width="110" height="32" rx="6"/>
+        <rect x="510" y="5" width="160" height="32" rx="6"/>
+        <rect x="10" y="50" width="650" height="300" rx="12"/>
+        <rect x="270" y="100" width="150" height="40" rx="6"/>
+        <rect x="450" y="105" width="120" height="32" rx="6"/>
+        <rect x="60" y="170" width="230" height="120" rx="8"/>
+        <rect x="360" y="170" width="230" height="120" rx="8"/>
+        <rect x="90" y="195" width="170" height="26" rx="4"/>
+        <rect x="100" y="225" width="170" height="26" rx="4"/>
+        <rect x="110" y="255" width="170" height="26" rx="4"/>
+        <rect x="390" y="195" width="170" height="26" rx="4"/>
+        <rect x="400" y="225" width="170" height="26" rx="4"/>
+        <rect x="410" y="255" width="170" height="26" rx="4"/>
+        <rect x="270" y="300" width="150" height="34" rx="6"/>
+      </g>
+      <rect x="30" y="80" width="610" height="260" rx="10" fill="none" stroke="var(--acc)" stroke-dasharray="6 4"/>
+      <g stroke="var(--linea)">
+        <line x1="305" y1="37" x2="345" y2="100"/>
+        <line x1="300" y1="140" x2="175" y2="170"/>
+        <line x1="390" y1="140" x2="475" y2="170"/>
+      </g>
+      <g stroke="var(--acc2)" stroke-dasharray="4 3">
+        <line x1="595" y1="37" x2="420" y2="110"/>
+        <line x1="420" y1="121" x2="450" y2="121"/>
+        <line x1="300" y1="300" x2="175" y2="290"/>
+        <line x1="390" y1="300" x2="475" y2="290"/>
+      </g>
+      <g fill="currentColor" stroke="none" font-size="10" text-anchor="middle">
+        <text x="305" y="25" font-weight="bold">Client</text>
+        <text x="590" y="20">ELB Owner /</text>
+        <text x="590" y="32">IAM User</text>
+        <text x="55" y="68" font-size="13" font-weight="bold" text-anchor="start">AWS Cloud</text>
+        <text x="345" y="116">Elastic Load</text>
+        <text x="345" y="130">Balancer</text>
+        <text x="510" y="125">CloudWatch</text>
+        <text x="175" y="185" font-weight="bold">Availability Zone #1</text>
+        <text x="175" y="212">Instance</text>
+        <text x="185" y="242">Instance</text>
+        <text x="195" y="272">Instance</text>
+        <text x="475" y="185" font-weight="bold">Availability Zone #2</text>
+        <text x="475" y="212">Instance</text>
+        <text x="485" y="242">Instance</text>
+        <text x="495" y="272">Instance</text>
+        <text x="345" y="321">Auto Scaling</text>
+        <text x="615" y="330" font-size="11">Region</text>
+      </g>
+      <g fill="var(--acc2)" stroke="none" font-size="8">
+        <text x="270" y="65" text-anchor="middle">HTTP/HTTPS/TCP/SSL</text>
+        <text x="500" y="70" text-anchor="middle">API/CLI</text>
+        <text x="435" y="112" text-anchor="middle">metricas</text>
+        <text x="230" y="308" text-anchor="middle">scale out/in</text>
+      </g>
+    </svg>
+    <figcaption>El load balancer solo enruta tráfico entre zonas de disponibilidad, el autoscaler ajusta cuántas instancias hay en cada zona y la administración (IAM, vía API/CLI o consola) es un plano separado del tráfico de usuarios.</figcaption>
+  </figure>
+
+  <h4 id="u11-elasticidad-k8s">Ejemplo 2: Kubernetes</h4>
+  <ul>
+    <li><b>Kubernetes Service</b> (rol de load balancer): redirecciona tráfico solo a pods en estado Ready. Las probes de <b>liveness</b> (¿el contenedor sigue vivo?) y <b>readiness</b> (¿está en condiciones de recibir tráfico?) permiten al usuario definir si un pod debe recibir tráfico o no.</li>
+    <li><b>Horizontal Pod Autoscaler (HPA)</b>: recurso asociado a un deployment que escala en función de una métrica, ponderando las métricas de cada instancia:
+      <pre><code>desiredReplicas = ceil(currReplicas * (currMetricValue / desiredMetricValue))</code></pre></li>
+    <li><b>Metrics Server</b>: recolecta métricas de cada pod del cluster y las expone en el API server; está diseñado específicamente para autoscaling.</li>
+  </ul>
+
+  <figure class="diag">
+    <svg viewBox="0 0 780 320" role="img" aria-label="Arquitectura de un cluster de Kubernetes: control plane con api server, controller manager, cloud controller manager, etcd y scheduler, conectado a varios nodos con kubelet y kube-proxy">
+      <g fill="none" stroke="var(--linea)">
+        <rect x="10" y="55" width="570" height="255" rx="10"/>
+        <rect x="40" y="100" width="110" height="32" rx="4"/>
+        <rect x="165" y="100" width="110" height="40" rx="4"/>
+        <rect x="100" y="170" width="90" height="36" rx="6"/>
+        <rect x="40" y="230" width="100" height="32" rx="4"/>
+        <rect x="165" y="230" width="110" height="32" rx="4"/>
+        <rect x="610" y="95" width="150" height="50" rx="10"/>
+        <rect x="310" y="110" width="80" height="130" rx="6"/>
+        <rect x="400" y="110" width="80" height="130" rx="6"/>
+        <rect x="490" y="110" width="80" height="130" rx="6"/>
+        <rect x="318" y="135" width="64" height="30" rx="4"/>
+        <rect x="318" y="175" width="64" height="32" rx="4"/>
+        <rect x="408" y="135" width="64" height="30" rx="4"/>
+        <rect x="408" y="175" width="64" height="32" rx="4"/>
+        <rect x="498" y="135" width="64" height="30" rx="4"/>
+        <rect x="498" y="175" width="64" height="32" rx="4"/>
+      </g>
+      <rect x="25" y="85" width="260" height="205" rx="8" fill="none" stroke="var(--acc)" stroke-dasharray="6 4"/>
+      <g stroke="var(--linea)">
+        <line x1="95" y1="132" x2="145" y2="170"/>
+        <line x1="220" y1="140" x2="145" y2="170"/>
+        <line x1="145" y1="206" x2="90" y2="230"/>
+        <line x1="145" y1="206" x2="220" y2="230"/>
+      </g>
+      <polyline points="220,100 220,72 685,72 685,95" fill="none" stroke="var(--acc2)" stroke-dasharray="5 4"/>
+      <g stroke="var(--acc)" fill="none">
+        <polyline points="190,188 295,188 295,278 530,278"/>
+        <line x1="350" y1="278" x2="350" y2="240"/>
+        <line x1="440" y1="278" x2="440" y2="240"/>
+        <line x1="530" y1="278" x2="530" y2="240"/>
+      </g>
+      <g fill="currentColor" stroke="none" font-size="10" text-anchor="middle">
+        <text x="20" y="45" font-size="13" font-weight="bold" text-anchor="start">Kubernetes cluster</text>
+        <text x="95" y="120" font-size="9">Controller manager</text>
+        <text x="220" y="116" font-size="8.5">Cloud controller</text>
+        <text x="220" y="129" font-size="8.5">manager</text>
+        <text x="145" y="192" font-weight="bold">API server</text>
+        <text x="90" y="244" font-weight="bold">etcd</text>
+        <text x="90" y="256" font-size="7.5">(persistence store)</text>
+        <text x="220" y="250">Scheduler</text>
+        <text x="685" y="116">Cloud provider</text>
+        <text x="685" y="130">API</text>
+        <text x="35" y="278" font-size="11" text-anchor="start">Control Plane</text>
+        <text x="350" y="125" font-weight="bold">Node 1</text>
+        <text x="440" y="125" font-weight="bold">Node 2</text>
+        <text x="530" y="125" font-weight="bold">Node 3</text>
+        <text x="350" y="154" font-size="9">kubelet</text>
+        <text x="440" y="154" font-size="9">kubelet</text>
+        <text x="530" y="154" font-size="9">kubelet</text>
+        <text x="350" y="195" font-size="8.5">kube-proxy</text>
+        <text x="440" y="195" font-size="8.5">kube-proxy</text>
+        <text x="530" y="195" font-size="8.5">kube-proxy</text>
+      </g>
+    </svg>
+    <figcaption>El Kubernetes Service (load balancer) y el HPA (autoscaler) explicados arriba corren sobre esta arquitectura: el API server es el punto central de coordinación, etcd persiste el estado del cluster y kubelet/kube-proxy en cada nodo ejecutan y enrutan hacia los pods.</figcaption>
+  </figure>
+
+  <div class="warn">Error común en examen: confundir escalabilidad con elasticidad. La escalabilidad es la capacidad potencial de adaptarse a otro tamaño (puede requerir intervención humana); la elasticidad exige que el ajuste sea automático, dinámico y en ambos sentidos (out e in). Un sistema puede ser escalable sin ser elástico; no puede ser elástico sin ser escalable.</div>
+
+  <div class="examen">Preguntado en finales: "¿En qué consiste la propiedad de Elasticidad de un sistema distribuido? ¿Qué elementos mínimos son necesarios para garantizarla?" (2024-07) y la variante "¿Qué componentes requiere una arquitectura para brindar elasticidad? Describa una situación donde este comportamiento sea deseable" (2025-02). La respuesta esperada: definición contrastada con escalabilidad, los tres componentes (monitoreo, autoscaler, load balancer) y un escenario tipo unpredictable burst.</div>
+
+  <h3 id="u11-alta-disponibilidad">Alta disponibilidad</h3>
+
+  <p>Aun cuando ciertas propiedades de confiabilidad fallen, en sistemas públicos interesa que el servicio esté siempre disponible:</p>
+  <p><code>P(system available) = 1 - P(failure)</code></p>
+  <p>Como <code>P(system available) &lt; 1</code> siempre, lo importante es cuán cerca de 1 está. La disponibilidad se mide por la <b>cantidad de nueves</b>: con P ~ 0,9 el sistema está caído 36,5 días al año; con P ~ 0,999, solo 8,76 horas al año.</p>
+
+  <div class="warn">La probabilidad sola no alcanza para juzgar un sistema: no distingue cuándo ocurrieron las caídas. No es lo mismo una única caída de 8 horas que muchas microcaídas repartidas, ni caerse de madrugada que en el pico de venta. Por eso en la industria se complementa con SLO e indicadores concretos.</div>
+
+  <h4 id="u11-calculo-9s">Cálculo de los 9: serie, redundancia y clusters</h4>
+  <p>Con tres componentes (web, DB, reportes), cada uno con P(available) = 0,9, la topología cambia todo:</p>
+  <ul>
+    <li><b>En serie</b> (un componente por nodo, todos necesarios): <code>P = 0,9 * 0,9 * 0,9 = 0,729</code>, aproximadamente 4 meses caídos al año. Distribuir sin redundancia empeora la disponibilidad.</li>
+    <li><b>Redundancia total</b> (los tres nodos corren el sistema completo): el sistema solo cae si caen los tres a la vez: <code>P = 1 - 0,1 * 0,1 * 0,1 = 0,999</code>.</li>
+    <li><b>Clusters por componente</b> (cada componente replicado en 3 nodos): cada cluster tiene P = 0,999 y el sistema es la serie de los clusters: <code>P = 0,999 ^ 3 = 0,997</code>.</li>
+  </ul>
+
+  <figure class="diag">
+    <svg viewBox="0 0 620 360" role="img" aria-label="Comparacion de disponibilidad en serie, con redundancia total y con clusters por componente">
+      <g fill="none" stroke="currentColor">
+        <text x="10" y="22" fill="currentColor" stroke="none" font-size="13" font-weight="bold">En serie: P = 0,9 x 0,9 x 0,9 = 0,729</text>
+        <rect x="20" y="40" width="90" height="36" rx="6"/>
+        <rect x="160" y="40" width="90" height="36" rx="6"/>
+        <rect x="300" y="40" width="90" height="36" rx="6"/>
+        <line x1="110" y1="58" x2="160" y2="58" stroke="var(--acc)"/>
+        <line x1="250" y1="58" x2="300" y2="58" stroke="var(--acc)"/>
+        <text x="65" y="62" fill="currentColor" stroke="none" font-size="12" text-anchor="middle">Web 0,9</text>
+        <text x="205" y="62" fill="currentColor" stroke="none" font-size="12" text-anchor="middle">DB 0,9</text>
+        <text x="345" y="62" fill="currentColor" stroke="none" font-size="12" text-anchor="middle">Report 0,9</text>
+        <text x="470" y="62" fill="var(--acc2)" stroke="none" font-size="12">falla si cae UNO</text>
+
+        <text x="10" y="120" fill="currentColor" stroke="none" font-size="13" font-weight="bold">Redundancia: P = 1 - 0,1 x 0,1 x 0,1 = 0,999</text>
+        <rect x="20" y="135" width="200" height="30" rx="6" stroke="var(--acc)"/>
+        <rect x="20" y="172" width="200" height="30" rx="6" stroke="var(--acc)"/>
+        <rect x="20" y="209" width="200" height="30" rx="6" stroke="var(--acc)"/>
+        <text x="120" y="154" fill="currentColor" stroke="none" font-size="12" text-anchor="middle">Web + DB + Report (0,9)</text>
+        <text x="120" y="191" fill="currentColor" stroke="none" font-size="12" text-anchor="middle">Web + DB + Report (0,9)</text>
+        <text x="120" y="228" fill="currentColor" stroke="none" font-size="12" text-anchor="middle">Web + DB + Report (0,9)</text>
+        <text x="250" y="191" fill="var(--acc2)" stroke="none" font-size="12">falla solo si caen TODOS</text>
+
+        <text x="10" y="270" fill="currentColor" stroke="none" font-size="13" font-weight="bold">Clusters por componente: P = 0,999 ^ 3 = 0,997</text>
+        <g stroke="var(--acc)">
+          <rect x="20" y="285" width="80" height="26" rx="5"/>
+          <rect x="26" y="291" width="80" height="26" rx="5"/>
+          <rect x="32" y="297" width="80" height="26" rx="5"/>
+          <rect x="160" y="285" width="80" height="26" rx="5"/>
+          <rect x="166" y="291" width="80" height="26" rx="5"/>
+          <rect x="172" y="297" width="80" height="26" rx="5"/>
+          <rect x="300" y="285" width="80" height="26" rx="5"/>
+          <rect x="306" y="291" width="80" height="26" rx="5"/>
+          <rect x="312" y="297" width="80" height="26" rx="5"/>
+        </g>
+        <line x1="112" y1="310" x2="160" y2="310" stroke="var(--acc)"/>
+        <line x1="252" y1="310" x2="300" y2="310" stroke="var(--acc)"/>
+        <text x="72" y="340" fill="currentColor" stroke="none" font-size="11" text-anchor="middle">Cluster Web (0,999)</text>
+        <text x="212" y="340" fill="currentColor" stroke="none" font-size="11" text-anchor="middle">Cluster DB (0,999)</text>
+        <text x="352" y="340" fill="currentColor" stroke="none" font-size="11" text-anchor="middle">Cluster Report (0,999)</text>
+      </g>
+    </svg>
+    <figcaption>Mismos tres nodos, distinta topología: en serie las disponibilidades se multiplican (empeora); con redundancia se multiplican las probabilidades de fallo (mejora); con clusters por componente se combinan ambos efectos, cada cluster gana redundancia interna (0,999) y los tres clusters siguen en serie entre sí, que es la topología del ejercicio de final citado más abajo (2 frontends + 2 backends).</figcaption>
+  </figure>
+
+  <div class="warn">En el cálculo no se suman probabilidades de fallo de servicios distintos a lo bruto: primero se resuelve cada capa redundante (paralelo: el cluster falla solo si fallan todas sus réplicas) y después se combinan las capas necesarias (serie: se multiplican las disponibilidades de cada cluster).</div>
+
+  <div class="examen">Preguntado en finales: "¿Cómo se calculan los 9s de disponibilidad de un sistema con 2 frontend idénticos que se comunican con 2 nodos de backend idénticos? Asuma P(availability) = 0,95 por nodo y load balancers que no se caen" (2025-02). Resolución: P(cae un cluster) = 0,05 * 0,05 = 0,0025, A(cluster) = 0,9975, A(sistema) = 0,9975 * 0,9975 = 0,995 (99,5%).</div>
+
+  <h4 id="u11-sla-slo-sli">Terminología de la industria: SLA, SLO, SLI</h4>
+  <table>
+    <thead><tr><th>Sigla</th><th>Qué es</th><th>Ejemplo</th></tr></thead>
+    <tbody>
+      <tr><td><b>SLA</b> (Service Level Agreement)</td><td>Contrato de disponibilidad pactado con el cliente; define qué pasa si no se respeta (penalidades, créditos).</td><td>SLA de BigQuery</td></tr>
+      <tr><td><b>SLO</b> (Service Level Objective)</td><td>Objetivo interno que se debe cumplir para no invalidar el SLA.</td><td>Availability &gt; 99,95%</td></tr>
+      <tr><td><b>SLI</b> (Service Level Indicator)</td><td>Métrica que se compara contra el SLO; debe mantenerse por encima del threshold. Requiere una plataforma de observability y sirve para analizar el impacto de cada despliegue.</td><td>Disponibilidad medida del último mes</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="u11-cap">Teorema CAP</h3>
+
+  <div class="def"><b>Teorema CAP</b> (Eric Brewer, 1998). En sistemas distribuidos con almacenamiento es posible garantizar solo 2 de estos 3 atributos: <b>Consistency</b> (repetibilidad de respuesta de todos los nodos frente a un mismo pedido), <b>Availability</b> (capacidad del sistema de responder a todo pedido) y <b>Partition Tolerance</b> (capacidad de lidiar con la formación de grupos aislados de nodos).</div>
+
+  <div class="ej">El escenario típico: un load balancer frente a dos réplicas con replicación bidireccional entre ellas. Si el enlace de replicación se corta (partición), cada réplica sigue recibiendo pedidos pero ya no puede sincronizarse con la otra. Hay que elegir: responder igual con datos posiblemente viejos (se sacrifica C, se mantiene A) o dejar de responder hasta reestablecer la replicación (se sacrifica A, se mantiene C).</div>
+
+  <div class="warn">Dos precisiones que se esperan en un final: (1) el trade-off no es todo o nada, se pueden sacrificar fracciones de consistencia o de disponibilidad (de ahí el espectro de bases NoSQL: CP, AP, y los sistemas CA que no toleran particiones); (2) sacrificar Partition Tolerance significa directamente no proveer un sistema distribuido, porque las redes reales se particionan. En la práctica P es ineludible y la elección real es entre C y A durante la partición.</div>
+
+  <div class="ej">Ejemplos reales por categoría: del lado <b>CA</b> están las bases relacionales clásicas (MySQL, SQL Server, MariaDB), que priorizan consistencia y disponibilidad porque históricamente no fueron pensadas para tolerar particiones de red. Del lado <b>CP</b> aparecen HBase, MongoDB y Redis: ante una partición dejan de responder antes que devolver un dato desactualizado. Del lado <b>AP</b> aparecen Cassandra, CouchDB y Riak: ante una partición siguen respondiendo aunque la respuesta pueda no ser la más reciente.</div>
+
+  <div class="examen">Preguntado en finales: "¿Qué propone el teorema CAP? Según el teorema, ¿es posible garantizar la tolerancia a fallos de un sistema distribuido?" (2023-07). Respuesta esperada: enunciar las tres propiedades, explicar que no se pueden garantizar las tres a la vez, y concluir que ante una partición (inevitable en redes no confiables) el sistema debe sacrificar consistencia o disponibilidad, por lo que no existe tolerancia a fallos "perfecta".</div>
+
+  <h3 id="u11-evolucion">Evolución de arquitecturas: de monolitos a serverless</h3>
+
+  <h4 id="u11-monolitica">Arquitectura monolítica y monolítica escalable</h4>
+  <p>La arquitectura monolítica clásica: un reverse proxy recibe requests, un web server (que también sirve archivos estáticos) concentra toda la lógica y consulta un único DB server por SQL. Escala solo verticalmente y es un sistema de producto único.</p>
+  <p>La versión <b>escalable</b> del monolito réplica el web server detrás del reverse proxy y réplica la base de datos:</p>
+  <ul>
+    <li>Vista de web requests: el reverse proxy suma routeo y escalabilidad, pero se vuelve single point of failure.</li>
+    <li>Vista de data queries: las réplicas de la DB mejoran el throughput de <b>lectura</b> pero empeoran el de <b>escritura</b> (cada escritura debe propagarse a todas las réplicas).</li>
+  </ul>
+
+  <h4 id="u11-soa">SOA: Service Oriented Architecture</h4>
+  <p>En SOA la aplicación se descompone en servicios de negocio (account, orders, shipping, data services) que se comunican a través de un <b>Enterprise Service Bus (ESB)</b>, con un <b>Service Registry</b> para descubrir servicios y <b>procesos de orquestación</b> que componen servicios en flujos de negocio, incluyendo integración B2B con otras empresas.</p>
+
+  <figure class="diag">
+    <svg viewBox="0 0 780 260" role="img" aria-label="Arquitectura SOA: Web App y Portlet hacia Service Registry y Enterprise Service Bus, que conectan con procesos de orquestacion y servicios de negocio, y estos hacia servicios de datos">
+      <g fill="none" stroke="var(--linea)">
+        <rect x="20" y="60" width="100" height="36" rx="6"/>
+        <rect x="20" y="140" width="100" height="36" rx="6"/>
+        <rect x="170" y="40" width="120" height="44" rx="6"/>
+        <rect x="170" y="100" width="120" height="140" rx="6"/>
+        <rect x="340" y="40" width="140" height="200" rx="8" stroke-dasharray="5 4"/>
+        <rect x="355" y="70" width="110" height="32" rx="4"/>
+        <rect x="355" y="112" width="110" height="32" rx="4"/>
+        <rect x="355" y="154" width="110" height="32" rx="4"/>
+        <rect x="500" y="40" width="140" height="200" rx="8" stroke-dasharray="5 4"/>
+        <rect x="515" y="70" width="110" height="30" rx="4"/>
+        <rect x="515" y="110" width="110" height="30" rx="4"/>
+        <rect x="515" y="150" width="110" height="30" rx="4"/>
+        <rect x="515" y="190" width="110" height="30" rx="4"/>
+        <rect x="660" y="70" width="100" height="170" rx="8"/>
+      </g>
+      <g stroke="var(--linea)">
+        <line x1="120" y1="78" x2="170" y2="90"/>
+        <line x1="120" y1="158" x2="170" y2="158"/>
+        <line x1="290" y1="140" x2="340" y2="140"/>
+        <line x1="290" y1="158" x2="500" y2="140"/>
+        <line x1="640" y1="140" x2="660" y2="140"/>
+      </g>
+      <g fill="currentColor" stroke="none" font-size="10" text-anchor="middle">
+        <text x="70" y="82" font-weight="bold">Web App</text>
+        <text x="70" y="162" font-weight="bold">Portlet</text>
+        <text x="230" y="66">Service Registry</text>
+        <text x="230" y="165">Enterprise</text>
+        <text x="230" y="180">Service Bus</text>
+        <text x="410" y="55" font-weight="bold">Orchestration Processes</text>
+        <text x="410" y="90">Customer</text>
+        <text x="410" y="132">Business to Business</text>
+        <text x="410" y="174">Integration</text>
+        <text x="570" y="55" font-weight="bold">Services</text>
+        <text x="570" y="89">Account Service</text>
+        <text x="570" y="129">Book Service</text>
+        <text x="570" y="169">Order Service</text>
+        <text x="570" y="209">Shipping Service</text>
+        <text x="710" y="65" font-weight="bold">Data Services</text>
+        <text x="710" y="110">DB 1</text>
+        <text x="710" y="150">...</text>
+        <text x="710" y="190">DB N</text>
+      </g>
+    </svg>
+    <figcaption>El ESB y el Service Registry son el punto de paso obligado entre clientes, procesos de orquestación y servicios de negocio; a diferencia de microservicios, los servicios no hablan directamente entre sí ni tienen necesariamente una base de datos propia.</figcaption>
+  </figure>
+
+  <p>SOA no es solo una arquitectura: es un paradigma orientado al ámbito corporativo, que se complementa con <b>Business Process Management (BPM)</b>: la disciplina que combina modelado, automatización, ejecución, control, medición y optimización de los flujos de actividad del negocio, atravesando sistemas, empleados, clientes y partners dentro y fuera de la empresa.</p>
+  <p>Características de los servicios SOA:</p>
+  <ul>
+    <li><b>Tecnologías</b>: WebServices = SOAP + HTTP; ESB preponderante para eventos; Service Repository y Discovery para comunicación punto a punto.</li>
+    <li><b>Procesos y servicios</b>: cada servicio define un <b>contract</b>, una <b>interface</b> y una <b>implementation</b> (lógica de negocio + gestión de datos).</li>
+  </ul>
+
+  <h4 id="u11-microservicios">Microservicios</h4>
+  <p>Los microservicios llevan la componentización más lejos: cada servicio es chico, tiene <b>su propia base de datos</b> y se despliega de forma independiente. Un <b>API Gateway</b> es el punto de entrada único para la front app: recibe las solicitudes externas y las enruta al microservicio correspondiente, ocultando la topología interna (el cliente no necesita conocer cuántos servicios hay ni dónde están). A diferencia de SOA, los microservicios pueden comunicarse directamente entre sí (sin pasar por un bus central), formando una malla de llamadas punto a punto; el API Gateway oculta esa malla interna de la aplicación cliente.</p>
+
+  <h4 id="u11-granularidad">Transición entre arquitecturas: el eje de granularidad</h4>
+  <table>
+    <thead><tr><th></th><th>Monolítica</th><th>SOA</th><th>Microservicios</th></tr></thead>
+    <tbody>
+      <tr><td>Granularidad</td><td>Una aplicación</td><td>Procesos y servicios gruesos</td><td>Muchos servicios finos</td></tr>
+      <tr><td>Escalabilidad</td><td>Vertical</td><td>Intermedia</td><td>Horizontal</td></tr>
+      <tr><td>Fortalezas</td><td>Sistema de producto único, simple de desarrollar y desplegar</td><td>Integración corporativa, procesos de negocio (BPM)</td><td>Flexibilidad de negocio, monitoreo y disponibilidad parcial (cae un servicio, no todo)</td></tr>
+    </tbody>
+  </table>
+  <div class="idea">La evolución es un eje continuo de granularidad decreciente: cuanto más fino se parte el sistema, más escalabilidad horizontal, flexibilidad y disponibilidad parcial se gana, a cambio de más complejidad de operación y comunicación. Elegir arquitectura es elegir un punto en ese eje, no "la mejor" en abstracto.</div>
+
+  <h4 id="u11-serverless">Serverless</h4>
+  <p>En una arquitectura serverless la unidad de despliegue ya no es un servicio sino una <b>función</b>: un HTTP router y un events router disparan funciones granulares que leen y escriben en stores gestionados e interactúan con servicios externos. El proveedor administra por completo los servidores y la asignación de recursos; el desarrollador solo escribe funciones.</p>
+  <details class="mas"><summary>FaaS en detalle: ventajas y limitaciones</summary>
+    <p>Al modelo también se lo llama Function as a Service (FaaS). Las funciones se disparan por eventos (HTTP, colas, cambios en una base de datos) y son efímeras.</p>
+    <ul>
+      <li><b>Ventaja</b>: escalabilidad automática extrema y pago por uso; el sistema escala a cero si no hay demanda.</li>
+      <li><b>Limitaciones</b>: las funciones deben ser stateless y de corta duración, y sufren latencia de arranque en frío (cold start) al instanciar el entorno en la primera ejecución.</li>
+    </ul>
+  </details>
+
+</section>
