@@ -60,19 +60,23 @@ Se cerraron los 10 FALTA y la mayoría de los PARCIAL, priorizando por valor par
 un final. Los diagramas nuevos son SVG propios, con los mismos tokens de color
 del resto y verificados contra la diapositiva antes de escribirse.
 
-El apunte quedó con **97 diagramas propios** (90 en las unidades y 7 en la
+El apunte quedó con **101 diagramas propios** (94 en las unidades y 7 en la
 autoevaluación) y pasó de 1055 a 1306 KB.
+
+El criterio de conteo es `figure.diag`: un `<figure class="diag">` con su `<svg>`
+y su `<figcaption>`. Los tres números coinciden exactamente (101 figuras, 101 SVG
+con `aria-label`, 101 figcaptions). El build reporta `svg=117` porque además
+cuenta 16 iconos `aria-hidden` de la interfaz, que no son diagramas.
 
 Antes de esta auditoría `DIFF-vs-apunte-viejo.md` registraba 49 diagramas. Ese
 número quedó sin poder re-verificarse, porque no se conservó una copia completa
-del archivo previo; el que sí está verificado, contando ocurrencias y no líneas,
-es el 97 de ahora.
+del archivo previo.
 
 Figuras por unidad después del cierre:
 
 ```
 u01  4   u02  8   u03 15   u04  3   u05  7   u06  1
-u07  9   u09  2   u10  4   u11  4   u13  5   u15  1
+u07  9   u09  6   u10  4   u11  4   u13  5   u15  1
 u16  6   u17  2   u19  3   u20 10   u21  6
 autoevaluación 7
 ```
