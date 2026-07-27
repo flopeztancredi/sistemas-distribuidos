@@ -352,7 +352,7 @@ cv.release()</code></pre>
     </tbody>
   </table>
   <div class="warn">TCP es orientado a <b>streams</b>, no a mensajes: garantiza que los bytes llegan completos y en orden, pero no respeta los límites de los <code>send()</code>. Un <code>recv()</code> puede devolver medio mensaje o dos mensajes juntos (short reads): delimitar donde empieza y termina cada mensaje (framing) es responsabilidad del programador. Este detalle se pregunta seguido cuando piden comparar TCP con abstracciones de mensajes discretos como los MOMs.</div>
-  <div class="examen">Preguntado en finales, de forma recurrente: "Suponga que debe implementar un protocolo de health-check de server a clientes mediante sockets. ¿Qué condiciones se deberian cumplir para que sea más conveniente utilizar UDP frente a TCP?" (2024-07, 2024-12). La respuesta esperada: si los mensajes son periódicos y toleran pérdida (basta que llegue alguno para dar por vivo al proceso), UDP conviene porque no paga conexión ni retransmisiones; TCP es contraproducente porque retransmite heartbeats viejos antes de entregar el nuevo, agregando latencia y hasta falsos negativos bajo congestion. Además UDP es más liviano si hay que chequear muchos procesos.</div>
+  <div class="examen">Preguntado en finales, de forma recurrente: "Suponga que debe implementar un protocolo de health-check de server a clientes mediante sockets. ¿Qué condiciones se deberian cumplir para que sea más conveniente utilizar UDP frente a TCP?" (2024-07, 2024-12). La respuesta esperada: si los mensajes son periódicos y toleran pérdida (basta que llegue alguno para dar por vivo al proceso), UDP conviene porque no paga conexión ni retransmisiones; TCP es contraproducente porque retransmite heartbeats viejos antes de entregar el nuevo, agregando latencia y hasta falsos negativos bajo congestión. Además UDP es más liviano si hay que chequear muchos procesos.</div>
   <div class="examen">También preguntado: "Indique ventajas y desventajas de utilizar comunicación por sockets TCP frente al pasaje de mensajes por colas mediante MOM" (2025-02, 2025-07). Desde esta unidad aporta: TCP da entrega y orden solo mientras la conexión vive, es stream (framing manual) y es liviano y de baja latencia; las garantías ante desconexión y los mensajes discretos los agrega el MOM (ver unidad 5).</div>
 
   <h3 id="u02-sockets-api">Programación con sockets</h3>
@@ -471,8 +471,8 @@ cv.release()</code></pre>
 
   <div class="examen">Relacionado en finales: "¿Cómo se garantiza que un algoritmo o protocolo sea sincrónico en el contexto de sistemas distribuidos?" (2025-07). La noción completa de sistema sincrónico (cotas conocidas de cómputo y comunicación) se desarrolla en la unidad de tiempo y sincronismo; desde aca conviene tener claro que sincrónico implica poder esperar la respuesta con un límite de tiempo conocido.</div>
 
-  <h3 id="u02-congestion">Congestion de red</h3>
-  <p>La red tiene capacidad finita. A medida que crece la carga ofrecida, el throughput crece linealmente hasta acercarse a la capacidad; ahí los buffers de los routers se llenan, aparecen retransmisiones y, sin control, el throughput <b>colapsa</b> (congestion collapse): más tráfico ofrecido resulta en menos datos útiles entregados. El delay se comporta peor: crece de forma explosiva cuando la utilización se acerca al 100%.</p>
+  <h3 id="u02-congestion">Congestión de red</h3>
+  <p>La red tiene capacidad finita. A medida que crece la carga ofrecida, el throughput crece linealmente hasta acercarse a la capacidad; ahí los buffers de los routers se llenan, aparecen retransmisiones y, sin control, el throughput <b>colapsa</b> (congestión collapse): más tráfico ofrecido resulta en menos datos útiles entregados. El delay se comporta peor: crece de forma explosiva cuando la utilización se acerca al 100%.</p>
 
   <figure class="diag">
     <svg viewBox="0 0 420 260" role="img" aria-label="Curva de throughput normalizado contra carga, con tres zonas: no congestion, moderate congestion y severe congestion, y los puntos A y B marcando los bordes de la zona de congestion moderada">
@@ -485,9 +485,9 @@ cv.release()</code></pre>
       <circle cx="180" cy="92" r="3.5" fill="currentColor" stroke="none" />
       <circle cx="230" cy="60" r="3.5" fill="currentColor" stroke="none" />
       <g fill="currentColor" stroke="none" font-size="11">
-        <text x="105" y="35" text-anchor="middle">No congestion</text>
+        <text x="105" y="35" text-anchor="middle">No congestión</text>
         <text x="205" y="35" text-anchor="middle">Moderate</text>
-        <text x="310" y="35" text-anchor="middle">Severe congestion</text>
+        <text x="310" y="35" text-anchor="middle">Severe congestión</text>
         <text x="188" y="88" text-anchor="start">A</text>
         <text x="238" y="56" text-anchor="start">B</text>
         <text x="210" y="238" text-anchor="middle">Load</text>
@@ -515,7 +515,7 @@ cv.release()</code></pre>
   </figure>
 
   <ul>
-    <li><b>Throttling:</b> limitar deliberadamente la tasa de envio para operar antes del punto de colapso; es la base del control de congestion de TCP (sliding window).</li>
+    <li><b>Throttling:</b> limitar deliberadamente la tasa de envio para operar antes del punto de colapso; es la base del control de congestión de TCP (sliding window).</li>
     <li>Para el diseño de sistemas distribuidos la lección es directa: nunca planificar para operar la red al límite, porque cerca de la saturación la latencia se degrada mucho antes que el throughput.</li>
     <li>Conviene distinguir el delay promedio de todos los paquetes ofrecidos, que diverge cerca de la saturación porque arrastra las retransmisiones, del delay promedio de los paquetes que efectivamente se entregan, que se satura pero no diverge.</li>
   </ul>
@@ -525,7 +525,7 @@ cv.release()</code></pre>
     <ul>
       <li>McCool, Robison, Reinders, <i>Structured Parallel Programming</i> (2012): caps. 1 y 2.</li>
       <li>Ben-Ari, <i>Principles of Concurrent and Distributed Programming</i>, 2da ed. (2006): caps. 2 (abstracción de programación concurrente), 3 (exclusión mutua), 4 (semaforos) y 5 (monitores).</li>
-      <li>Stallings, <i>Data and Computer Communications</i>, 8va ed.: curvas de throughput y delay bajo congestion.</li>
+      <li>Stallings, <i>Data and Computer Communications</i>, 8va ed.: curvas de throughput y delay bajo congestión.</li>
     </ul>
   </details>
 </section>

@@ -60,13 +60,21 @@ Se cerraron los 10 FALTA y la mayoría de los PARCIAL, priorizando por valor par
 un final. Los diagramas nuevos son SVG propios, con los mismos tokens de color
 del resto y verificados contra la diapositiva antes de escribirse.
 
-El apunte pasó de **49 a 101 diagramas propios** y de 1055 a 1306 KB.
+El apunte quedó con **97 diagramas propios** (90 en las unidades y 7 en la
+autoevaluación) y pasó de 1055 a 1306 KB.
+
+Antes de esta auditoría `DIFF-vs-apunte-viejo.md` registraba 49 diagramas. Ese
+número quedó sin poder re-verificarse, porque no se conservó una copia completa
+del archivo previo; el que sí está verificado, contando ocurrencias y no líneas,
+es el 97 de ahora.
 
 Figuras por unidad después del cierre:
 
 ```
-u01 4   u02 8   u03 15  u04 3   u05 7   u06 1   u07 9   u09 6   u10 4
-u11 4   u13 5   u15 1   u16 6   u17 2   u19 3   u20 10  u21 6
+u01  4   u02  8   u03 15   u04  3   u05  7   u06  1
+u07  9   u09  2   u10  4   u11  4   u13  5   u15  1
+u16  6   u17  2   u19  3   u20 10   u21  6
+autoevaluación 7
 ```
 
 ## Errores de contenido encontrados

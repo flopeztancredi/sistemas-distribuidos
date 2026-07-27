@@ -720,7 +720,7 @@ def loop_del_proceso():
 
   <h4 id="u20-orden-total">Orden total</h4>
   <div class="def"><b>Orden total.</b> Todo par de mensajes entregado a los mismos receptores es entregado en el mismo orden por todos esos receptores.</div>
-  <p>No dice cual es el orden correcto: dice que tiene que haber <b>uno solo</b> y que todos lo vean igual. Si el emisor 2 mando m2 después que el emisor 1 mando m1, pero por congestion m2 llega primero a un receptor, entonces el orden acordado es m2 antes que m1 y <b>todos</b> los receptores deben entregar m2 antes que m1.</p>
+  <p>No dice cual es el orden correcto: dice que tiene que haber <b>uno solo</b> y que todos lo vean igual. Si el emisor 2 mando m2 después que el emisor 1 mando m1, pero por congestión m2 llega primero a un receptor, entonces el orden acordado es m2 antes que m1 y <b>todos</b> los receptores deben entregar m2 antes que m1.</p>
   <div class="ej">Caso donde se cumple (la forma típica de responder el final):
     <pre><code>t0: E1 emite M1 a R1 y R2
 t1: E2 emite M2 a R1 y R2
@@ -882,7 +882,7 @@ def al_recibir_mensaje(c, m):
       <line x1="440" y1="131" x2="545" y2="194" stroke="var(--linea)" stroke-dasharray="5 3" marker-end="url(#u20-ar4)"/>
       <text x="480" y="150" fill="currentColor" font-size="10">m2</text>
 
-      <text x="60" y="242" fill="currentColor" font-size="10">lineas llenas: marcadores | m1 (en curso, entra al corte) | m2 (posterior, queda afuera)</text>
+      <text x="60" y="242" fill="currentColor" font-size="10">líneas llenas: marcadores | m1 (en curso, entra al corte) | m2 (posterior, queda afuera)</text>
     </svg>
     <figcaption>P0 inicia: graba S0 y difunde marcadores. P1 y P2, al recibir su primer marcador, graban su estado y propagan. El mensaje de aplicación m1 fue enviado por P2 antes de su marcador, y como el canal es FIFO llega a P0 antes del marcador de P2: P0 ya estaba logueando ese canal, así que m1 entra al corte. El corte final es <code>S0 U S1 U S2 U (P2 -&gt; P0: m1)</code>. En cambio m2 lo genera P1 después de haber grabado su estado, y llega a P2 después del marcador de P1, así que P2 ya cerro ese canal: m2 se procesa normalmente pero no forma parte del corte.</figcaption>
   </figure>

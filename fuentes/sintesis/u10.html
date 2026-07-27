@@ -210,7 +210,7 @@
         <text x="620" y="204">Output R</text>
         <text x="155" y="110" font-size="10">forks, asigna tareas</text>
         <text x="415" y="20" font-size="10">partición hash(key) mod R</text>
-        <text x="415" y="285" font-size="10">lectura via RPC del disco local</text>
+        <text x="415" y="285" font-size="10">lectura vía RPC del disco local</text>
       </g>
     </svg>
     <figcaption>Arquitectura MapReduce: el master forkea mappers (uno por chunk) y R reducers. Cada mapper escribe archivos intermedios (IF) particionados por key; cada reducer lee su partición de todos los IF, ordena, agrupa y escribe su output file.</figcaption>

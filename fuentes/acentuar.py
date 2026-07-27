@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Agrega tildes y enies al texto visible de los fragmentos del apunte.
 
-Opera SOLO sobre el texto fuera de etiquetas, y saltea por completo el
-contenido de <pre>, <code> y <svg> (identificadores y pseudocodigo van sin
-acentos). No toca atributos.
+Opera SOLO sobre el texto fuera de etiquetas: saltea <pre> y <code>
+(pseudocodigo e identificadores van sin acentos) y no toca atributos.
+El texto de las etiquetas de los <svg> SI se acentua: es prosa, y saltear
+los svg fue lo que dejo todos los diagramas escritos sin tildes.
 
 Uso: acentuar.py archivo.html [...]      (edita en el lugar)
 """
@@ -13,6 +14,10 @@ from pathlib import Path
 
 # --- 1. palabras sin ambiguedad: una sola forma correcta ---------------------
 PALABRAS = {
+    # -stion no lo cubre la regla de sufijos (-cion, -sion, -xion)
+    "congestion": "congestión", "gestion": "gestión",
+    "cuestion": "cuestión", "digestion": "digestión",
+    "sugestion": "sugestión", "combustion": "combustión",
     # vocabulario tecnico de la materia que faltaba en la primera pasada
     "patron": "patrón", "patrones": "patrones",
     "anonima": "anónima", "anonimo": "anónimo",
@@ -182,7 +187,11 @@ INTERROG = {
     "cuanta": "cuánta", "cuantas": "cuántas", "por que": "por qué",
 }
 
-PROTEGIDO = re.compile(r"(<pre\b.*?</pre>|<code\b.*?</code>|<svg\b.*?</svg>|<[^>]+>)",
+# Se protege el codigo y TODOS los tags (o sea, los valores de atributos).
+# Los bloques <svg> NO se protegen enteros a proposito: el texto de las
+# etiquetas de un diagrama es prosa y tambien lleva tildes. Saltearlos fue
+# el punto ciego que dejo los diagramas escritos sin acentos.
+PROTEGIDO = re.compile(r"(<pre\b.*?</pre>|<code\b.*?</code>|<[^>]+>)",
                        re.S | re.I)
 
 

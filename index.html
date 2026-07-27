@@ -2027,7 +2027,7 @@ cv.release()</code></pre>
     </tbody>
   </table></div>
   <div class="callout warning">TCP es orientado a <b>streams</b>, no a mensajes: garantiza que los bytes llegan completos y en orden, pero no respeta los límites de los <code>send()</code>. Un <code>recv()</code> puede devolver medio mensaje o dos mensajes juntos (short reads): delimitar donde empieza y termina cada mensaje (framing) es responsabilidad del programador. Este detalle se pregunta seguido cuando piden comparar TCP con abstracciones de mensajes discretos como los MOMs.</div>
-  <div class="callout exam">Preguntado en finales, de forma recurrente: "Suponga que debe implementar un protocolo de health-check de server a clientes mediante sockets. ¿Qué condiciones se deberian cumplir para que sea más conveniente utilizar UDP frente a TCP?" (2024-07, 2024-12). La respuesta esperada: si los mensajes son periódicos y toleran pérdida (basta que llegue alguno para dar por vivo al proceso), UDP conviene porque no paga conexión ni retransmisiones; TCP es contraproducente porque retransmite heartbeats viejos antes de entregar el nuevo, agregando latencia y hasta falsos negativos bajo congestion. Además UDP es más liviano si hay que chequear muchos procesos.</div>
+  <div class="callout exam">Preguntado en finales, de forma recurrente: "Suponga que debe implementar un protocolo de health-check de server a clientes mediante sockets. ¿Qué condiciones se deberian cumplir para que sea más conveniente utilizar UDP frente a TCP?" (2024-07, 2024-12). La respuesta esperada: si los mensajes son periódicos y toleran pérdida (basta que llegue alguno para dar por vivo al proceso), UDP conviene porque no paga conexión ni retransmisiones; TCP es contraproducente porque retransmite heartbeats viejos antes de entregar el nuevo, agregando latencia y hasta falsos negativos bajo congestión. Además UDP es más liviano si hay que chequear muchos procesos.</div>
   <div class="callout exam">También preguntado: "Indique ventajas y desventajas de utilizar comunicación por sockets TCP frente al pasaje de mensajes por colas mediante MOM" (2025-02, 2025-07). Desde esta unidad aporta: TCP da entrega y orden solo mientras la conexión vive, es stream (framing manual) y es liviano y de baja latencia; las garantías ante desconexión y los mensajes discretos los agrega el MOM (ver unidad 5).</div>
 
   <h3 id="u02-sockets-api">Programación con sockets</h3>
@@ -2146,8 +2146,8 @@ cv.release()</code></pre>
 
   <div class="callout exam">Relacionado en finales: "¿Cómo se garantiza que un algoritmo o protocolo sea sincrónico en el contexto de sistemas distribuidos?" (2025-07). La noción completa de sistema sincrónico (cotas conocidas de cómputo y comunicación) se desarrolla en la unidad de tiempo y sincronismo; desde aca conviene tener claro que sincrónico implica poder esperar la respuesta con un límite de tiempo conocido.</div>
 
-  <h3 id="u02-congestion">Congestion de red</h3>
-  <p>La red tiene capacidad finita. A medida que crece la carga ofrecida, el throughput crece linealmente hasta acercarse a la capacidad; ahí los buffers de los routers se llenan, aparecen retransmisiones y, sin control, el throughput <b>colapsa</b> (congestion collapse): más tráfico ofrecido resulta en menos datos útiles entregados. El delay se comporta peor: crece de forma explosiva cuando la utilización se acerca al 100%.</p>
+  <h3 id="u02-congestion">Congestión de red</h3>
+  <p>La red tiene capacidad finita. A medida que crece la carga ofrecida, el throughput crece linealmente hasta acercarse a la capacidad; ahí los buffers de los routers se llenan, aparecen retransmisiones y, sin control, el throughput <b>colapsa</b> (congestión collapse): más tráfico ofrecido resulta en menos datos útiles entregados. El delay se comporta peor: crece de forma explosiva cuando la utilización se acerca al 100%.</p>
 
   <figure class="diag">
     <svg viewBox="0 0 420 260" role="img" aria-label="Curva de throughput normalizado contra carga, con tres zonas: no congestion, moderate congestion y severe congestion, y los puntos A y B marcando los bordes de la zona de congestion moderada">
@@ -2160,9 +2160,9 @@ cv.release()</code></pre>
       <circle cx="180" cy="92" r="3.5" fill="currentColor" stroke="none" />
       <circle cx="230" cy="60" r="3.5" fill="currentColor" stroke="none" />
       <g fill="currentColor" stroke="none" font-size="11">
-        <text x="105" y="35" text-anchor="middle">No congestion</text>
+        <text x="105" y="35" text-anchor="middle">No congestión</text>
         <text x="205" y="35" text-anchor="middle">Moderate</text>
-        <text x="310" y="35" text-anchor="middle">Severe congestion</text>
+        <text x="310" y="35" text-anchor="middle">Severe congestión</text>
         <text x="188" y="88" text-anchor="start">A</text>
         <text x="238" y="56" text-anchor="start">B</text>
         <text x="210" y="238" text-anchor="middle">Load</text>
@@ -2190,7 +2190,7 @@ cv.release()</code></pre>
   </figure>
 
   <ul class="study-list">
-    <li><b>Throttling:</b> limitar deliberadamente la tasa de envio para operar antes del punto de colapso; es la base del control de congestion de TCP (sliding window).</li>
+    <li><b>Throttling:</b> limitar deliberadamente la tasa de envio para operar antes del punto de colapso; es la base del control de congestión de TCP (sliding window).</li>
     <li>Para el diseño de sistemas distribuidos la lección es directa: nunca planificar para operar la red al límite, porque cerca de la saturación la latencia se degrada mucho antes que el throughput.</li>
     <li>Conviene distinguir el delay promedio de todos los paquetes ofrecidos, que diverge cerca de la saturación porque arrastra las retransmisiones, del delay promedio de los paquetes que efectivamente se entregan, que se satura pero no diverge.</li>
   </ul>
@@ -2199,7 +2199,7 @@ cv.release()</code></pre>
     <ul>
       <li>McCool, Robison, Reinders, <i>Structured Parallel Programming</i> (2012): caps. 1 y 2.</li>
       <li>Ben-Ari, <i>Principles of Concurrent and Distributed Programming</i>, 2da ed. (2006): caps. 2 (abstracción de programación concurrente), 3 (exclusión mutua), 4 (semaforos) y 5 (monitores).</li>
-      <li>Stallings, <i>Data and Computer Communications</i>, 8va ed.: curvas de throughput y delay bajo congestion.</li>
+      <li>Stallings, <i>Data and Computer Communications</i>, 8va ed.: curvas de throughput y delay bajo congestión.</li>
     </ul>
   </div></details>
 
@@ -5624,7 +5624,7 @@ for serial in sub1.get_devices():
         <text x="620" y="204">Output R</text>
         <text x="155" y="110" font-size="10">forks, asigna tareas</text>
         <text x="415" y="20" font-size="10">partición hash(key) mod R</text>
-        <text x="415" y="285" font-size="10">lectura via RPC del disco local</text>
+        <text x="415" y="285" font-size="10">lectura vía RPC del disco local</text>
       </g>
     </svg>
     <figcaption>Arquitectura MapReduce: el master forkea mappers (uno por chunk) y R reducers. Cada mapper escribe archivos intermedios (IF) particionados por key; cada reducer lee su partición de todos los IF, ordena, agrupa y escribe su output file.</figcaption>
@@ -6067,7 +6067,7 @@ stats.addSink(sink)</code></pre>
       <g fill="var(--acc2)" stroke="none" font-size="8">
         <text x="270" y="65" text-anchor="middle">HTTP/HTTPS/TCP/SSL</text>
         <text x="500" y="70" text-anchor="middle">API/CLI</text>
-        <text x="435" y="112" text-anchor="middle">metricas</text>
+        <text x="435" y="112" text-anchor="middle">métricas</text>
         <text x="230" y="308" text-anchor="middle">scale out/in</text>
       </g>
     </svg>
@@ -6434,16 +6434,16 @@ stats.addSink(sink)</code></pre>
       <text x="395" y="29" text-anchor="middle" fill="currentColor" font-size="11">Clientes</text>
       <rect x="20" y="80" width="110" height="44" rx="6" fill="none" stroke="var(--acc)" stroke-width="2"/>
       <text x="75" y="99" text-anchor="middle" fill="currentColor" font-size="12">Leader</text>
-      <text x="75" y="115" text-anchor="middle" fill="currentColor" font-size="12">Replica</text>
+      <text x="75" y="115" text-anchor="middle" fill="currentColor" font-size="12">Réplica</text>
       <rect x="340" y="80" width="110" height="44" rx="6" fill="none" stroke="var(--acc)" stroke-width="2"/>
       <text x="395" y="99" text-anchor="middle" fill="currentColor" font-size="12">Leader</text>
-      <text x="395" y="115" text-anchor="middle" fill="currentColor" font-size="12">Replica</text>
+      <text x="395" y="115" text-anchor="middle" fill="currentColor" font-size="12">Réplica</text>
       <rect x="20" y="175" width="110" height="44" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
       <text x="75" y="194" text-anchor="middle" fill="currentColor" font-size="12">Follower</text>
-      <text x="75" y="210" text-anchor="middle" fill="currentColor" font-size="12">Replica</text>
+      <text x="75" y="210" text-anchor="middle" fill="currentColor" font-size="12">Réplica</text>
       <rect x="340" y="175" width="110" height="44" rx="6" fill="none" stroke="var(--acc2)" stroke-width="1.5"/>
       <text x="395" y="194" text-anchor="middle" fill="currentColor" font-size="12">Follower</text>
-      <text x="395" y="210" text-anchor="middle" fill="currentColor" font-size="12">Replica</text>
+      <text x="395" y="210" text-anchor="middle" fill="currentColor" font-size="12">Réplica</text>
       <line x1="75" y1="40" x2="75" y2="77" stroke="var(--linea)" stroke-width="1.5"/>
       <polygon points="75,78 70,68 80,68" fill="var(--linea)"/>
       <line x1="395" y1="40" x2="395" y2="77" stroke="var(--linea)" stroke-width="1.5"/>
@@ -7382,7 +7382,7 @@ bytes_dia = fotos_dia * 0.5 MB                    # ~18 TB por dia
     <svg viewBox="0 0 640 110" role="img" aria-label="Cadena causal fallo, error, averia">
       <rect x="10" y="30" width="170" height="50" rx="8" fill="none" stroke="var(--acc)"/>
       <text x="95" y="50" text-anchor="middle" fill="currentColor" font-size="13">Fallo (fault)</text>
-      <text x="95" y="68" text-anchor="middle" fill="currentColor" font-size="11">condicion no cumplida</text>
+      <text x="95" y="68" text-anchor="middle" fill="currentColor" font-size="11">condición no cumplida</text>
       <line x1="180" y1="55" x2="230" y2="55" stroke="var(--linea)"/>
       <polygon points="230,55 220,50 220,60" fill="var(--linea)"/>
       <text x="205" y="45" text-anchor="middle" fill="currentColor" font-size="11">causa</text>
@@ -7738,7 +7738,7 @@ for request in cola:
       <polygon points="118,185 128,180 128,190" fill="var(--linea)"/>
       <line x1="90" y1="157" x2="90" y2="94" stroke="var(--linea)"/>
       <polygon points="90,88 85,98 95,98" fill="var(--linea)"/>
-      <text x="195" y="45" text-anchor="middle" fill="currentColor" font-size="11">eleccion(45)</text>
+      <text x="195" y="45" text-anchor="middle" fill="currentColor" font-size="11">elección(45)</text>
       <text x="195" y="222" text-anchor="middle" fill="currentColor" font-size="11">el mensaje viaja siempre en el mismo sentido</text>
       <text x="345" y="125" text-anchor="middle" fill="currentColor" font-size="11">48</text>
     </svg>
@@ -8909,7 +8909,7 @@ def loop_del_proceso():
 
   <h4 id="u20-orden-total">Orden total</h4>
   <div class="callout"><b>Orden total.</b> Todo par de mensajes entregado a los mismos receptores es entregado en el mismo orden por todos esos receptores.</div>
-  <p>No dice cual es el orden correcto: dice que tiene que haber <b>uno solo</b> y que todos lo vean igual. Si el emisor 2 mando m2 después que el emisor 1 mando m1, pero por congestion m2 llega primero a un receptor, entonces el orden acordado es m2 antes que m1 y <b>todos</b> los receptores deben entregar m2 antes que m1.</p>
+  <p>No dice cual es el orden correcto: dice que tiene que haber <b>uno solo</b> y que todos lo vean igual. Si el emisor 2 mando m2 después que el emisor 1 mando m1, pero por congestión m2 llega primero a un receptor, entonces el orden acordado es m2 antes que m1 y <b>todos</b> los receptores deben entregar m2 antes que m1.</p>
   <div class="callout example">Caso donde se cumple (la forma típica de responder el final):
     <pre><code>t0: E1 emite M1 a R1 y R2
 t1: E2 emite M2 a R1 y R2
@@ -9071,7 +9071,7 @@ def al_recibir_mensaje(c, m):
       <line x1="440" y1="131" x2="545" y2="194" stroke="var(--linea)" stroke-dasharray="5 3" marker-end="url(#u20-ar4)"/>
       <text x="480" y="150" fill="currentColor" font-size="10">m2</text>
 
-      <text x="60" y="242" fill="currentColor" font-size="10">lineas llenas: marcadores | m1 (en curso, entra al corte) | m2 (posterior, queda afuera)</text>
+      <text x="60" y="242" fill="currentColor" font-size="10">líneas llenas: marcadores | m1 (en curso, entra al corte) | m2 (posterior, queda afuera)</text>
     </svg>
     <figcaption>P0 inicia: graba S0 y difunde marcadores. P1 y P2, al recibir su primer marcador, graban su estado y propagan. El mensaje de aplicación m1 fue enviado por P2 antes de su marcador, y como el canal es FIFO llega a P0 antes del marcador de P2: P0 ya estaba logueando ese canal, así que m1 entra al corte. El corte final es <code>S0 U S1 U S2 U (P2 -&gt; P0: m1)</code>. En cambio m2 lo genera P1 después de haber grabado su estado, y llega a P2 después del marcador de P1, así que P2 ya cerro ese canal: m2 se procesa normalmente pero no forma parte del corte.</figcaption>
   </figure>
@@ -9178,7 +9178,7 @@ def al_recibir_mensaje(c, m):
       <text x="330" y="38" fill="currentColor" font-size="10" text-anchor="middle">Red corporativa</text>
       <!-- separacion IT / OT -->
       <line x1="10" y1="84" x2="650" y2="84" stroke="var(--acc2)" stroke-width="1.2" stroke-dasharray="5 4"/>
-      <text x="648" y="80" fill="currentColor" font-size="10" text-anchor="end">IT: sin garantias temporales</text>
+      <text x="648" y="80" fill="currentColor" font-size="10" text-anchor="end">IT: sin garantías temporales</text>
       <text x="648" y="98" fill="currentColor" font-size="10" text-anchor="end">OT: piso de planta, RT</text>
       <!-- gateway -->
       <line x1="330" y1="45" x2="330" y2="108" stroke="var(--linea)" stroke-width="1.5"/>
@@ -9358,7 +9358,7 @@ def al_recibir_mensaje(c, m):
       <text x="510" y="48" fill="currentColor" font-size="10" text-anchor="middle">e2_resp</text>
       <!-- deadline del primer ciclo -->
       <line x1="330" y1="36" x2="330" y2="168" stroke="var(--acc2)" stroke-width="1.3" stroke-dasharray="4 3"/>
-      <text x="336" y="176" fill="currentColor" font-size="10">deadline de e1: e1_resp tiene que caer antes de esta linea</text>
+      <text x="336" y="176" fill="currentColor" font-size="10">deadline de e1: e1_resp tiene que caer antes de esta línea</text>
       <line x1="190" y1="172" x2="300" y2="172" stroke="var(--linea)" stroke-width="1"/>
       <line x1="190" y1="166" x2="190" y2="178" stroke="var(--linea)" stroke-width="1"/>
       <line x1="300" y1="166" x2="300" y2="178" stroke="var(--linea)" stroke-width="1"/>
@@ -9494,7 +9494,7 @@ def al_recibir_mensaje(c, m):
       <line x1="545" y1="255" x2="95" y2="255" stroke="currentColor" stroke-width="1.2"/>
       <line x1="95" y1="255" x2="95" y2="204" stroke="currentColor" stroke-width="1.2"/>
       <polygon points="95,204 91,212 99,212" fill="currentColor"/>
-      <text x="320" y="270" fill="currentColor" font-size="10" text-anchor="middle">Realimentacion (medicion de la salida)</text>
+      <text x="320" y="270" fill="currentColor" font-size="10" text-anchor="middle">Realimentación (medición de la salida)</text>
     </svg>
     <figcaption>Lazo abierto: la salida no influye en el control. Lazo cerrado: la salida medida se resta de la referencia y el error gobierna la actuación.</figcaption>
   </figure>
