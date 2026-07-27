@@ -6,21 +6,28 @@ auditoría contra finales.
 
 ## Números
 
+La columna "Nuevo" está remedida después de la auditoría de figuras, que agregó
+diagramas y texto. Método: palabras de texto visible con `html.parser`
+descartando `script`, `style` y `svg`; el resto contando ocurrencias del tag.
+
 | Métrica | Viejo | Nuevo |
 |---|---:|---:|
-| Palabras de texto | 33.050 | 115.031 |
-| Tamaño del archivo | 5.642 KB | 949 KB |
+| Palabras de texto | 33.050 | 126.460 |
+| Tamaño del archivo | 5.642 KB | 1.306 KB |
 | Secciones de primer nivel | 21 | 19 |
 | Subsecciones (h3) | 156 | 166 |
-| Sub-subsecciones (h4) | 85 | 201 |
-| Diagramas SVG | 4 | 48 |
+| Sub-subsecciones (h4) | 85 | 207 |
+| Diagramas SVG | 4 | 101 |
 | Capturas de filminas (JPEG embebido) | 70 | 0 |
-| Tablas | 22 | 63 |
-| Bloques desplegables | 109 | 86 |
+| Tablas | 22 | 67 |
+| Bloques desplegables | 109 | 88 |
 
-El nuevo tiene 3,5 veces más texto en un archivo 6 veces más liviano: el peso
+El nuevo tiene casi 4 veces más texto en un archivo 4 veces más liviano: el peso
 del viejo son las 70 capturas de filminas en JPEG. El nuevo usa diagramas SVG
 propios, que además se adaptan al tema claro u oscuro y escalan sin pixelarse.
+
+Los números del viejo no se pueden re-verificar: no se conservó una copia
+completa de ese archivo.
 
 ## Contenido que el viejo no tiene
 
@@ -40,8 +47,10 @@ Verificado buscando el término y su contexto en ambos documentos:
   reales 2022-2025, con la fecha del examen donde apareció cada una, y 33 de
   ellas son ejercicios prácticos resueltos con desarrollo completo (cálculos de
   volumen con unidades, endpoints, pseudocódigo, arquitecturas).
-- **70 marcas de "tomado en finales"** repartidas por el cuerpo del apunte, con
-  la forma textual de la pregunta y el año. El viejo no las tiene.
+- **75 marcas de "tomado en finales"** repartidas por el cuerpo del apunte, con
+  la forma textual de la pregunta. 66 traen además la fecha del examen; las 9
+  restantes son preguntas recurrentes que se citan sin atarlas a una fecha
+  puntual. El viejo no las tiene.
 
 ## Contenido del viejo que el nuevo también cubre
 

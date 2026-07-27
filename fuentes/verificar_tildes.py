@@ -26,7 +26,14 @@ def ids_y_hrefs(s: str):
 
 
 def main() -> int:
+    if len(sys.argv) < 3:
+        print(__doc__.strip().splitlines()[2])
+        print("\nEjemplo: verificar_tildes.py /tmp/backup-fragmentos redes/*.html")
+        return 2
     backup = Path(sys.argv[1])
+    if not backup.is_dir():
+        print(f"!! {backup} no es un directorio de backup")
+        return 2
     fallas = 0
     for arg in sys.argv[2:]:
         nuevo_p = Path(arg)
