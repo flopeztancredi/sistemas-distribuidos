@@ -13529,5 +13529,629 @@ P1: f  recibe de e        max([2,1,0],[0,0,1]) + P1 = [3,1,1]   ✓</code></pre>
       URL.revokeObjectURL(url);
     });
   </script>
+<!-- ============================================================================
+     Sincronizacion de notas y resaltados entre dispositivos.
+
+     El sitio es estatico: no hay servidor propio donde guardar nada. Cada
+     lector conecta SU token de GitHub y sus datos viajan en UN gist secreto de
+     SU cuenta. No hay estado compartido: nadie ve lo de nadie, y el que no
+     conecta nada sigue igual que siempre, con todo en localStorage.
+
+     Dos limitaciones que el dialogo dice en pantalla, porque son reales:
+     un token con permiso de gists alcanza a todos los gists de esa cuenta, y
+     un gist "secreto" es no listado, no privado.
+
+     Se sincroniza el contenido (resaltados, notas, temas marcados), no el
+     estado de la interfaz: el tema claro u oscuro y los paneles plegados son
+     decisiones de cada dispositivo.
+============================================================================ -->
+<style>
+  .sync-dialog {
+    width: min(560px, calc(100vw - 32px));
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    box-shadow: var(--shadow);
+  }
+  .sync-dialog::backdrop { background: rgba(10, 12, 18, .45); }
+  .sync-box { padding: 22px 24px 20px; }
+  .sync-h2 { margin: 0 0 6px; font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
+  .sync-box p { margin: 0 0 14px; color: var(--muted); font-size: 14px; line-height: 1.55; }
+  .sync-box p a { color: var(--accent-ink); }
+  .sync-box label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 700; }
+  .sync-box input[type="password"] {
+    width: 100%;
+    padding: 9px 11px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--bg);
+    color: var(--ink);
+    font: inherit;
+    font-size: 14px;
+  }
+  .sync-box input[type="password"]:focus { border-color: var(--accent); outline: none; }
+  .sync-fila { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 15px; }
+  .sync-btn {
+    padding: 8px 15px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .sync-btn:hover:not(:disabled) { border-color: var(--accent); }
+  .sync-btn:disabled { opacity: .5; cursor: default; }
+  .sync-btn.primario { border-color: var(--accent); background: var(--accent-2); color: var(--accent-ink); font-weight: 700; }
+  .sync-btn.suelto { margin-left: auto; }
+  .sync-estado {
+    margin-top: 15px;
+    padding: 11px 13px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+  .sync-estado[hidden] { display: none; }
+  .sync-estado b { font-weight: 700; }
+  .sync-estado ul { margin: 7px 0 0; padding-left: 18px; }
+  .sync-estado li { margin-bottom: 2px; }
+  /* Con respaldo: no todos los apuntes definen estos tokens, y un var()
+     sin definir no falla, computa a vacio y deja el elemento invisible. */
+  .sync-estado.mal { background: var(--danger-bg, #fdebf0); color: var(--danger, #a63a56); }
+  .sync-nota { margin-top: 15px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+  .sync-sep { margin: 18px 0 0; padding-top: 16px; border-top: 1px solid var(--line); }
+  .sync-punto {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--ok, #35704a);
+    flex: none;
+  }
+  .sync-punto.pendiente { background: var(--warm, #96591c); }
+  .sync-punto.error { background: var(--danger, #a63a56); }
+  .sync-aviso {
+    position: fixed;
+    left: 50%;
+    bottom: 22px;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 16px;
+    transform: translateX(-50%);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    font-size: 14px;
+  }
+  .sync-aviso[hidden] { display: none; }
+  @media print { .sync-aviso, .sync-dialog { display: none !important; } }
+</style>
+
+<dialog class="sync-dialog" id="sync-dialog" aria-labelledby="sync-titulo">
+  <div class="sync-box">
+    <p class="sync-h2" id="sync-titulo">Sincronizar entre dispositivos</p>
+    <p>
+      Tus resaltados, tus notas y los temas que marcaste viven en este navegador.
+      Para tenerlos en la compu y en el celular, se guardan en un
+      <b>gist secreto de tu propia cuenta de GitHub</b>. No hay un servidor de
+      este sitio en el medio: cada lector usa su cuenta y nadie ve lo de nadie.
+    </p>
+
+    <div id="sync-alta">
+      <label for="sync-token">Token de GitHub</label>
+      <input type="password" id="sync-token" autocomplete="off" spellcheck="false"
+             placeholder="github_pat_...">
+      <p class="sync-nota">
+        Cre&aacute; uno en
+        <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">
+          Settings, Developer settings, Fine-grained tokens</a>, con el permiso
+        <b>Gists: Read and write</b> de Account permissions y nada m&aacute;s.
+        Ten&eacute; en cuenta que ese permiso alcanza a todos los gists de esa
+        cuenta, no hay forma de limitarlo a uno solo. Y un gist secreto es
+        <b>no listado, no privado</b>: cualquiera con la URL lo lee, aunque el
+        identificador sea impredecible. Si algo de eso te incomoda, us&aacute;
+        el archivo de m&aacute;s abajo, que no necesita ninguna cuenta.
+      </p>
+      <div class="sync-fila">
+        <button class="sync-btn primario" id="sync-conectar" type="button">Conectar</button>
+      </div>
+    </div>
+
+    <div id="sync-conectado" hidden>
+      <div class="sync-fila">
+        <button class="sync-btn primario" id="sync-ahora" type="button">Sincronizar ahora</button>
+        <button class="sync-btn" id="sync-deshacer" type="button" hidden>Deshacer lo &uacute;ltimo</button>
+        <button class="sync-btn suelto" id="sync-desconectar" type="button">Desconectar</button>
+      </div>
+      <p class="sync-nota" id="sync-donde"></p>
+    </div>
+
+    <div class="sync-estado" id="sync-estado" hidden></div>
+
+    <div class="sync-sep">
+      <label>Sin cuenta: copia en un archivo</label>
+      <p class="sync-nota">
+        Baja todo a un JSON y lo levanta en el otro dispositivo. No es
+        autom&aacute;tico, pero es el respaldo que hoy no ten&eacute;s: si
+        borr&aacute;s los datos del sitio, se pierde todo.
+      </p>
+      <div class="sync-fila">
+        <button class="sync-btn" id="sync-bajar" type="button">Bajar copia</button>
+        <button class="sync-btn" id="sync-subir" type="button">Cargar copia</button>
+        <button class="sync-btn suelto" id="sync-cerrar" type="button">Cerrar</button>
+      </div>
+      <input type="file" id="sync-archivo" accept="application/json,.json" hidden>
+    </div>
+  </div>
+</dialog>
+
+<div class="sync-aviso" id="sync-aviso" hidden>
+  <span id="sync-aviso-txt"></span>
+  <button class="sync-btn" id="sync-aviso-btn" type="button">Recargar</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var API = 'https://api.github.com';
+  var ARCHIVO = 'apuntes-fiuba.json';
+  var MARCA = 'apuntes-fiuba-sync';
+
+  var K_TOKEN = 'fiuba-sync-token';
+  var K_GIST = 'fiuba-sync-gist';
+  var K_MTIME = 'fiuba-sync-mtimes';
+  var K_UNDO = 'fiuba-sync-undo';
+  var K_VISTO = 'fiuba-sync-visto';
+
+  // Contenido, no interfaz. La regla es por sufijo y no por prefijo a
+  // proposito: cuando entre una materia nueva con su propio prefijo, entra
+  // sola sin tocar este archivo.
+  var SINCRONIZABLE = /-(highlights|study-notes|prepared-topics)-v1$/;
+
+  var MATERIAS = {
+    aa: 'Aprendizaje Automático', sd: 'Sistemas Distribuidos',
+    rd: 'Redes', ebt: 'Empresas de Base Tecnológica'
+  };
+  var TIPOS = {
+    'highlights': 'resaltados', 'study-notes': 'notas', 'prepared-topics': 'temas marcados'
+  };
+
+  function legible(clave) {
+    var m = clave.match(/^([a-z0-9]+)-(highlights|study-notes|prepared-topics)-v1$/);
+    if (!m) return clave;
+    return (TIPOS[m[2]] || m[2]) + ' de ' + (MATERIAS[m[1]] || m[1]);
+  }
+
+  // ---- almacenamiento local ------------------------------------------------
+
+  // Se envuelve setItem para saber CUANDO cambio cada clave. Sin marca de
+  // tiempo por clave no hay forma de decidir cual de dos versiones es la
+  // buena, y la fusion se vuelve adivinanza.
+  var setOriginal = Storage.prototype.setItem;
+  var removeOriginal = Storage.prototype.removeItem;
+
+  function leerMtimes() {
+    try { return JSON.parse(localStorage.getItem(K_MTIME) || '{}'); } catch (e) { return {}; }
+  }
+  function marcar(clave, cuando) {
+    var m = leerMtimes();
+    m[clave] = cuando || Date.now();
+    setOriginal.call(localStorage, K_MTIME, JSON.stringify(m));
+  }
+
+  Storage.prototype.setItem = function (clave, valor) {
+    setOriginal.call(this, clave, valor);
+    if (this === window.localStorage && SINCRONIZABLE.test(clave)) {
+      marcar(clave);
+      programarEnvio();
+    }
+  };
+  Storage.prototype.removeItem = function (clave) {
+    removeOriginal.call(this, clave);
+    if (this === window.localStorage && SINCRONIZABLE.test(clave)) {
+      marcar(clave);
+      programarEnvio();
+    }
+  };
+
+  function snapshot() {
+    var m = leerMtimes(), datos = {};
+    for (var i = 0; i < localStorage.length; i++) {
+      var clave = localStorage.key(i);
+      if (!SINCRONIZABLE.test(clave)) continue;
+      datos[clave] = { v: localStorage.getItem(clave), t: m[clave] || 0 };
+    }
+    return datos;
+  }
+
+  function aplicar(clave, entrada) {
+    setOriginal.call(localStorage, clave, entrada.v);
+    marcar(clave, entrada.t);
+  }
+
+  // ---- API de GitHub -------------------------------------------------------
+
+  function token() { return localStorage.getItem(K_TOKEN) || ''; }
+  function gistId() { return localStorage.getItem(K_GIST) || ''; }
+
+  function pedir(ruta, opciones) {
+    opciones = opciones || {};
+    opciones.headers = Object.assign({
+      'Authorization': 'Bearer ' + token(),
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    }, opciones.headers || {});
+    return fetch(API + ruta, opciones).then(function (r) {
+      if (r.status === 401) throw new Error('El token no sirve o fue revocado.');
+      if (r.status === 403) throw new Error('GitHub rechazo el pedido: al token le falta el permiso Gists, o te pasaste del limite de pedidos.');
+      if (r.status === 404) throw new Error('No se encontro el gist. Puede que lo hayas borrado desde GitHub.');
+      if (!r.ok) throw new Error('GitHub respondio ' + r.status + '.');
+      return r.json();
+    });
+  }
+
+  function buscarGist() {
+    return pedir('/gists?per_page=100').then(function (lista) {
+      for (var i = 0; i < lista.length; i++) {
+        if (lista[i].description === MARCA && lista[i].files && lista[i].files[ARCHIVO]) {
+          return lista[i].id;
+        }
+      }
+      return '';
+    });
+  }
+
+  function cuerpo(datos) {
+    var archivos = {};
+    archivos[ARCHIVO] = {
+      content: JSON.stringify({ schema: 1, updatedAt: new Date().toISOString(), datos: datos }, null, 1)
+    };
+    return JSON.stringify({ description: MARCA, public: false, files: archivos });
+  }
+
+  function crearGist(datos) {
+    return pedir('/gists', { method: 'POST', body: cuerpo(datos) }).then(function (g) {
+      setOriginal.call(localStorage, K_GIST, g.id);
+      return g.id;
+    });
+  }
+
+  function escribirGist(id, datos) {
+    return pedir('/gists/' + id, { method: 'PATCH', body: cuerpo(datos) });
+  }
+
+  function leerGist(id) {
+    return pedir('/gists/' + id).then(function (g) {
+      var f = g.files && g.files[ARCHIVO];
+      if (!f) return {};
+      // Arriba de 1 MB la API devuelve el contenido cortado y hay que ir al raw.
+      var texto = f.truncated
+        ? fetch(f.raw_url).then(function (r) { return r.text(); })
+        : Promise.resolve(f.content);
+      return Promise.resolve(texto).then(function (t) {
+        try {
+          var p = JSON.parse(t);
+          return (p && p.datos) || {};
+        } catch (e) { return {}; }
+      });
+    });
+  }
+
+  // ---- fusion --------------------------------------------------------------
+
+  // Gana la version mas nueva, clave por clave. Antes de pisar nada local se
+  // guarda una copia en K_UNDO, asi "Deshacer" siempre tiene a que volver.
+  function fusionar(local, remoto) {
+    var claves = {}, k;
+    for (k in local) claves[k] = 1;
+    for (k in remoto) claves[k] = 1;
+
+    var salida = {}, traidos = [], enviados = [];
+    for (k in claves) {
+      var l = local[k], r = remoto[k];
+      if (!r) { salida[k] = l; enviados.push(k); continue; }
+      if (!l) { salida[k] = r; traidos.push(k); continue; }
+      if (l.v === r.v) { salida[k] = (l.t >= r.t) ? l : r; continue; }
+      if (l.t >= r.t) { salida[k] = l; enviados.push(k); }
+      else { salida[k] = r; traidos.push(k); }
+    }
+    return { salida: salida, traidos: traidos, enviados: enviados };
+  }
+
+  function hayContenido(datos) {
+    for (var k in datos) {
+      var v = datos[k].v;
+      if (v && v !== '[]' && v !== '""' && v.trim() !== '') return true;
+    }
+    return false;
+  }
+
+  // ---- sincronizacion ------------------------------------------------------
+
+  var sincronizando = false;
+  var temporizador = null;
+
+  function programarEnvio() {
+    if (!token()) return;
+    clearTimeout(temporizador);
+    temporizador = setTimeout(function () { sincronizar(true); }, 4000);
+  }
+
+  function sincronizar(silencioso) {
+    if (!token() || sincronizando) return Promise.resolve();
+    sincronizando = true;
+    clearTimeout(temporizador);
+    if (!silencioso) estado('Sincronizando...');
+    pintarBoton('trabajando');
+
+    var local = snapshot();
+
+    return Promise.resolve(gistId() || buscarGist())
+      .then(function (id) {
+        if (!id) return crearGist(local).then(function () { return null; });
+        setOriginal.call(localStorage, K_GIST, id);
+        return leerGist(id).then(function (remoto) { return { id: id, remoto: remoto }; });
+      })
+      .then(function (paso) {
+        if (!paso) {
+          for (var k in local) marcar(k, local[k].t || Date.now());
+          return { traidos: [], enviados: Object.keys(local), nuevo: true };
+        }
+
+        // Primera vez en este dispositivo y hay contenido de los dos lados:
+        // no se elige solo, se pregunta. Es el unico momento donde no hay
+        // marcas de tiempo locales para comparar.
+        var sinMarcas = Object.keys(leerMtimes()).length === 0;
+        if (sinMarcas && hayContenido(local) && hayContenido(paso.remoto)) {
+          var quedarse = window.confirm(
+            'Este dispositivo ya tiene notas o resaltados, y en tu gist hay otros.\n\n' +
+            'Aceptar: traer lo del gist y reemplazar lo de este dispositivo.\n' +
+            'Cancelar: subir lo de este dispositivo y reemplazar lo del gist.');
+          var elegido = quedarse ? paso.remoto : local;
+          var cuales = Object.keys(elegido);
+          guardarUndo(local);
+          if (quedarse) for (var c = 0; c < cuales.length; c++) aplicar(cuales[c], elegido[cuales[c]]);
+          else for (var d = 0; d < cuales.length; d++) marcar(cuales[d], Date.now());
+          return escribirGist(paso.id, quedarse ? paso.remoto : snapshot()).then(function () {
+            return { traidos: quedarse ? cuales : [], enviados: quedarse ? [] : cuales };
+          });
+        }
+
+        var f = fusionar(local, paso.remoto);
+        if (f.traidos.length) {
+          guardarUndo(local);
+          for (var i = 0; i < f.traidos.length; i++) aplicar(f.traidos[i], f.salida[f.traidos[i]]);
+        }
+        var subir = f.enviados.length > 0;
+        return (subir ? escribirGist(paso.id, f.salida) : Promise.resolve())
+          .then(function () { return { traidos: f.traidos, enviados: f.enviados }; });
+      })
+      .then(function (r) {
+        setOriginal.call(localStorage, K_VISTO, String(Date.now()));
+        pintarBoton('ok');
+        if (!silencioso) informar(r);
+        if (r.traidos.length) avisarRecarga(r.traidos.length);
+        sincronizando = false;
+      })
+      .catch(function (e) {
+        pintarBoton('error');
+        sincronizando = false;
+        if (!silencioso) estado(e.message, true);
+        else console.warn('[sync]', e.message);
+      });
+  }
+
+  function guardarUndo(local) {
+    setOriginal.call(localStorage, K_UNDO, JSON.stringify({ cuando: Date.now(), datos: local }));
+    var b = document.getElementById('sync-deshacer');
+    if (b) b.hidden = false;
+  }
+
+  // Deshacer toca este dispositivo y nada mas: el gist queda como esta. Es la
+  // opcion segura, porque la alternativa (imponer lo local en la nube) borraria
+  // el trabajo del otro dispositivo. Consecuencia, y el texto lo dice: si
+  // volves a sincronizar, lo del gist baja de nuevo.
+  function deshacer() {
+    var crudo = localStorage.getItem(K_UNDO);
+    if (!crudo) return;
+    var previo = JSON.parse(crudo);
+    // Reponer las viejas no alcanza: la fusion pudo agregar claves que antes
+    // no existian, y esas hay que sacarlas.
+    var actuales = snapshot();
+    for (var k in actuales) if (!(k in previo.datos)) removeOriginal.call(localStorage, k);
+    for (var j in previo.datos) aplicar(j, previo.datos[j]);
+    removeOriginal.call(localStorage, K_UNDO);
+    estado('Este dispositivo volvió a como estaba antes de la última sincronización. Recargá la página para verlo. El gist quedó intacto: si volvés a sincronizar, eso baja de nuevo.');
+    document.getElementById('sync-deshacer').hidden = true;
+  }
+
+  // ---- interfaz ------------------------------------------------------------
+
+  var dialogo = document.getElementById('sync-dialog');
+  var cajaEstado = document.getElementById('sync-estado');
+  var boton = null;
+
+  function estado(texto, mal) {
+    cajaEstado.hidden = false;
+    cajaEstado.className = 'sync-estado' + (mal ? ' mal' : '');
+    cajaEstado.textContent = texto;
+  }
+
+  function informar(r) {
+    if (r.nuevo) return estado('Listo. Se creo el gist y se subio todo lo de este dispositivo.');
+    if (!r.traidos.length && !r.enviados.length) return estado('Ya estaba todo igual en los dos lados.');
+    cajaEstado.hidden = false;
+    cajaEstado.className = 'sync-estado';
+    cajaEstado.innerHTML = '';
+    var lineas = [];
+    if (r.enviados.length) lineas.push(['Se subio', r.enviados]);
+    if (r.traidos.length) lineas.push(['Se trajo', r.traidos]);
+    lineas.forEach(function (par) {
+      var b = document.createElement('b');
+      b.textContent = par[0] + ':';
+      cajaEstado.appendChild(b);
+      var ul = document.createElement('ul');
+      par[1].forEach(function (clave) {
+        var li = document.createElement('li');
+        li.textContent = legible(clave);
+        ul.appendChild(li);
+      });
+      cajaEstado.appendChild(ul);
+    });
+  }
+
+  function avisarRecarga(cuantos) {
+    var caja = document.getElementById('sync-aviso');
+    document.getElementById('sync-aviso-txt').textContent =
+      cuantos === 1 ? 'Llegó un cambio de otro dispositivo.'
+                    : 'Llegaron ' + cuantos + ' cambios de otro dispositivo.';
+    caja.hidden = false;
+  }
+
+  function pintarBoton(cual) {
+    if (!boton) return;
+    var punto = boton.querySelector('.sync-punto');
+    if (!punto) return;
+    punto.className = 'sync-punto' + (cual === 'ok' ? '' : cual === 'error' ? ' error' : ' pendiente');
+    punto.title = cual === 'ok' ? 'Sincronizado' : cual === 'error' ? 'Fallo la ultima sincronizacion' : 'Sincronizando';
+  }
+
+  function pintarDialogo() {
+    var hay = !!token();
+    document.getElementById('sync-alta').hidden = hay;
+    document.getElementById('sync-conectado').hidden = !hay;
+    document.getElementById('sync-deshacer').hidden = !localStorage.getItem(K_UNDO);
+    if (hay) {
+      var visto = Number(localStorage.getItem(K_VISTO) || 0);
+      var id = gistId();
+      document.getElementById('sync-donde').textContent =
+        (id ? 'Gist ' + id.slice(0, 8) + '… en tu cuenta. ' : '') +
+        (visto ? 'Última sincronización: ' + new Date(visto).toLocaleString('es-AR') + '.'
+               : 'Todavía no se sincronizó.');
+    }
+  }
+
+  // ---- copia en archivo ----------------------------------------------------
+
+  function bajar() {
+    var datos = snapshot();
+    var blob = new Blob([JSON.stringify({ schema: 1, updatedAt: new Date().toISOString(), datos: datos }, null, 1)],
+                        { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'apuntes-fiuba-' + new Date().toISOString().slice(0, 10) + '.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    estado('Se bajó la copia.');
+  }
+
+  function subir(archivo) {
+    var lector = new FileReader();
+    lector.onload = function () {
+      var p;
+      try { p = JSON.parse(lector.result); } catch (e) { return estado('El archivo no es un JSON valido.', true); }
+      if (!p || !p.datos) return estado('El archivo no tiene el formato de una copia de estos apuntes.', true);
+      var local = snapshot();
+      var f = fusionar(local, p.datos);
+      if (!f.traidos.length) return estado('La copia no trae nada mas nuevo que lo que ya hay acá.');
+      guardarUndo(local);
+      for (var i = 0; i < f.traidos.length; i++) aplicar(f.traidos[i], f.salida[f.traidos[i]]);
+      informar({ traidos: f.traidos, enviados: [] });
+      avisarRecarga(f.traidos.length);
+    };
+    lector.readAsText(archivo);
+  }
+
+  // ---- armado --------------------------------------------------------------
+
+  function montarBoton() {
+    var acciones = document.querySelector('.side-actions');
+    if (!acciones) return;
+    boton = document.createElement('button');
+    boton.className = 'icon-button wide';
+    boton.type = 'button';
+    boton.id = 'sync-button';
+    boton.title = 'Sincronizar notas y resaltados entre dispositivos';
+    boton.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
+      '<path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"></path><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"></path>' +
+      '<path d="M21 3v5h-5"></path><path d="M3 21v-5h5"></path></svg>' +
+      'Sincronizar<span class="sync-punto" hidden></span>';
+    var instalar = document.getElementById('install-app');
+    if (instalar) acciones.insertBefore(boton, instalar);
+    else acciones.appendChild(boton);
+    boton.addEventListener('click', function () {
+      pintarDialogo();
+      cajaEstado.hidden = true;
+      dialogo.showModal();
+    });
+    if (token()) {
+      boton.querySelector('.sync-punto').hidden = false;
+      pintarBoton('ok');
+    }
+  }
+
+  function montarEventos() {
+    document.getElementById('sync-conectar').addEventListener('click', function () {
+      var campo = document.getElementById('sync-token');
+      var valor = campo.value.trim();
+      if (!valor) return estado('Pegá el token primero.', true);
+      setOriginal.call(localStorage, K_TOKEN, valor);
+      campo.value = '';
+      boton.querySelector('.sync-punto').hidden = false;
+      pintarDialogo();
+      sincronizar(false).then(pintarDialogo);
+    });
+
+    document.getElementById('sync-ahora').addEventListener('click', function () {
+      sincronizar(false).then(pintarDialogo);
+    });
+
+    document.getElementById('sync-deshacer').addEventListener('click', deshacer);
+
+    document.getElementById('sync-desconectar').addEventListener('click', function () {
+      if (!window.confirm('Se borra el token de este dispositivo. Las notas y los resaltados quedan como estan, acá y en el gist.')) return;
+      removeOriginal.call(localStorage, K_TOKEN);
+      removeOriginal.call(localStorage, K_GIST);
+      removeOriginal.call(localStorage, K_VISTO);
+      boton.querySelector('.sync-punto').hidden = true;
+      pintarDialogo();
+      estado('Desconectado. El token ya no está en este dispositivo.');
+    });
+
+    document.getElementById('sync-bajar').addEventListener('click', bajar);
+    document.getElementById('sync-subir').addEventListener('click', function () {
+      document.getElementById('sync-archivo').click();
+    });
+    document.getElementById('sync-archivo').addEventListener('change', function (e) {
+      if (e.target.files && e.target.files[0]) subir(e.target.files[0]);
+      e.target.value = '';
+    });
+    document.getElementById('sync-cerrar').addEventListener('click', function () { dialogo.close(); });
+    document.getElementById('sync-aviso-btn').addEventListener('click', function () { location.reload(); });
+  }
+
+  montarBoton();
+  montarEventos();
+
+  if (token()) {
+    sincronizar(true);
+    // Al volver a la pestania puede haber cambios de otro dispositivo, y al
+    // irse conviene dejar subido lo que se escribio recien.
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') sincronizar(true);
+      else { clearTimeout(temporizador); sincronizar(true); }
+    });
+  }
+})();
+</script>
 </body>
 </html>

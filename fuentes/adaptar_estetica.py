@@ -17,6 +17,11 @@ from pathlib import Path
 
 BASE = Path("/home/lopez/fiuba/distribuidos/apunte/fuentes")
 SHELL = BASE / "shell-aa.html"
+# El modulo de sincronizacion es el mismo para todos los apuntes. La copia que
+# manda es la del repo de la portada; aca hay un duplicado porque los repos son
+# independientes, y el build avisa si se separaron.
+SYNC = BASE / "sync.html"
+SYNC_CANONICO = Path("/home/lopez/fiuba/flopeztancredi.github.io/fuentes/sync.html")
 SINT = BASE / "sintesis"
 OUT = Path("/home/lopez/fiuba/distribuidos/apunte/index.html")
 
@@ -411,6 +416,26 @@ def main() -> int:
                  f'<link rel="icon" href="{favicon}"', doc)
     doc = doc.replace('content="Aprendizaje Automático"',
                       'content="Sistemas Distribuidos"')
+
+    # 9. sincronizacion entre dispositivos
+    # El reemplazo va como lambda: re.sub interpreta los escapes del string de
+    # reemplazo y convertiria los \n del JavaScript en saltos de linea reales,
+    # partiendo los literales al medio.
+    if not SYNC.exists():
+        print(f"!! falta {SYNC}", file=sys.stderr)
+        return 1
+    sync = SYNC.read_text(encoding="utf-8")
+    if SYNC_CANONICO.exists() and SYNC_CANONICO.read_text(encoding="utf-8") != sync:
+        print(f"  !! {SYNC.name} difiere del canonico en {SYNC_CANONICO}")
+    # Si el shell ya lo trae (paso, por ejemplo, cuando se refresca
+    # shell-aa.html desde el apunte de Aprendizaje Automatico, que ya lo tiene
+    # inyectado), no se duplica.
+    n_sync = 1 if "sync-dialog" in doc else 0
+    if not n_sync:
+        doc, n_sync = re.subn(r"</body>", lambda _: sync + "</body>", doc, count=1)
+    if not n_sync:
+        print("!! no se encontro </body> para inyectar sync.html", file=sys.stderr)
+        return 1
 
     OUT.write_text(doc, encoding="utf-8")
 
