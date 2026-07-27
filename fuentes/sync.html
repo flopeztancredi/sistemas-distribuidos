@@ -1,22 +1,21 @@
 <!-- ============================================================================
      Sincronizacion de notas y resaltados entre dispositivos.
 
-     El sitio es estatico: no hay servidor propio donde guardar nada. Cada
-     lector conecta SU token de GitHub y sus datos viajan en UN gist secreto de
-     SU cuenta. No hay estado compartido: nadie ve lo de nadie, y el que no
-     conecta nada sigue igual que siempre, con todo en localStorage.
+     Modelo tipo Brave: no hay cuenta ni login. Se genera una frase de 12
+     palabras que es identidad y clave a la vez. De esa frase salen, por
+     derivaciones independientes, la clave de cifrado y el identificador del
+     registro. El endpoint solo ve el identificador y un blob AES-GCM: no
+     puede leer nada, y no hay estado compartido entre lectores.
 
-     Dos limitaciones que el dialogo dice en pantalla, porque son reales:
-     un token con permiso de gists alcanza a todos los gists de esa cuenta, y
-     un gist "secreto" es no listado, no privado.
+     El que no configura nada sigue igual que siempre, con todo en
+     localStorage, y tiene la copia en archivo como respaldo.
 
-     Se sincroniza el contenido (resaltados, notas, temas marcados), no el
-     estado de la interfaz: el tema claro u oscuro y los paneles plegados son
-     decisiones de cada dispositivo.
+     Se sincroniza contenido (resaltados, notas, temas marcados), no interfaz:
+     el tema claro u oscuro y los paneles plegados son de cada dispositivo.
 ============================================================================ -->
 <style>
   .sync-dialog {
-    width: min(560px, calc(100vw - 32px));
+    width: min(580px, calc(100vw - 32px));
     padding: 0;
     border: 1px solid var(--line);
     border-radius: 16px;
@@ -29,19 +28,7 @@
   .sync-box { padding: 22px 24px 20px; }
   .sync-h2 { margin: 0 0 6px; font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
   .sync-box p { margin: 0 0 14px; color: var(--muted); font-size: 14px; line-height: 1.55; }
-  .sync-box p a { color: var(--accent-ink); }
   .sync-box label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 700; }
-  .sync-box input[type="password"] {
-    width: 100%;
-    padding: 9px 11px;
-    border: 1px solid var(--line);
-    border-radius: 9px;
-    background: var(--bg);
-    color: var(--ink);
-    font: inherit;
-    font-size: 14px;
-  }
-  .sync-box input[type="password"]:focus { border-color: var(--accent); outline: none; }
   .sync-fila { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 15px; }
   .sync-btn {
     padding: 8px 15px;
@@ -55,8 +42,24 @@
   }
   .sync-btn:hover:not(:disabled) { border-color: var(--accent); }
   .sync-btn:disabled { opacity: .5; cursor: default; }
+  .sync-btn[hidden] { display: none; }
   .sync-btn.primario { border-color: var(--accent); background: var(--accent-2); color: var(--accent-ink); font-weight: 700; }
   .sync-btn.suelto { margin-left: auto; }
+  .sync-frase {
+    width: 100%;
+    min-height: 78px;
+    padding: 12px 13px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 15px;
+    line-height: 1.7;
+    resize: vertical;
+  }
+  .sync-frase:focus { border-color: var(--accent); outline: none; }
+  .sync-frase[readonly] { background: var(--accent-2); color: var(--accent-ink); font-weight: 600; }
   .sync-estado {
     margin-top: 15px;
     padding: 11px 13px;
@@ -69,18 +72,13 @@
   .sync-estado b { font-weight: 700; }
   .sync-estado ul { margin: 7px 0 0; padding-left: 18px; }
   .sync-estado li { margin-bottom: 2px; }
-  /* Con respaldo: no todos los apuntes definen estos tokens, y un var()
-     sin definir no falla, computa a vacio y deja el elemento invisible. */
+  /* Con respaldo: no todos los apuntes definen estos tokens, y un var() sin
+     definir no falla, computa a vacio y deja el elemento invisible. */
   .sync-estado.mal { background: var(--danger-bg, #fdebf0); color: var(--danger, #a63a56); }
-  .sync-nota { margin-top: 15px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+  .sync-nota { margin-top: 13px; font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+  .sync-nota b { color: var(--ink); }
   .sync-sep { margin: 18px 0 0; padding-top: 16px; border-top: 1px solid var(--line); }
-  .sync-punto {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--ok, #35704a);
-    flex: none;
-  }
+  .sync-punto { width: 7px; height: 7px; border-radius: 50%; background: var(--ok, #35704a); flex: none; }
   .sync-punto.pendiente { background: var(--warm, #96591c); }
   .sync-punto.error { background: var(--danger, #a63a56); }
   .sync-aviso {
@@ -106,36 +104,43 @@
 <dialog class="sync-dialog" id="sync-dialog" aria-labelledby="sync-titulo">
   <div class="sync-box">
     <p class="sync-h2" id="sync-titulo">Sincronizar entre dispositivos</p>
-    <p>
-      Tus resaltados, tus notas y los temas que marcaste viven en este navegador.
-      Para tenerlos en la compu y en el celular, se guardan en un
-      <b>gist secreto de tu propia cuenta de GitHub</b>. No hay un servidor de
-      este sitio en el medio: cada lector usa su cuenta y nadie ve lo de nadie.
-    </p>
 
-    <div id="sync-alta">
-      <label for="sync-token">Token de GitHub</label>
-      <input type="password" id="sync-token" autocomplete="off" spellcheck="false"
-             placeholder="github_pat_...">
-      <p class="sync-nota">
-        Cre&aacute; uno en
-        <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">
-          Settings, Developer settings, Fine-grained tokens</a>, con el permiso
-        <b>Gists: Read and write</b> de Account permissions y nada m&aacute;s.
-        Ten&eacute; en cuenta que ese permiso alcanza a todos los gists de esa
-        cuenta, no hay forma de limitarlo a uno solo. Y un gist secreto es
-        <b>no listado, no privado</b>: cualquiera con la URL lo lee, aunque el
-        identificador sea impredecible. Si algo de eso te incomoda, us&aacute;
-        el archivo de m&aacute;s abajo, que no necesita ninguna cuenta.
+    <div id="sync-apagado" hidden>
+      <p>
+        La sincronizaci&oacute;n todav&iacute;a no est&aacute; configurada en este
+        sitio. Mientras tanto, la copia en archivo de m&aacute;s abajo funciona
+        igual y no necesita nada.
       </p>
-      <div class="sync-fila">
-        <button class="sync-btn primario" id="sync-conectar" type="button">Conectar</button>
+    </div>
+
+    <div id="sync-alta" hidden>
+      <p>
+        Sin cuenta y sin contrase&ntilde;a. Se genera una <b>frase de 12
+        palabras</b> que es tu llave: la escrib&iacute;s en el otro dispositivo y
+        ya est&aacute;. Tus notas viajan cifradas con esa frase, as&iacute; que el
+        servidor guarda algo que no puede leer.
+      </p>
+      <div class="sync-fila" id="sync-opciones">
+        <button class="sync-btn primario" id="sync-generar" type="button">Crear una frase nueva</button>
+        <button class="sync-btn" id="sync-tengo" type="button">Ya tengo una frase</button>
+      </div>
+
+      <div id="sync-caja-frase" hidden>
+        <label for="sync-texto" id="sync-etiqueta">Tu frase</label>
+        <textarea class="sync-frase" id="sync-texto" spellcheck="false" autocomplete="off"
+                  autocapitalize="off" autocorrect="off"></textarea>
+        <p class="sync-nota" id="sync-ayuda"></p>
+        <div class="sync-fila">
+          <button class="sync-btn primario" id="sync-conectar" type="button">Conectar</button>
+          <button class="sync-btn" id="sync-copiar" type="button" hidden>Copiar la frase</button>
+        </div>
       </div>
     </div>
 
     <div id="sync-conectado" hidden>
       <div class="sync-fila">
         <button class="sync-btn primario" id="sync-ahora" type="button">Sincronizar ahora</button>
+        <button class="sync-btn" id="sync-ver" type="button">Ver mi frase</button>
         <button class="sync-btn" id="sync-deshacer" type="button" hidden>Deshacer lo &uacute;ltimo</button>
         <button class="sync-btn suelto" id="sync-desconectar" type="button">Desconectar</button>
       </div>
@@ -145,10 +150,10 @@
     <div class="sync-estado" id="sync-estado" hidden></div>
 
     <div class="sync-sep">
-      <label>Sin cuenta: copia en un archivo</label>
+      <label>Copia en un archivo</label>
       <p class="sync-nota">
         Baja todo a un JSON y lo levanta en el otro dispositivo. No es
-        autom&aacute;tico, pero es el respaldo que hoy no ten&eacute;s: si
+        autom&aacute;tico, pero es el respaldo que si no no existe: si
         borr&aacute;s los datos del sitio, se pierde todo.
       </p>
       <div class="sync-fila">
@@ -170,33 +175,39 @@
 (function () {
   'use strict';
 
-  var API = 'https://api.github.com';
-  var ARCHIVO = 'apuntes-fiuba.json';
-  var MARCA = 'apuntes-fiuba-sync';
+  // URL del worker (ver sync-worker/README.md). Mientras diga SIN_CONFIGURAR,
+  // el dialogo ofrece solo la copia en archivo.
+  var ENDPOINT = 'SIN_CONFIGURAR';
 
-  var K_TOKEN = 'fiuba-sync-token';
-  var K_GIST = 'fiuba-sync-gist';
+  var K_FRASE = 'fiuba-sync-frase';
   var K_MTIME = 'fiuba-sync-mtimes';
   var K_UNDO = 'fiuba-sync-undo';
   var K_VISTO = 'fiuba-sync-visto';
+  var K_ENDPOINT = 'fiuba-sync-endpoint';
 
   // Contenido, no interfaz. La regla es por sufijo y no por prefijo a
   // proposito: cuando entre una materia nueva con su propio prefijo, entra
   // sola sin tocar este archivo.
   var SINCRONIZABLE = /-(highlights|study-notes|prepared-topics)-v1$/;
 
+  var PALABRAS = 'abeja abrigo acero agua aguja ajedrez alba alce aldea almeja altura amable ancla antena arana arbol arena arpa arroz asado atlas aurora avena aviso azul balde balsa bandera barco barro bastan bota brisa broche buho buzon caballo cabina cactus cadena cafe calor cama campo canal capa cara carbon casa cascada caspa cebolla ceja cena cepillo cerca cero cesta chaleco cielo cima cinta ciudad clavo cobre cocina cola colina collar coma copa coral corcho corona cosecha costa cresta cuenco cuerda cuervo dado danza dedo delfin disco duna enero escoba espada espiga espuma faro fecha fideo figura flauta flecha flor fogata fresa fruta fuente galeria gancho ganso gato gemelo globo gorra grano grieta grillo guante gusano hacha harina hielo hierro higo hoja hongo horno huella hueso humo isla jarra jaula jinete jugo lago lampara lana lapiz laurel leche lengua libro lima limon lirio lluvia loma luna madera maiz malla manta mapa marea marfil miel mimbre mina moneda mora motor musgo nido niebla nieve nudo oasis olivo olla oreja orilla pala palma papel pared pasillo pato pecera pedal pelota perla pesca pico pino pinza pipa pirata pluma polea pollo pozo prado puente puerta pulsera queso rama rana rayo rebano receta reino reloj remo resina risco robot roca rodillo rombo ropa rosa ruta sabana sable salto sardina sauce seda semilla senda sierra sirena sobre soga sombra surco tabla taller tapa tarima techo tejado templo tienda tierra tinta toldo tomate torre trigo trineo trono tulipan turba vaca valle vaso vela veleta venado viento vino violin yema yeso yunque zanja zorro zumo'.split(' ');
+
   var MATERIAS = {
     aa: 'Aprendizaje Automático', sd: 'Sistemas Distribuidos',
     rd: 'Redes', ebt: 'Empresas de Base Tecnológica'
   };
-  var TIPOS = {
-    'highlights': 'resaltados', 'study-notes': 'notas', 'prepared-topics': 'temas marcados'
-  };
+  var TIPOS = { 'highlights': 'resaltados', 'study-notes': 'notas', 'prepared-topics': 'temas marcados' };
 
   function legible(clave) {
     var m = clave.match(/^([a-z0-9]+)-(highlights|study-notes|prepared-topics)-v1$/);
     if (!m) return clave;
     return (TIPOS[m[2]] || m[2]) + ' de ' + (MATERIAS[m[1]] || m[1]);
+  }
+
+  function endpoint() {
+    var base = localStorage.getItem(K_ENDPOINT) || ENDPOINT;
+    if (base === 'SIN_CONFIGURAR') return '';
+    return base.charAt(base.length - 1) === '/' ? base.slice(0, -1) : base;
   }
 
   // ---- almacenamiento local ------------------------------------------------
@@ -218,17 +229,11 @@
 
   Storage.prototype.setItem = function (clave, valor) {
     setOriginal.call(this, clave, valor);
-    if (this === window.localStorage && SINCRONIZABLE.test(clave)) {
-      marcar(clave);
-      programarEnvio();
-    }
+    if (this === window.localStorage && SINCRONIZABLE.test(clave)) { marcar(clave); programarEnvio(); }
   };
   Storage.prototype.removeItem = function (clave) {
     removeOriginal.call(this, clave);
-    if (this === window.localStorage && SINCRONIZABLE.test(clave)) {
-      marcar(clave);
-      programarEnvio();
-    }
+    if (this === window.localStorage && SINCRONIZABLE.test(clave)) { marcar(clave); programarEnvio(); }
   };
 
   function snapshot() {
@@ -246,71 +251,139 @@
     marcar(clave, entrada.t);
   }
 
-  // ---- API de GitHub -------------------------------------------------------
+  // ---- frase y criptografia ------------------------------------------------
 
-  function token() { return localStorage.getItem(K_TOKEN) || ''; }
-  function gistId() { return localStorage.getItem(K_GIST) || ''; }
-
-  function pedir(ruta, opciones) {
-    opciones = opciones || {};
-    opciones.headers = Object.assign({
-      'Authorization': 'Bearer ' + token(),
-      'Accept': 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28'
-    }, opciones.headers || {});
-    return fetch(API + ruta, opciones).then(function (r) {
-      if (r.status === 401) throw new Error('El token no sirve o fue revocado.');
-      if (r.status === 403) throw new Error('GitHub rechazo el pedido: al token le falta el permiso Gists, o te pasaste del limite de pedidos.');
-      if (r.status === 404) throw new Error('No se encontro el gist. Puede que lo hayas borrado desde GitHub.');
-      if (!r.ok) throw new Error('GitHub respondio ' + r.status + '.');
-      return r.json();
-    });
+  function nuevaFrase() {
+    // 256 palabras por posicion y 12 posiciones: 96 bits, uniformes porque el
+    // tamanio de la lista divide exacto el rango de un byte.
+    var n = crypto.getRandomValues(new Uint8Array(12));
+    var palabras = [];
+    for (var i = 0; i < n.length; i++) palabras.push(PALABRAS[n[i]]);
+    return palabras.join(' ');
   }
 
-  function buscarGist() {
-    return pedir('/gists?per_page=100').then(function (lista) {
-      for (var i = 0; i < lista.length; i++) {
-        if (lista[i].description === MARCA && lista[i].files && lista[i].files[ARCHIVO]) {
-          return lista[i].id;
-        }
+  function normalizar(texto) {
+    return (texto || '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  }
+
+  function revisarFrase(texto) {
+    var p = normalizar(texto);
+    if (p.length !== 12) return 'La frase son 12 palabras y escribiste ' + p.length + '.';
+    for (var i = 0; i < p.length; i++) {
+      if (PALABRAS.indexOf(p[i]) < 0) {
+        return 'La palabra "' + p[i] + '" no es de la lista, puede ser un error de tipeo.';
       }
-      return '';
-    });
+    }
+    return '';
   }
 
-  function cuerpo(datos) {
-    var archivos = {};
-    archivos[ARCHIVO] = {
-      content: JSON.stringify({ schema: 1, updatedAt: new Date().toISOString(), datos: datos }, null, 1)
-    };
-    return JSON.stringify({ description: MARCA, public: false, files: archivos });
+  function aHex(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) s += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+    return s;
   }
 
-  function crearGist(datos) {
-    return pedir('/gists', { method: 'POST', body: cuerpo(datos) }).then(function (g) {
-      setOriginal.call(localStorage, K_GIST, g.id);
-      return g.id;
-    });
+  function aBase64(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
   }
 
-  function escribirGist(id, datos) {
-    return pedir('/gists/' + id, { method: 'PATCH', body: cuerpo(datos) });
+  function deBase64(texto) {
+    var bin = atob(texto), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
   }
 
-  function leerGist(id) {
-    return pedir('/gists/' + id).then(function (g) {
-      var f = g.files && g.files[ARCHIVO];
-      if (!f) return {};
-      // Arriba de 1 MB la API devuelve el contenido cortado y hay que ir al raw.
-      var texto = f.truncated
-        ? fetch(f.raw_url).then(function (r) { return r.text(); })
-        : Promise.resolve(f.content);
-      return Promise.resolve(texto).then(function (t) {
-        try {
-          var p = JSON.parse(t);
-          return (p && p.datos) || {};
-        } catch (e) { return {}; }
+  // De la frase salen dos cosas que no se deducen una de la otra: la primera
+  // mitad de los bits es la clave de cifrado, la segunda mitad hasheada es el
+  // identificador publico. Asi el que ve pasar el identificador por la red no
+  // aprende nada sobre la clave.
+  function derivar(frase) {
+    var enc = new TextEncoder();
+    return crypto.subtle.importKey('raw', enc.encode(frase), 'PBKDF2', false, ['deriveBits'])
+      .then(function (base) {
+        return crypto.subtle.deriveBits({
+          name: 'PBKDF2',
+          salt: enc.encode('apuntes-fiuba/v1'),
+          // La frase la genera el sitio con 96 bits uniformes, asi que la
+          // fuerza bruta es imposible con cualquier numero de vueltas. Las
+          // iteraciones existen por si alguien se inventa una frase debil.
+          // 200k cuesta menos de medio segundo y no traba el celular.
+          iterations: 200000,
+          hash: 'SHA-256'
+        }, base, 512);
+      })
+      .then(function (bits) {
+        var bytes = new Uint8Array(bits);
+        return Promise.all([
+          crypto.subtle.importKey('raw', bytes.slice(0, 32), 'AES-GCM', false, ['encrypt', 'decrypt']),
+          crypto.subtle.digest('SHA-256', bytes.slice(32, 64))
+        ]);
+      })
+      .then(function (par) {
+        return { clave: par[0], id: aHex(new Uint8Array(par[1])).slice(0, 32) };
       });
+  }
+
+  function cifrar(clave, texto) {
+    var iv = crypto.getRandomValues(new Uint8Array(12));
+    return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, clave, new TextEncoder().encode(texto))
+      .then(function (ct) {
+        var ctb = new Uint8Array(ct), junto = new Uint8Array(iv.length + ctb.length);
+        junto.set(iv, 0);
+        junto.set(ctb, iv.length);
+        return aBase64(junto);
+      });
+  }
+
+  function descifrar(clave, texto) {
+    var junto = deBase64(texto);
+    return crypto.subtle.decrypt({ name: 'AES-GCM', iv: junto.slice(0, 12) }, clave, junto.slice(12))
+      .then(function (pt) { return new TextDecoder().decode(pt); });
+  }
+
+  // ---- transporte ----------------------------------------------------------
+
+  var sesion = null;   // {frase, clave, id}, se cachea porque derivar cuesta
+
+  function abrirSesion() {
+    if (sesion) return Promise.resolve(sesion);
+    var frase = localStorage.getItem(K_FRASE);
+    if (!frase) return Promise.reject(new Error('No hay frase configurada.'));
+    return derivar(frase).then(function (d) {
+      sesion = { frase: frase, clave: d.clave, id: d.id };
+      return sesion;
+    });
+  }
+
+  function bajarRemoto(s) {
+    return fetch(endpoint() + '/d/' + s.id, { cache: 'no-store' }).then(function (r) {
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error('El servidor de sincronización respondió ' + r.status + '.');
+      return r.text();
+    }).then(function (txt) {
+      if (txt === null) return null;
+      if (!txt) return {};
+      return descifrar(s.clave, txt).then(function (plano) {
+        var p = JSON.parse(plano);
+        return (p && p.datos) || {};
+      }).catch(function () {
+        throw new Error('Hay datos guardados con ese identificador pero la frase no los abre. Revisá que sea exactamente la misma frase.');
+      });
+    });
+  }
+
+  function guardarRemoto(s, datos) {
+    var plano = JSON.stringify({ schema: 1, updatedAt: new Date().toISOString(), datos: datos });
+    return cifrar(s.clave, plano).then(function (blob) {
+      return fetch(endpoint() + '/d/' + s.id, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'text/plain' },
+        body: blob
+      });
+    }).then(function (r) {
+      if (!r.ok) throw new Error('No se pudo guardar: el servidor respondió ' + r.status + '.');
     });
   }
 
@@ -348,59 +421,62 @@
   var sincronizando = false;
   var temporizador = null;
 
+  function activo() { return !!endpoint() && !!localStorage.getItem(K_FRASE); }
+
   function programarEnvio() {
-    if (!token()) return;
+    if (!activo()) return;
     clearTimeout(temporizador);
     temporizador = setTimeout(function () { sincronizar(true); }, 4000);
   }
 
   function sincronizar(silencioso) {
-    if (!token() || sincronizando) return Promise.resolve();
+    if (!activo() || sincronizando) return Promise.resolve();
     sincronizando = true;
     clearTimeout(temporizador);
     if (!silencioso) estado('Sincronizando...');
     pintarBoton('trabajando');
 
     var local = snapshot();
+    var ses = null;
 
-    return Promise.resolve(gistId() || buscarGist())
-      .then(function (id) {
-        if (!id) return crearGist(local).then(function () { return null; });
-        setOriginal.call(localStorage, K_GIST, id);
-        return leerGist(id).then(function (remoto) { return { id: id, remoto: remoto }; });
-      })
-      .then(function (paso) {
-        if (!paso) {
+    return abrirSesion()
+      .then(function (s) { ses = s; return bajarRemoto(s); })
+      .then(function (remoto) {
+        if (remoto === null) {
           for (var k in local) marcar(k, local[k].t || Date.now());
-          return { traidos: [], enviados: Object.keys(local), nuevo: true };
+          return guardarRemoto(ses, local).then(function () {
+            return { traidos: [], enviados: Object.keys(local), nuevo: true };
+          });
         }
 
         // Primera vez en este dispositivo y hay contenido de los dos lados:
         // no se elige solo, se pregunta. Es el unico momento donde no hay
         // marcas de tiempo locales para comparar.
         var sinMarcas = Object.keys(leerMtimes()).length === 0;
-        if (sinMarcas && hayContenido(local) && hayContenido(paso.remoto)) {
-          var quedarse = window.confirm(
-            'Este dispositivo ya tiene notas o resaltados, y en tu gist hay otros.\n\n' +
-            'Aceptar: traer lo del gist y reemplazar lo de este dispositivo.\n' +
-            'Cancelar: subir lo de este dispositivo y reemplazar lo del gist.');
-          var elegido = quedarse ? paso.remoto : local;
+        if (sinMarcas && hayContenido(local) && hayContenido(remoto)) {
+          var traer = window.confirm([
+            'Este dispositivo ya tiene notas o resaltados, y con esa frase hay otros guardados.',
+            '',
+            'Aceptar: traer lo guardado y reemplazar lo de este dispositivo.',
+            'Cancelar: subir lo de este dispositivo y reemplazar lo guardado.'
+          ].join(String.fromCharCode(10)));
+          var elegido = traer ? remoto : local;
           var cuales = Object.keys(elegido);
+          var i;
           guardarUndo(local);
-          if (quedarse) for (var c = 0; c < cuales.length; c++) aplicar(cuales[c], elegido[cuales[c]]);
-          else for (var d = 0; d < cuales.length; d++) marcar(cuales[d], Date.now());
-          return escribirGist(paso.id, quedarse ? paso.remoto : snapshot()).then(function () {
-            return { traidos: quedarse ? cuales : [], enviados: quedarse ? [] : cuales };
+          if (traer) { for (i = 0; i < cuales.length; i++) aplicar(cuales[i], elegido[cuales[i]]); }
+          else { for (i = 0; i < cuales.length; i++) marcar(cuales[i], Date.now()); }
+          return guardarRemoto(ses, traer ? remoto : snapshot()).then(function () {
+            return { traidos: traer ? cuales : [], enviados: traer ? [] : cuales };
           });
         }
 
-        var f = fusionar(local, paso.remoto);
+        var f = fusionar(local, remoto);
         if (f.traidos.length) {
           guardarUndo(local);
-          for (var i = 0; i < f.traidos.length; i++) aplicar(f.traidos[i], f.salida[f.traidos[i]]);
+          for (var j = 0; j < f.traidos.length; j++) aplicar(f.traidos[j], f.salida[f.traidos[j]]);
         }
-        var subir = f.enviados.length > 0;
-        return (subir ? escribirGist(paso.id, f.salida) : Promise.resolve())
+        return (f.enviados.length ? guardarRemoto(ses, f.salida) : Promise.resolve())
           .then(function () { return { traidos: f.traidos, enviados: f.enviados }; });
       })
       .then(function (r) {
@@ -414,7 +490,7 @@
         pintarBoton('error');
         sincronizando = false;
         if (!silencioso) estado(e.message, true);
-        else console.warn('[sync]', e.message);
+        else if (window.console) console.warn('[sync]', e.message);
       });
   }
 
@@ -424,10 +500,10 @@
     if (b) b.hidden = false;
   }
 
-  // Deshacer toca este dispositivo y nada mas: el gist queda como esta. Es la
-  // opcion segura, porque la alternativa (imponer lo local en la nube) borraria
-  // el trabajo del otro dispositivo. Consecuencia, y el texto lo dice: si
-  // volves a sincronizar, lo del gist baja de nuevo.
+  // Deshacer toca este dispositivo y nada mas: lo guardado en el servidor queda
+  // como esta. Es la opcion segura, porque la alternativa (imponer lo local)
+  // borraria el trabajo del otro dispositivo. Consecuencia, y el texto lo dice:
+  // si volves a sincronizar, eso baja de nuevo.
   function deshacer() {
     var crudo = localStorage.getItem(K_UNDO);
     if (!crudo) return;
@@ -438,7 +514,7 @@
     for (var k in actuales) if (!(k in previo.datos)) removeOriginal.call(localStorage, k);
     for (var j in previo.datos) aplicar(j, previo.datos[j]);
     removeOriginal.call(localStorage, K_UNDO);
-    estado('Este dispositivo volvió a como estaba antes de la última sincronización. Recargá la página para verlo. El gist quedó intacto: si volvés a sincronizar, eso baja de nuevo.');
+    estado('Este dispositivo volvió a como estaba antes de la última sincronización. Recargá la página para verlo. Lo guardado quedó intacto: si volvés a sincronizar, eso baja de nuevo.');
     document.getElementById('sync-deshacer').hidden = true;
   }
 
@@ -455,13 +531,13 @@
   }
 
   function informar(r) {
-    if (r.nuevo) return estado('Listo. Se creo el gist y se subio todo lo de este dispositivo.');
+    if (r.nuevo) return estado('Listo, se subió todo lo de este dispositivo. Anotá la frase: sin ella no hay forma de recuperarlo.');
     if (!r.traidos.length && !r.enviados.length) return estado('Ya estaba todo igual en los dos lados.');
     cajaEstado.hidden = false;
     cajaEstado.className = 'sync-estado';
     cajaEstado.innerHTML = '';
     var lineas = [];
-    if (r.enviados.length) lineas.push(['Se subio', r.enviados]);
+    if (r.enviados.length) lineas.push(['Se subió', r.enviados]);
     if (r.traidos.length) lineas.push(['Se trajo', r.traidos]);
     lineas.forEach(function (par) {
       var b = document.createElement('b');
@@ -478,11 +554,10 @@
   }
 
   function avisarRecarga(cuantos) {
-    var caja = document.getElementById('sync-aviso');
     document.getElementById('sync-aviso-txt').textContent =
       cuantos === 1 ? 'Llegó un cambio de otro dispositivo.'
                     : 'Llegaron ' + cuantos + ' cambios de otro dispositivo.';
-    caja.hidden = false;
+    document.getElementById('sync-aviso').hidden = false;
   }
 
   function pintarBoton(cual) {
@@ -490,29 +565,45 @@
     var punto = boton.querySelector('.sync-punto');
     if (!punto) return;
     punto.className = 'sync-punto' + (cual === 'ok' ? '' : cual === 'error' ? ' error' : ' pendiente');
-    punto.title = cual === 'ok' ? 'Sincronizado' : cual === 'error' ? 'Fallo la ultima sincronizacion' : 'Sincronizando';
+    punto.title = cual === 'ok' ? 'Sincronizado' : cual === 'error' ? 'Falló la última sincronización' : 'Sincronizando';
+  }
+
+  function mostrarFrase(frase, esNueva) {
+    document.getElementById('sync-caja-frase').hidden = false;
+    var campo = document.getElementById('sync-texto');
+    campo.value = frase || '';
+    campo.readOnly = !!frase;
+    document.getElementById('sync-copiar').hidden = !frase;
+    document.getElementById('sync-etiqueta').textContent = frase ? 'Tu frase' : 'Escribí tu frase';
+    document.getElementById('sync-ayuda').textContent = esNueva
+      ? 'Anotala ahora. Es la única llave: si la perdés no hay forma de recuperar los datos, ni yo ni nadie puede. Después apretá Conectar.'
+      : (frase ? 'Escribila en el otro dispositivo para que lea y escriba los mismos datos.'
+               : 'Son 12 palabras separadas por espacios, en el mismo orden en que te las dio el otro dispositivo.');
+    if (!frase) campo.focus();
   }
 
   function pintarDialogo() {
-    var hay = !!token();
-    document.getElementById('sync-alta').hidden = hay;
-    document.getElementById('sync-conectado').hidden = !hay;
+    var configurado = !!endpoint();
+    var frase = localStorage.getItem(K_FRASE);
+    document.getElementById('sync-apagado').hidden = configurado;
+    document.getElementById('sync-alta').hidden = !configurado || !!frase;
+    document.getElementById('sync-conectado').hidden = !configurado || !frase;
+    document.getElementById('sync-caja-frase').hidden = true;
+    document.getElementById('sync-opciones').hidden = false;
+    document.getElementById('sync-conectar').hidden = false;
     document.getElementById('sync-deshacer').hidden = !localStorage.getItem(K_UNDO);
-    if (hay) {
+    if (frase) {
       var visto = Number(localStorage.getItem(K_VISTO) || 0);
-      var id = gistId();
-      document.getElementById('sync-donde').textContent =
-        (id ? 'Gist ' + id.slice(0, 8) + '… en tu cuenta. ' : '') +
-        (visto ? 'Última sincronización: ' + new Date(visto).toLocaleString('es-AR') + '.'
-               : 'Todavía no se sincronizó.');
+      document.getElementById('sync-donde').textContent = visto
+        ? 'Última sincronización: ' + new Date(visto).toLocaleString('es-AR') + '.'
+        : 'Todavía no se sincronizó.';
     }
   }
 
   // ---- copia en archivo ----------------------------------------------------
 
-  function bajar() {
-    var datos = snapshot();
-    var blob = new Blob([JSON.stringify({ schema: 1, updatedAt: new Date().toISOString(), datos: datos }, null, 1)],
+  function bajarArchivo() {
+    var blob = new Blob([JSON.stringify({ schema: 1, updatedAt: new Date().toISOString(), datos: snapshot() }, null, 1)],
                         { type: 'application/json' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -522,15 +613,15 @@
     estado('Se bajó la copia.');
   }
 
-  function subir(archivo) {
+  function subirArchivo(archivo) {
     var lector = new FileReader();
     lector.onload = function () {
       var p;
-      try { p = JSON.parse(lector.result); } catch (e) { return estado('El archivo no es un JSON valido.', true); }
+      try { p = JSON.parse(lector.result); } catch (e) { return estado('El archivo no es un JSON válido.', true); }
       if (!p || !p.datos) return estado('El archivo no tiene el formato de una copia de estos apuntes.', true);
       var local = snapshot();
       var f = fusionar(local, p.datos);
-      if (!f.traidos.length) return estado('La copia no trae nada mas nuevo que lo que ya hay acá.');
+      if (!f.traidos.length) return estado('La copia no trae nada más nuevo que lo que ya hay acá.');
       guardarUndo(local);
       for (var i = 0; i < f.traidos.length; i++) aplicar(f.traidos[i], f.salida[f.traidos[i]]);
       informar({ traidos: f.traidos, enviados: [] });
@@ -562,46 +653,62 @@
       cajaEstado.hidden = true;
       dialogo.showModal();
     });
-    if (token()) {
+    if (activo()) {
       boton.querySelector('.sync-punto').hidden = false;
       pintarBoton('ok');
     }
   }
 
-  function montarEventos() {
-    document.getElementById('sync-conectar').addEventListener('click', function () {
-      var campo = document.getElementById('sync-token');
-      var valor = campo.value.trim();
-      if (!valor) return estado('Pegá el token primero.', true);
-      setOriginal.call(localStorage, K_TOKEN, valor);
-      campo.value = '';
-      boton.querySelector('.sync-punto').hidden = false;
-      pintarDialogo();
-      sincronizar(false).then(pintarDialogo);
-    });
+  function conectar() {
+    var problema = revisarFrase(document.getElementById('sync-texto').value);
+    if (problema) return estado(problema, true);
+    sesion = null;
+    setOriginal.call(localStorage, K_FRASE,
+                     normalizar(document.getElementById('sync-texto').value).join(' '));
+    boton.querySelector('.sync-punto').hidden = false;
+    pintarDialogo();
+    sincronizar(false).then(pintarDialogo);
+  }
 
+  function montarEventos() {
+    document.getElementById('sync-generar').addEventListener('click', function () {
+      mostrarFrase(nuevaFrase(), true);
+    });
+    document.getElementById('sync-tengo').addEventListener('click', function () {
+      mostrarFrase('', false);
+    });
+    document.getElementById('sync-copiar').addEventListener('click', function () {
+      var campo = document.getElementById('sync-texto');
+      if (navigator.clipboard) navigator.clipboard.writeText(campo.value);
+      else { campo.select(); document.execCommand('copy'); }
+      estado('Frase copiada al portapapeles.');
+    });
+    document.getElementById('sync-conectar').addEventListener('click', conectar);
     document.getElementById('sync-ahora').addEventListener('click', function () {
       sincronizar(false).then(pintarDialogo);
     });
-
+    document.getElementById('sync-ver').addEventListener('click', function () {
+      document.getElementById('sync-alta').hidden = false;
+      document.getElementById('sync-opciones').hidden = true;
+      document.getElementById('sync-conectar').hidden = true;
+      mostrarFrase(localStorage.getItem(K_FRASE), false);
+    });
     document.getElementById('sync-deshacer').addEventListener('click', deshacer);
-
     document.getElementById('sync-desconectar').addEventListener('click', function () {
-      if (!window.confirm('Se borra el token de este dispositivo. Las notas y los resaltados quedan como estan, acá y en el gist.')) return;
-      removeOriginal.call(localStorage, K_TOKEN);
-      removeOriginal.call(localStorage, K_GIST);
+      if (!window.confirm('Se borra la frase de este dispositivo. Las notas quedan como están, acá y en el servidor. Si no la anotaste, no vas a poder volver a entrar.')) return;
+      removeOriginal.call(localStorage, K_FRASE);
       removeOriginal.call(localStorage, K_VISTO);
+      sesion = null;
       boton.querySelector('.sync-punto').hidden = true;
       pintarDialogo();
-      estado('Desconectado. El token ya no está en este dispositivo.');
+      estado('Desconectado. La frase ya no está en este dispositivo.');
     });
-
-    document.getElementById('sync-bajar').addEventListener('click', bajar);
+    document.getElementById('sync-bajar').addEventListener('click', bajarArchivo);
     document.getElementById('sync-subir').addEventListener('click', function () {
       document.getElementById('sync-archivo').click();
     });
     document.getElementById('sync-archivo').addEventListener('change', function (e) {
-      if (e.target.files && e.target.files[0]) subir(e.target.files[0]);
+      if (e.target.files && e.target.files[0]) subirArchivo(e.target.files[0]);
       e.target.value = '';
     });
     document.getElementById('sync-cerrar').addEventListener('click', function () { dialogo.close(); });
@@ -611,8 +718,10 @@
   montarBoton();
   montarEventos();
 
-  if (token()) {
-    sincronizar(true);
+  if (activo()) {
+    // Diferido: derivar la clave cuesta CPU y no vale la pena competir con el
+    // primer dibujado de la pagina por unos datos que casi siempre ya estan.
+    setTimeout(function () { sincronizar(true); }, 1200);
     // Al volver a la pestania puede haber cambios de otro dispositivo, y al
     // irse conviene dejar subido lo que se escribio recien.
     document.addEventListener('visibilitychange', function () {
