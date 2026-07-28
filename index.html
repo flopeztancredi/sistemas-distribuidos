@@ -14062,7 +14062,7 @@ P1: f  recibe de e        max([2,1,0],[0,0,1]) + P1 = [3,1,1]   ✓</code></pre>
   }
 
   function informar(r) {
-    if (r.nuevo) return estado('Listo, se subió todo lo de este dispositivo. Anotá la frase: sin ella no hay forma de recuperarlo.');
+    if (r.nuevo) return estado('Listo, se subió todo lo de este dispositivo. Tu frase queda guardada acá y la podés ver cuando quieras con "Ver mi frase".');
     if (!r.traidos.length && !r.enviados.length) return estado('Ya estaba todo igual en los dos lados.');
     cajaEstado.hidden = false;
     cajaEstado.className = 'sync-estado';
@@ -14107,8 +14107,8 @@ P1: f  recibe de e        max([2,1,0],[0,0,1]) + P1 = [3,1,1]   ✓</code></pre>
     document.getElementById('sync-copiar').hidden = !frase;
     document.getElementById('sync-etiqueta').textContent = frase ? 'Tu frase' : 'Escribí tu frase';
     document.getElementById('sync-ayuda').textContent = esNueva
-      ? 'Anotala ahora. Es la única llave: si la perdés no hay forma de recuperar los datos, ni yo ni nadie puede. Después apretá Conectar.'
-      : (frase ? 'Escribila en el otro dispositivo para que lea y escriba los mismos datos.'
+      ? 'Apretá Conectar y listo. Después la podés volver a ver cuando quieras con "Ver mi frase", desde cualquier dispositivo que ya esté conectado. Anotala igual: si perdés todos los dispositivos a la vez, nadie puede recuperar los datos, porque la única copia de la llave la tenés vos.'
+      : (frase ? 'Escribila en el otro dispositivo para que lea y escriba los mismos datos. Podés volver acá a verla cuando quieras.'
                : 'Son 12 palabras separadas por espacios, en el mismo orden en que te las dio el otro dispositivo.');
     if (!frase) campo.focus();
   }
@@ -14226,7 +14226,7 @@ P1: f  recibe de e        max([2,1,0],[0,0,1]) + P1 = [3,1,1]   ✓</code></pre>
     });
     document.getElementById('sync-deshacer').addEventListener('click', deshacer);
     document.getElementById('sync-desconectar').addEventListener('click', function () {
-      if (!window.confirm('Se borra la frase de este dispositivo. Las notas quedan como están, acá y en el servidor. Si no la anotaste, no vas a poder volver a entrar.')) return;
+      if (!window.confirm('Se borra la frase de este dispositivo. Las notas quedan como están, acá y en el servidor.\n\nAntes de seguir: si no la tenés anotada ni en otro dispositivo conectado, mirala con "Ver mi frase", porque después de esto no hay de dónde sacarla.')) return;
       removeOriginal.call(localStorage, K_FRASE);
       removeOriginal.call(localStorage, K_VISTO);
       sesion = null;
