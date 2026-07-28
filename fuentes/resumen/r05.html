@@ -10,8 +10,10 @@
   <p>Un bus de información distribuye eventos a suscriptores. Una cola entrega trabajo a consumidores, normalmente uno por mensaje. Un broker media direcciones, buffers y políticas. ZeroMQ ofrece abstracciones de mensajería sin imponer un broker central.</p>
 
   <h3 id="r05-grupos">Grupos, difusión y atomicidad</h3>
-  <p>Un grupo permite dirigir un mensaje a un conjunto lógico. <b>Broadcast</b> intenta alcanzar a todos en un dominio. <b>Multicast</b> alcanza a miembros de un grupo. <b>Unicast</b> tiene un destino. <b>Anycast</b> alcanza una instancia apropiada entre varias.</p>
+  <div class="def"><b>Grupo de comunicación.</b> Colección dinámica de procesos tratada como una entidad lógica, con primitivas para crear, unir, abandonar y enviar al conjunto.</div>
+  <p><b>Broadcast</b> intenta alcanzar a todos en un dominio. <b>Multicast</b> alcanza a miembros de un grupo. <b>Unicast</b> tiene un destino. <b>Anycast</b> alcanza una instancia apropiada entre varias.</p>
   <p>La membresía puede ser estática o dinámica. Con cambios dinámicos hace falta acordar vistas, altas, bajas y sospechas de fallo. Entrega atómica de grupo significa que el mensaje se entrega a todos los miembros correctos de una vista o a ninguno, no que cada handler sea transaccional.</p>
+  <div class="def"><b>Atomicidad de mensajes.</b> Un mensaje dirigido a un grupo se entrega a todos los destinatarios de la vista acordada o no se entrega a ninguno.</div>
   <p>Un middleware de grupos mantiene <code>join(grupo, miembro)</code>, <code>leave</code> y <code>send(grupo, mensaje)</code>. El servicio asigna una vista numerada, persiste o retransmite por miembro y entrega solo dentro de la vista acordada. Para atomicidad, un coordinador puede difundir, reunir ACK de todos y recién emitir <code>DELIVER</code>; si no llega a todos, emite <code>ABORT</code>. Esto cuesta dos rondas y puede bloquear ante fallos. Protocolos de reliable atomic multicast reemplazan el coordinador único con orden y acuerdo de vista.</p>
 
   <h3 id="r05-patrones">Patrones de comunicación</h3>
@@ -40,6 +42,15 @@
   <h4 id="r05-pipeline-dag">Pipeline y DAG</h4>
   <p>Un pipeline procesa elementos en streaming: cuando una etapa termina el elemento A puede recibir B mientras la siguiente procesa A. El throughput queda limitado por la etapa más lenta. Replicarla requiere una política de reparto y, si importa el orden, una de recomposición.</p>
   <p>Un DAG generaliza dependencias. Una tarea queda lista cuando completan todos sus predecesores. Si el grafo contiene un ciclo de espera no es DAG y puede haber deadlock. Conviene distinguir <b>worker por etapa</b>, especializado pero potencialmente ocioso, de <b>worker por item</b>, que ejecuta varias transformaciones y reduce transferencias.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Concepto</th><th>Artefactos posibles</th><th>Garantía que hay que agregar</th></tr></thead>
+    <tbody>
+      <tr><td>Filter</td><td>Función, thread, proceso, worker remoto u operador Flink</td><td>Determinismo, idempotencia o estado explícito</td></tr>
+      <tr><td>Pipe</td><td>Pipe del SO, socket, cola de MOM, PUSH PULL de ZeroMQ o stream</td><td>Buffer, framing, orden, backpressure y recuperación</td></tr>
+      <tr><td>Source</td><td>Archivo, socket, tópico o sensor</td><td>Posición y replay si se recupera</td></tr>
+      <tr><td>Sink</td><td>Archivo, base, servicio o tópico</td><td>Commit o deduplicación del efecto</td></tr>
+    </tbody>
+  </table></div>
 
   <h3 id="r05-entrega">ACK, reintentos e idempotencia</h3>
   <p>Un ACK confirma un punto preciso. Puede significar recibido en memoria, persistido, entregado al proceso o efecto confirmado. Si no se define ese punto, “tiene ACK” no expresa una garantía.</p>
@@ -94,6 +105,7 @@ espera_real = aleatorio(0, espera)       # full jitter</code></pre>
 
   <h3 id="r05-zeromq">ZeroMQ</h3>
   <p>ZeroMQ es una biblioteca de sockets con patrones de mensajería. Los procesos se conectan directamente o mediante un proxy construido con los mismos sockets. No ofrece por sí misma persistencia durable ni administración central.</p>
+  <p><code>bind</code> crea un endpoint y <code>connect</code> se conecta a él. No equivalen necesariamente a servidor y cliente: un worker puede hacer connect hacia un ventilador central, mientras el patrón del socket define qué secuencias de mensajes son válidas. ZeroMQ transporta frames, pero la serialización y evolución del contenido quedan a cargo de la aplicación.</p>
   <ul>
     <li><b>REQ REP:</b> alternancia estricta request y reply. Simple, pero un peer caído bloquea el ciclo si no se diseña timeout y reconstrucción.</li>
     <li><b>PUSH PULL:</b> pipeline y distribución de trabajo. PUSH reparte, PULL recibe.</li>
@@ -129,6 +141,23 @@ coordinador al recibir ARRIVE:
         enviar RELEASE(generacion) a los N
         persistir generacion + 1</code></pre>
   <p>Con request reply, cada worker deja su request pendiente hasta liberar. Con MOM, ARRIVE entra a una cola y RELEASE puede publicarse a una cola por worker o tópico, con mensajes durables e idempotentes. Con blocking queues locales, cada worker pone un token y espera una señal propia. Deben definirse caída de un worker, timeout, participantes fijos y reutilización.</p>
+  <pre><code>barrera correcta con blocking queues, N workers:
+    arrivals = BlockingQueue()
+    release[i] = BlockingQueue() para cada worker i
+
+worker i:
+    arrivals.put((generacion, i))
+    if i == coordinador:
+        vistos = set()
+        while size(vistos) &lt; N:
+            (g, j) = arrivals.take()
+            if g == generacion: vistos.add(j)
+        for j in 0..N-1:
+            release[j].put(generacion)
+    release[i].take()
+
+Una sola cola donde cada worker hace put y luego take no es barrera:
+el primer take consume el primer put y cruza sin esperar a los demas.</code></pre>
 
   <h4 id="r05-work-pool">Repartir trabajo y agregar</h4>
   <pre><code>coordinador:
@@ -145,8 +174,39 @@ worker:
         resultado = procesar(request)
         responder(request.task_id, resultado)</code></pre>
   <p>Request reply requiere correlación y timeout por worker. Producer consumer ya implementa la competencia mediante una cola. Publisher subscriber difunde, por lo que no reparte solo: hay que asignar particiones por worker o publicar tareas en canales filtrados y usar otro tópico para resultados.</p>
+  <pre><code>XOR de un archivo por bloques con N workers:
+    acumulado = 0
+    pendientes = mapa task_id -&gt; worker
+    por cada bloque de 4 bytes:
+        asignar task_id una sola vez
+        enviar request(task_id, bloque) a un worker libre
+    por cada respuesta aun pendiente:
+        parcial = response.valor
+        acumulado = acumulado XOR parcial
+        eliminar task_id de pendientes
+    imprimir acumulado
+
+Un retry conserva task_id. Una respuesta duplicada no vuelve a entrar
+porque el task_id ya fue eliminado o marcado como procesado.</code></pre>
+  <pre><code>suma con Publisher Subscriber y P workers conocidos:
+    coordinador divide vector en P rangos
+    publica TASK(worker_id, rango, valores)
+
+    cada worker recibe todos pero procesa solo su worker_id
+    publica RESULT(job_id, worker_id, suma_parcial)
+
+    agregador deduplica por (job_id, worker_id)
+    al reunir P resultados: suma las parciales
+
+stream por ventanas de 1.000.000:
+    asignar window_id = floor(seq / 1_000_000)
+    cada parcial lleva (window_id, sum, count)
+    cerrar cuando las P particiones marcaron fin de ventana
+    promedio = sum_total / count_total</code></pre>
 
   <h4 id="r05-chat">Chat por grupos</h4>
   <p>Un chat de equipos modela cada equipo como grupo. La API mínima es <code>join(team, player)</code>, <code>publish(team, message_id, body)</code>, <code>subscribe(team, offset)</code> y <code>leave</code>. El servidor autoriza membresía, asigna secuencia por equipo, retiene historia según política y permite reanudar desde offset. El cliente deduplica por <code>message_id</code>. Presencia y chat son flujos distintos: perder un heartbeat no debe borrar mensajes.</p>
+  <h4 id="r05-siguiente-numero">Cola distribuida de turnos</h4>
+  <p>Para que hasta diez agentes tomen el siguiente número de una fila, el estado autoritativo no puede ser una variable local en cada agente. Un servicio de turnos conserva <code>ultimo_asignado</code> en almacenamiento con incremento atómico y expone <code>next(agent_id, request_id)</code>. La misma <code>request_id</code> devuelve el mismo turno si hay retry. Otra opción es precargar una cola durable y hacer que cada agente consuma con ACK, pero hay que decidir qué ocurre con un turno entregado si el agente cae antes de iniciar la llamada.</p>
   <div class="examen">En ejercicios con mensajes, dibujá canal, dirección, cardinalidad y ACK. Después recorré el fallo entre “aplicar efecto” y “confirmar”: ahí aparece la necesidad de idempotencia.</div>
 </section>

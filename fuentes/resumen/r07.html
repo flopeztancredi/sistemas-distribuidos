@@ -4,6 +4,7 @@
 
   <h3 id="r07-escalabilidad">Escalabilidad</h3>
   <div class="def"><b>Escalabilidad.</b> Capacidad de conservar objetivos de servicio cuando crecen usuarios, datos, operaciones o distribución geográfica mediante una cantidad razonable de recursos.</div>
+  <p>La cátedra distingue tres dimensiones: <b>tamaño</b>, más usuarios, datos o recursos; <b>geografía</b>, mayor distancia y cantidad de ubicaciones; y <b>administración</b>, nuevas organizaciones, políticas, sintaxis, semánticas o servicios que deben interoperar. Un sistema puede escalar en una dimensión y fallar en otra.</p>
   <p>Antes de elegir tecnología se identifica la dimensión que crece y el recurso limitante: CPU, memoria, disco, IOPS, ancho de banda, conexiones, locks, coordinador o capacidad de una partición.</p>
   <div class="tablewrap"><table>
     <thead><tr><th>Técnica</th><th>Qué alivia</th><th>Problema nuevo</th></tr></thead>
@@ -87,6 +88,8 @@
       <tr><td>Serverless</td><td>Función o servicio administrado</td><td>Escala automática y pago por uso</td><td>Cold start, límites, lock in y estado externo</td></tr>
     </tbody>
   </table></div>
+  <div class="def"><b>SOA.</b> Arquitectura que descompone aplicaciones en servicios alineados con procesos de negocio, publicados en un registro, comunicados mediante un bus y combinados por orquestaciones de nivel superior.</div>
+  <div class="def"><b>Microservicio.</b> Servicio cohesivo que encapsula lógica y ownership de sus datos, se despliega y escala de forma independiente y se integra mediante contratos de red.</div>
   <p>La granularidad se elige por cohesión, autonomía de datos, ritmo de cambio y propiedad del equipo, no por cantidad arbitraria de líneas. Una transición segura extrae una capacidad con frontera clara, observa su tráfico y evita compartir tablas como contrato permanente.</p>
   <p>SOA suele integrar servicios más gruesos y puede usar un Enterprise Service Bus. Microservicios enfatizan equipos autónomos, despliegue independiente, automatización y endpoints livianos. Ambos son arquitecturas orientadas a servicios.</p>
   <p>Un <b>API Gateway</b> ofrece un frente estable para clientes: termina autenticación, aplica cuotas, enruta, traduce versiones y puede agregar respuestas. Evita que el cliente conozca cada instancia o servicio interno. No debe concentrar lógica de negocio ni convertirse en un monolito oculto. Se replica y su configuración se versiona.</p>

@@ -3,6 +3,7 @@
   <p class="intro">Consenso hace que procesos correctos decidan un mismo valor pese a fallos. Elegir líder resuelve quién coordina durante una época, pero no alcanza para preservar decisiones entre líderes. Paxos y Raft combinan quorums, términos y logs para conservar safety durante cambios.</p>
 
   <h3 id="r13-lider">Elección de líder</h3>
+  <div class="def"><b>Elección de líder.</b> Algoritmo que selecciona un proceso del grupo para un rol particular y permite reelegir cuando el líder se retira o falla.</div>
   <p>Propiedades esperadas:</p>
   <ul>
     <li><b>Safety:</b> a lo sumo un líder válido por término o vista.</li>
@@ -24,6 +25,7 @@ COORDINATOR(max_id): segunda vuelta para informar</code></pre>
   <p>En el peor caso genera O(N cuadrado) mensajes. Presupone conocer a todos y poder contactarlos. El mayor ID gana, no el más capaz salvo que el ID codifique esa política.</p>
 
   <h3 id="r13-consenso">Problema del consenso</h3>
+  <div class="def"><b>Consenso.</b> Dado un conjunto de procesos y un punto de decisión, todos los procesos correctos deben acordar el mismo valor.</div>
   <p>Cada proceso propone un valor y debe decidir:</p>
   <ul>
     <li><b>Agreement:</b> procesos correctos no deciden distinto.</li>
@@ -32,6 +34,7 @@ COORDINATOR(max_id): segunda vuelta para informar</code></pre>
     <li><b>Termination:</b> procesos correctos finalmente deciden.</li>
   </ul>
   <p>En un sistema completamente asincrónico con al menos un posible crash, ningún algoritmo determinista garantiza siempre termination. Los protocolos prácticos preservan safety sin tiempo y obtienen liveness bajo sincronía parcial, timeouts y períodos estables.</p>
+  <div class="def"><b>Quorum de mayoría.</b> Para tolerar <code>f</code> caídas y todavía decidir por mayoría se requieren al menos <code>N = 2f + 1</code> procesos. Cualquier par de mayorías se intersecta.</div>
 
   <h4 id="r13-rondas">Consenso sincrónico por rondas</h4>
   <p>Si se conoce una cota de <code>f</code> crashes y las rondas tienen entrega acotada, cada proceso difunde los valores conocidos durante <code>f + 1</code> rondas. La ronda extra permite que un valor recibido justo antes de caer se propague. Al final todos aplican la misma función determinista, por ejemplo mínimo.</p>
@@ -43,8 +46,10 @@ decidir min(known)</code></pre>
   <p>La prueba depende de rondas y límites conocidos. Sin ellos, no recibir en una ronda no distingue crash de demora.</p>
 
   <h3 id="r13-bizantinos">Generales bizantinos</h3>
+  <div class="def"><b>Falla bizantina.</b> Comportamiento arbitrario en tiempo y respuesta, incluso enviando información diferente a participantes distintos o actuando de forma maliciosa.</div>
   <p>Un participante bizantino puede mentir, omitir o enviar valores diferentes. En el problema clásico de mensajes orales sin firmas, para tolerar <code>f</code> traidores hacen falta:</p>
   <pre><code>N &gt;= 3f + 1</code></pre>
+  <div class="def"><b>Quorum bizantino.</b> Para tolerar <code>f</code> procesos bizantinos en el modelo clásico se requieren al menos <code>3f + 1</code> procesos, de los cuales al menos <code>2f + 1</code> son correctos.</div>
   <p>Con tres generales y un traidor, los leales no pueden distinguir si el comandante mintió o el mensajero alteró. Con cuatro y uno, cada general reenvía lo que recibió y la mayoría permite filtrar una versión inconsistente.</p>
   <p>El algoritmo OM(f) reenvía recursivamente valores por caminos de longitud hasta <code>f + 1</code> y aplica mayoría. Su costo crece rápidamente. Firmas digitales cambian supuestos porque un traidor no puede falsificar lo dicho por otro, aunque todavía puede omitir.</p>
   <div class="warn">Tolerar crash con mayoría de <code>2f + 1</code> réplicas no equivale a tolerar Byzantine. Con actores arbitrarios, la cota clásica es <code>3f + 1</code>.</div>
@@ -61,6 +66,7 @@ decidir min(known)</code></pre>
   <p>Cuatro servicios miden <code>1010, 1000, 1000, 1030</code>. Un algoritmo válido debe declarar la función de decisión. En una ronda sin fallos, cada uno difunde <code>(id, medición)</code>, espera los cuatro valores y aplica mediana inferior o mayoría de valor si existe. Con mediana ordena <code>[1000, 1000, 1010, 1030]</code> y todos deciden 1000 por la misma regla. Si se tolera un crash en rondas sincrónicas, se propagan conjuntos durante dos rondas antes de decidir. El protocolo acuerda un valor, no demuestra que el sensor sea físicamente correcto.</p>
 
   <h3 id="r13-paxos">Paxos</h3>
+  <div class="def"><b>Paxos.</b> Protocolo de consenso que elige un único valor entre propuestas concurrentes mientras pueda comunicarse una mayoría de acceptors.</div>
   <p>Paxos decide un valor por instancia. Roles lógicos:</p>
   <ul>
     <li><b>Proposer:</b> propone número y valor.</li>

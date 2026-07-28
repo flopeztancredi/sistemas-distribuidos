@@ -3,6 +3,7 @@
   <p class="intro">Los relojes físicos aproximan tiempo real, los lógicos representan causalidad. A partir de causalidad se definen órdenes de entrega y cortes consistentes. Esta sección desarrolla algoritmos y condiciones, porque son preguntas centrales de final.</p>
 
   <h3 id="r12-fisicos">Relojes físicos, drift y skew</h3>
+  <div class="def"><b>Tiempo.</b> Magnitud usada para medir duración y separación entre eventos. En cómputo se modela de forma discreta y monotónica: una fuente usada para duraciones no debe retroceder.</div>
   <div class="def"><b>Drift.</b> Diferencia entre la velocidad de un reloj y la del tiempo ideal.</div>
   <div class="def"><b>Skew.</b> Diferencia instantánea entre dos lecturas de reloj.</div>
   <p>Si la tasa de drift está acotada por <code>rho</code>, dos relojes que se sincronizaron juntos pueden separarse hasta aproximadamente <code>2 * rho * tiempo</code>. Para mantener skew menor que <code>delta</code> hay que resincronizar antes de <code>delta / (2 * rho)</code>.</p>
@@ -16,10 +17,12 @@ incertidumbre aproximada = RTT/2</code></pre>
   <p>Se repite y se prefiere la muestra con menor RTT, porque probablemente tuvo menos cola. Si ida y vuelta son asimétricas, el error puede acercarse a esa asimetría.</p>
 
   <h4 id="r12-ntp">NTP</h4>
+  <div class="def"><b>NTP.</b> Protocolo para sincronizar muchos relojes contra UTC con tolerancia a demoras y caídas, diseñado para sincronización, alta disponibilidad y escalabilidad.</div>
   <p>Con cuatro timestamps, <code>t1</code> salida cliente, <code>t2</code> recepción servidor, <code>t3</code> salida servidor y <code>t4</code> recepción cliente:</p>
   <pre><code>offset theta = ((t2 - t1) + (t3 - t4)) / 2
 delay  delta = (t4 - t1) - (t3 - t2)</code></pre>
-  <p>NTP organiza servidores en estratos respecto de fuentes de referencia. Modos: cliente servidor, simétrico entre peers y broadcast o multicast con menor precisión. Filtra muestras, estima drift y evita depender de una única fuente.</p>
+  <p>NTP organiza servidores en estratos: 0 son fuentes físicas como GPS o relojes atómicos, 1 se conecta directamente a ellas y cada estrato N se sincroniza con fuentes de N menos 1. Los peers del mismo estrato pueden darse backup mutuo. Modos: cliente servidor, simétrico entre peers y broadcast o multicast con menor precisión.</p>
+  <p>La tolerancia a fallos no depende de una sola medición: usa servidores y rutas redundantes, consulta varias fuentes, descarta muestras dispersas o con RTT alto y cambia de fuente si una se vuelve inválida. Usa UDP 123 porque una medición perdida se reemplaza por otra y retransmitir alteraría la demora que se intenta estimar.</p>
 
   <h3 id="r12-causalidad">Eventos y happened before</h3>
   <div class="def"><b>Happened before.</b> Relación <code>a -&gt; b</code> si ambos eventos pertenecen al mismo proceso y a ocurre antes, si a es envío y b su recepción, o por transitividad.</div>
@@ -47,9 +50,13 @@ recepcion en i de vector W:
   <pre><code>a -&gt; b  si y solo si  V(a) &lt; V(b)
 a || b  si V(a) y V(b) son incomparables</code></pre>
   <p>Lamport cuesta un entero por mensaje y no detecta concurrencia. Vectores cuestan N y requieren gestionar membresía, pero capturan causalidad exactamente.</p>
+  <div class="ej">En tres procesos, <code>a = [1,0,0]</code> y <code>b = [2,1,0]</code>: <code>a &lt; b</code>, por lo tanto a ocurrió antes que b. En cambio <code>c = [2,1,0]</code> y <code>d = [1,0,1]</code> son incomparables: c supera a d en los dos primeros componentes y d supera a c en el tercero, por lo tanto son concurrentes. Para reconstruir un diagrama, cada incremento identifica un evento local y un salto en otro componente revela información recibida mediante un mensaje.</div>
 
   <h3 id="r12-sincronismo">Sincronismo de comunicación</h3>
-  <p><b>Steadiness</b> describe regularidad del intervalo entre mensajes. <b>Tightness</b> describe cercanía temporal de copias del mismo mensaje en distintos receptores. Son propiedades distintas.</p>
+  <div class="def"><b>Sincronismo distribuido.</b> Un protocolo es sincrónico si sus acciones tienen cotas temporales conocidas; parcialmente sincrónico si las cotas existen pero se desconocen o aparecen después de un momento incierto; asincrónico si no se presupone una cota.</div>
+  <div class="def"><b>Steadiness, sigma.</b> Máxima diferencia entre el mayor y el menor tiempo de delivery observado por un proceso: <code>sigma = max(TDmax - TDmin)</code>. Mide qué tan regular es su recepción.</div>
+  <div class="def"><b>Tightness, tau.</b> Máxima diferencia entre los tiempos de delivery del mismo mensaje en dos receptores: <code>tau = max |tD_p(m) - tD_q(m)|</code>. Mide qué tan simultáneamente lo observan.</div>
+  <p>Steadiness compara mensajes diferentes desde el punto de vista de un receptor. Tightness compara receptores para el mismo mensaje. Un flujo puede llegar regularmente a cada nodo y, sin embargo, con mucha diferencia entre nodos.</p>
   <div class="tablewrap"><table>
     <thead><tr><th>Protocolo</th><th>Garantía temporal</th><th>Mecanismo</th></tr></thead>
     <tbody>
@@ -63,7 +70,8 @@ a || b  si V(a) y V(b) son incomparables</code></pre>
   <p>Un sistema sincrónico conoce cotas de cómputo, transmisión y clock drift. Uno asincrónico no las presupone. Parcialmente sincrónico significa que las cotas existen después de un momento desconocido o son desconocidas para el algoritmo.</p>
 
   <h3 id="r12-orden">Órdenes de mensajes</h3>
-  <p>Recepción es llegada al middleware. Delivery es exposición a la aplicación. Una <b>hold back queue</b> retiene mensajes hasta satisfacer la condición del orden.</p>
+  <div class="def"><b>Delivery.</b> Procesamiento de un mensaje por la aplicación, eventualmente con cambio de estado. Es distinto de la recepción física por el nodo.</div>
+  <p>Una <b>hold back queue</b> retiene mensajes recibidos hasta satisfacer la condición del orden.</p>
   <div class="tablewrap"><table>
     <thead><tr><th>Orden</th><th>Condición</th><th>Metadata típica</th></tr></thead>
     <tbody>
@@ -74,6 +82,7 @@ a || b  si V(a) y V(b) son incomparables</code></pre>
     </tbody>
   </table></div>
   <p>FIFO no ordena emisores diferentes. Causal ordena solo dependencias. Total puede decidir <code>m2, m1</code> en todos y aun violar causalidad si <code>m1 -&gt; m2</code>. Para total causal se combinan ambas condiciones.</p>
+  <div class="ej">P1 envía <code>m1 = "¿estado?"</code> a P2. Después de recibirlo, P2 envía <code>m2 = "listo"</code> al grupo, por lo tanto <code>m1 -&gt; m2</code>. Un sequencer puede asignar primero a m2 y hacer que todos entreguen <code>m2, m1</code>: hay orden total porque todos coinciden, pero se violó causalidad porque entregaron la respuesta antes que la pregunta. Si los emisores fueran independientes, invertirlos no demostraría una violación causal.</div>
   <pre><code>FIFO desde emisor j:
     entregar m si seq(m) == siguiente[j]
     luego incrementar y revisar buffer
@@ -84,9 +93,13 @@ causal con vector W recibido en proceso i:
   <p>Orden total puede implementarse con sequencer que asigna número global, token que serializa emisiones o consenso por posición de log. El sequencer es simple pero necesita replicación para no ser único punto de fallo.</p>
 
   <h3 id="r12-estado">Estado global y cortes</h3>
-  <p>Un estado global combina un estado local de cada proceso y el estado de canales. Un corte elige un prefijo de la historia de cada proceso.</p>
+  <div class="def"><b>Estado local.</b> Tupla de todas las variables internas de un proceso en un punto de su historia.</div>
+  <div class="def"><b>Estado global.</b> Unión de los estados locales de todos los procesos y el estado de los canales, formado por mensajes enviados pero todavía no entregados.</div>
+  <div class="def"><b>Historia.</b> Secuencia de eventos procesados por un proceso considerado como máquina de estados.</div>
+  <div class="def"><b>Corte.</b> Unión de un prefijo de la historia de cada proceso. Su frontera contiene el último evento incluido de cada proceso.</div>
   <div class="def"><b>Corte consistente.</b> Si contiene un evento, contiene todas sus causas. En particular, no contiene una recepción sin contener el envío correspondiente.</div>
   <p>Puede contener un envío sin recepción: el mensaje está en tránsito y pertenece al estado del canal. Un corte inconsistente describe un estado global imposible.</p>
+  <div class="ej">P0 tiene $100, descuenta $10 y envía una transferencia a P1, que parte de $0 y acredita al recibir. <code>{P0: 90, P1: 0, canal: $10}</code> es válido. <code>{P0: 100, P1: 10}</code> es inválido: contiene la recepción sin el envío y crea dinero sin causa.</div>
 
   <h4 id="r12-chandy">Snapshot de Chandy y Lamport</h4>
   <p>Supuestos: canales confiables FIFO, procesos que no se detienen y grafo conectado.</p>
@@ -108,5 +121,6 @@ al recibir primer MARKER por canal c:
 termina cuando cada proceso recibio MARKER por todos sus canales entrantes</code></pre>
   <p>FIFO garantiza que los mensajes previos al marker por un canal llegan antes que él. En el canal que trae el primer marker, no puede quedar un mensaje pre snapshot por registrar. El algoritmo no congela el sistema: captura un corte consistente mientras continúa.</p>
   <p>Usos: checkpoint distribuido, detectar terminación, deadlock, tokens perdidos y propiedades estables. Después hay que recolectar estados locales y de canal para analizarlos.</p>
+  <div class="def"><b>Comunicación confiable.</b> Garantiza integridad, los datos no llegan corruptos; validez, lo entregado corresponde a lo enviado; y atomicidad de delivery, el mensaje se entrega completo y, en grupos, a todos los destinatarios acordados o a ninguno.</div>
   <div class="examen">En Lamport, nunca afirmar la inversa. En snapshots, dibujá al menos un mensaje en tránsito y explicá por qué una recepción sin envío vuelve inconsistente al corte.</div>
 </section>

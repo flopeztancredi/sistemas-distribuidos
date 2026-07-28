@@ -34,7 +34,7 @@
   <p>Un retry puede mejorar probabilidad de entrega pero consumir el tiempo restante. La política correcta pregunta cuántos intentos caben antes del deadline y qué modo seguro se activa si no alcanzan.</p>
 
   <h4 id="r14-industrial">Arquitecturas industriales</h4>
-  <p>La automatización clásica usa niveles: sensores y actuadores, controladores PLC, supervisión SCADA, ejecución de manufactura y planificación empresarial. Los niveles bajos requieren tiempos más estrictos y redes deterministas; los altos agregan y planifican.</p>
+  <p>La automatización clásica usa niveles: sensores y actuadores, controladores PLC, supervisión SCADA, ejecución de manufactura y planificación empresarial. Los niveles bajos requieren tiempos más estrictos y redes deterministas como fieldbus, Profibus o Profinet; los altos agregan y planifican. Ethernet o TCP sin una política temporal adicional no garantizan deadline solo por ser rápidos.</p>
   <p>En automoción, una arquitectura distribuida por función conecta muchas ECUs. Una arquitectura zonal agrupa dispositivos por ubicación física en controladores de zona y lleva backbone de alta velocidad hacia cómputo central. Reduce cableado y consolida cómputo, pero vuelve críticos backbone y controladores centrales, que deben redundarse y aislarse.</p>
 
   <h3 id="r14-paradigmas">Event triggered y time triggered</h3>
@@ -59,6 +59,10 @@
     <li><b>Actuador:</b> aplica la acción sobre la planta.</li>
     <li><b>Perturbación:</b> influencia externa no controlada.</li>
   </ul>
+  <div class="def"><b>Variable controlada.</b> Salida o condición que se desea llevar a un valor, por ejemplo la temperatura de una habitación.</div>
+  <div class="def"><b>Variable manipulada.</b> Cantidad que el controlador modifica para afectar la variable controlada, por ejemplo potencia o velocidad del ventilador.</div>
+  <div class="def"><b>Lazo abierto.</b> La acción de control no usa la salida medida. No corrige perturbaciones ni error real.</div>
+  <div class="def"><b>Lazo cerrado.</b> La salida se mide, se compara con la referencia y el error realimenta la decisión del controlador.</div>
   <pre><code>         error              accion
 setpoint -&gt; [Controlador] -&gt; [Actuador] -&gt; [Planta] -&gt; salida
    ^                                              |
@@ -68,6 +72,7 @@ setpoint -&gt; [Controlador] -&gt; [Actuador] -&gt; [Planta] -&gt; salida
 
   <h3 id="r14-programacion">Programación y scheduling</h3>
   <p>Una tarea RT debe tener ejecución acotada: evitar memoria dinámica impredecible, page faults, locks sin cota, I/O desconocido y garbage collection no controlado. Las interrupciones y drivers también consumen presupuesto.</p>
+  <p>Un backoff exponencial sin cantidad máxima es incompatible con hard RT porque no tiene peor caso finito útil. Si se permiten retries, cantidad, timeout y demora deben caber explícitamente dentro del deadline y terminar en una acción segura.</p>
   <div class="def"><b>Inversión de prioridades.</b> Una tarea alta queda bloqueada por un lock de una baja, mientras tareas medias impiden que la baja ejecute y libere.</div>
   <p><b>Priority inheritance</b> eleva temporalmente la prioridad de quien retiene el recurso. <b>Priority ceiling</b> asigna un techo a recursos y limita bloqueos de forma más analizable.</p>
   <p>En un conjunto periódico simple, utilización es <code>U = suma(Ci / Ti)</code>, donde <code>Ci</code> es WCET y <code>Ti</code> período. Que <code>U &lt; 1</code> es necesario en un procesador, pero no siempre suficiente bajo cualquier scheduler y blocking. La prueba real incluye deadlines, prioridades, interferencia y secciones críticas.</p>

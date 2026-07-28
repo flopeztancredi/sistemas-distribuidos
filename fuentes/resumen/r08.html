@@ -71,18 +71,51 @@ si W &gt; N/2, dos escrituras de quorum intersectan</code></pre>
 
   <h3 id="r08-dsm">Distributed Shared Memory</h3>
   <div class="def"><b>DSM.</b> Abstracción que presenta un espacio de memoria compartido sobre máquinas con memoria físicamente separada.</div>
-  <p>El enfoque ingenuo guarda todo en un servidor y convierte cada acceso en remoto, con cuello de botella. Migrar páginas acerca una página a quien la usa, pero puede causar ping pong por false sharing. Replicar páginas de solo lectura escala lecturas. Permitir escritura en varias copias exige invalidación o actualización y un modelo de consistencia.</p>
-  <p>DSM simplifica algunos algoritmos, pero oculta una diferencia de costo enorme entre acceso local y remoto. La granularidad de página puede transferir datos sin relación y convertir dos variables independientes en contención.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Variante</th><th>Operación</th><th>Consistencia y costo</th></tr></thead>
+    <tbody>
+      <tr><td>Naive</td><td>Todas las páginas viven en un servidor. Cada read o write es un request y el servidor serializa con locks.</td><td>Consistencia simple, red en cada acceso, cuello y fallo único.</td></tr>
+      <tr><td>Migración</td><td>El servidor presta una página completa a un cliente. Si otro la pide, espera o la página migra desde el dueño actual.</td><td>Una sola copia escribible evita conflictos, pero una página disputada hace ping pong.</td></tr>
+      <tr><td>Réplicas de solo lectura</td><td>Los reads crean mirrors locales. Los writes van al servidor, que invalida todos los mirrors.</td><td>Lecturas locales rápidas, escrituras caras y tormenta de recarga si cambian seguido.</td></tr>
+      <tr><td>Réplicas de lectura y escritura</td><td>Los clientes escriben copias y un secuenciador central ordena y difunde cada actualización.</td><td>Más concurrencia, pero coherencia, orden y recuperación son complejos.</td></tr>
+    </tbody>
+  </table></div>
+  <pre><code>replicacion de solo lectura:
+    cliente sin pagina -&gt; READ_PAGE al servidor
+    servidor registra al cliente y devuelve mirror
+    cliente lee localmente
+
+    WRITE siempre llega al servidor
+    servidor actualiza version
+    servidor -&gt; INVALIDATE(version) a cada mirror
+    cada cliente descarta y vuelve a pedir cuando necesite</code></pre>
+  <p>Esta variante conviene cuando hay muchas lecturas y pocas escrituras, por ejemplo tablas de configuración grandes que cambian raramente. Es perjudicial con escrituras frecuentes o false sharing, porque cada cambio invalida páginas completas y obliga a transferirlas de nuevo.</p>
+  <p>DSM simplifica algunos algoritmos, pero oculta una diferencia de costo enorme entre acceso local y remoto. La granularidad de página puede transferir datos sin relación y convertir dos variables independientes en contención. También desalienta diseñar particiones y ownership explícitos, por eso no suele ser la primera elección en multicomputing.</p>
 
   <h3 id="r08-dfs">Distributed File Systems</h3>
   <p>Un DFS presenta archivos remotos con nombres, permisos y operaciones conocidas. Las preguntas centrales son ubicación de metadata, cache, consistencia, replicación, tamaño de bloque y conducta ante desconexión.</p>
   <h4 id="r08-nfs">NFS</h4>
   <p>NFS permite montar un filesystem remoto. Una VFS del cliente traduce operaciones a RPC contra el servidor. Los file handles identifican objetos sin depender de una sesión permanente. El cache del cliente reduce red, pero obliga a definir cuándo revalidar atributos y datos. El diseño históricamente stateless simplifica reinicio del servidor, aunque locks y versiones modernas agregan estado.</p>
+  <pre><code>aplicacion cliente
+    -&gt; VFS del kernel
+        +-&gt; filesystem local
+        \-&gt; NFS client -&gt; RPC -&gt; NFS server -&gt; VFS -&gt; disco
+
+RPC Bind informa el puerto del servicio.
+La misma interfaz POSIX decide si la operacion es local o remota.</code></pre>
   <p>Conviene para compartir directorios y archivos con semántica familiar en una LAN. Es perjudicial para procesamiento masivo con muchas operaciones pequeñas o para un dataset que excede y satura un servidor central.</p>
 
   <h4 id="r08-hdfs">HDFS</h4>
   <p>HDFS optimiza archivos grandes y acceso secuencial. El NameNode mantiene namespace y mapa de bloques. DataNodes guardan bloques grandes replicados. El cliente consulta metadata y transfiere datos directamente con DataNodes. Para escribir, el bloque atraviesa un pipeline de réplicas y se confirma según la política.</p>
-  <p>HDFS mueve cómputo hacia datos y tolera caída de nodos re replicando bloques. No está pensado para baja latencia, millones de archivos diminutos ni escrituras aleatorias generales. Su consistencia y patrón de append son deliberadamente más restringidos que POSIX.</p>
+  <pre><code>lectura:
+    cliente -&gt; NameNode: ubicaciones del bloque
+    cliente -&gt; DataNode cercano: bytes
+
+escritura con factor 3:
+    cliente -&gt; DN1 -&gt; DN2 -&gt; DN3
+    ACK vuelve DN3 -&gt; DN2 -&gt; DN1 -&gt; cliente</code></pre>
+  <p>Los DataNodes envían heartbeats y reportes de bloques. Si uno cae, el NameNode ordena re replicar hasta recuperar el factor. Rack awareness ubica copias en dominios distintos. Los bloques grandes reducen metadata y favorecen throughput; el costo es desperdicio o metadata excesiva con archivos pequeños.</p>
+  <p>HDFS mueve cómputo hacia datos y tolera hardware commodity. No está pensado para baja latencia, millones de archivos diminutos ni escrituras aleatorias generales. Su consistencia y patrón write once o append son deliberadamente más restringidos que POSIX.</p>
   <div class="tablewrap"><table>
     <thead><tr><th></th><th>NFS</th><th>HDFS</th></tr></thead>
     <tbody>

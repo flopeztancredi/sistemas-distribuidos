@@ -24,7 +24,7 @@ reduce(k2, vals)  -&gt; lista de resultados</code></pre>
   <ol>
     <li>Particionar archivos de entrada en splits.</li>
     <li>Asignar cada split a un mapper, preferentemente cerca de sus datos.</li>
-    <li>El mapper emite pares intermedios y los divide por reducer con una función de partición.</li>
+    <li>El mapper emite pares intermedios, los divide por reducer con una función de partición y materializa archivos intermedios locales para el shuffle.</li>
     <li>Un combiner opcional agrega localmente si la operación es asociativa y conmutativa.</li>
     <li>Shuffle transfiere cada partición al reducer correspondiente y sort agrupa claves.</li>
     <li>Cada reducer procesa una clave y escribe output durable.</li>
@@ -59,6 +59,7 @@ las tres ramas se unen solo para publicar el reporte</code></pre>
   <h3 id="r06-mpi">MPI y Open MPI</h3>
   <div class="def"><b>MPI.</b> Estándar de pasaje de mensajes para programas paralelos donde procesos conocidos coordinan explícitamente comunicación punto a punto y colectiva.</div>
   <p>Todos los procesos ejecutan el mismo programa en el modelo SPMD, pero usan su <b>rank</b> dentro de un communicator para tomar roles diferentes. El tamaño del communicator indica cuántos participan.</p>
+  <p>Las operaciones colectivas se invocan en el mismo orden desde todos los ranks del communicator. En <code>Bcast</code>, por ejemplo, el root aporta el buffer y los demás participan en la misma llamada para recibirlo. Saltear la colectiva en un rank puede bloquear al resto.</p>
   <div class="tablewrap"><table>
     <thead><tr><th>Primitiva</th><th>Efecto</th></tr></thead>
     <tbody>

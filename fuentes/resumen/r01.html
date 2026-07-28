@@ -3,11 +3,14 @@
   <p class="intro">Un sistema distribuido coordina computadoras autónomas mediante mensajes para ofrecer un resultado común. El punto de partida no es memorizar arquitecturas, sino entender qué cambia cuando no hay memoria, reloj ni destino de fallo compartidos, y qué decisiones compensan esas limitaciones.</p>
 
   <h3 id="r01-definicion">Qué hace distribuido a un sistema</h3>
-  <div class="def"><b>Sistema distribuido.</b> Conjunto de computadoras independientes conectadas por una red que coordinan acciones intercambiando mensajes y que, para quien lo usa, se comportan como un sistema coherente.</div>
-  <p>La definición combina dos perspectivas que deben cumplirse a la vez:</p>
+  <div class="def"><b>Sistema distribuido, Tanenbaum.</b> Colección de computadoras independientes que el usuario ve como un solo sistema coherente.</div>
+  <div class="def"><b>Sistema distribuido, Coulouris.</b> Sistema de computadoras interconectadas por una red que se comunican y coordinan sus acciones intercambiando mensajes.</div>
+  <div class="def"><b>Sistema distribuido, Lamport.</b> Aquel en el que el fallo de una computadora que ni siquiera sabías que existía puede dejar inutilizable la tuya.</div>
+  <p>No son tres redacciones intercambiables. Cada una fija una dimensión que se usa durante toda la materia:</p>
   <ul>
-    <li><b>Perspectiva interna:</b> hay procesos autónomos, cada uno con memoria y control propios. La única evidencia directa sobre otro nodo llega por mensajes.</li>
-    <li><b>Perspectiva externa:</b> la distribución no obliga al usuario a conocer dónde vive cada recurso ni qué nodo resolvió cada operación.</li>
+    <li><b>Tanenbaum, transparencia:</b> las computadoras son autónomas por dentro, pero la distribución se presenta como un sistema coherente.</li>
+    <li><b>Coulouris, mecanismo:</b> la coordinación ocurre por mensajes sobre una red, no mediante memoria global.</li>
+    <li><b>Lamport, fallo parcial:</b> una dependencia remota puede fallar mientras el resto sigue ejecutando, incluso si quien usa el sistema desconoce esa dependencia.</li>
   </ul>
   <p>De la autonomía aparecen los problemas centrales de la materia:</p>
   <ul>

@@ -1203,11 +1203,14 @@
   <p class="intro">Un sistema distribuido coordina computadoras autónomas mediante mensajes para ofrecer un resultado común. El punto de partida no es memorizar arquitecturas, sino entender qué cambia cuando no hay memoria, reloj ni destino de fallo compartidos, y qué decisiones compensan esas limitaciones.</p>
 
   <h3 id="r01-definicion">Qué hace distribuido a un sistema</h3>
-  <div class="callout"><b>Sistema distribuido.</b> Conjunto de computadoras independientes conectadas por una red que coordinan acciones intercambiando mensajes y que, para quien lo usa, se comportan como un sistema coherente.</div>
-  <p>La definición combina dos perspectivas que deben cumplirse a la vez:</p>
+  <div class="callout"><b>Sistema distribuido, Tanenbaum.</b> Colección de computadoras independientes que el usuario ve como un solo sistema coherente.</div>
+  <div class="callout"><b>Sistema distribuido, Coulouris.</b> Sistema de computadoras interconectadas por una red que se comunican y coordinan sus acciones intercambiando mensajes.</div>
+  <div class="callout"><b>Sistema distribuido, Lamport.</b> Aquel en el que el fallo de una computadora que ni siquiera sabías que existía puede dejar inutilizable la tuya.</div>
+  <p>No son tres redacciones intercambiables. Cada una fija una dimensión que se usa durante toda la materia:</p>
   <ul class="study-list">
-    <li><b>Perspectiva interna:</b> hay procesos autónomos, cada uno con memoria y control propios. La única evidencia directa sobre otro nodo llega por mensajes.</li>
-    <li><b>Perspectiva externa:</b> la distribución no obliga al usuario a conocer dónde vive cada recurso ni qué nodo resolvió cada operación.</li>
+    <li><b>Tanenbaum, transparencia:</b> las computadoras son autónomas por dentro, pero la distribución se presenta como un sistema coherente.</li>
+    <li><b>Coulouris, mecanismo:</b> la coordinación ocurre por mensajes sobre una red, no mediante memoria global.</li>
+    <li><b>Lamport, fallo parcial:</b> una dependencia remota puede fallar mientras el resto sigue ejecutando, incluso si quien usa el sistema desconoce esa dependencia.</li>
   </ul>
   <p>De la autonomía aparecen los problemas centrales de la materia:</p>
   <ul class="study-list">
@@ -1310,6 +1313,8 @@ volumes:
   <p class="intro">Antes de distribuir entre máquinas hay que dominar los mismos problemas dentro de una: intercalaciones, exclusión, espera y comunicación. La red cambia los mecanismos disponibles, pero no elimina las invariantes que deben preservarse.</p>
 
   <h3 id="r02-modelos">Threads, procesos y computadoras</h3>
+  <div class="callout"><b>Concurrencia.</b> Varias actividades progresan durante el mismo intervalo y sus eventos pueden intercalarse, incluso sobre un único procesador.</div>
+  <div class="callout"><b>Paralelismo.</b> Varias actividades ejecutan simultáneamente sobre recursos físicos distintos.</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Modelo</th><th>Memoria</th><th>Comunicación</th><th>Aislamiento</th></tr></thead>
     <tbody>
@@ -1358,7 +1363,7 @@ lock:
   <h4 id="r02-problemas-clasicos">Problemas clásicos</h4>
   <p><b>Productor consumidor</b> requiere exclusión sobre el buffer, espera si está vacío y, si es acotado, espera si está lleno. <b>Lectores escritores</b> permite lectores simultáneos pero excluye escritores; priorizar siempre a un grupo puede dejar al otro sin progreso. <b>Filósofos comensales</b> muestra deadlock si todos retienen un recurso mientras esperan el siguiente.</p>
   <div class="callout"><b>Deadlock.</b> Conjunto de actividades que esperan circularmente recursos retenidos por otras del mismo conjunto.</div>
-  <p>Las condiciones de Coffman son exclusión mutua, retención mientras se espera, ausencia de desalojo y espera circular. Romper cualquiera evita ese tipo de deadlock. Ordenar globalmente la adquisición de locks rompe la espera circular.</p>
+  <p>Un grafo wait for dibuja una arista de Pi a Pj cuando Pi espera un recurso retenido por Pj. Un ciclo indica posibilidad de deadlock. Las condiciones de Coffman son exclusión mutua, retención mientras se espera, ausencia de desalojo y espera circular. Romper cualquiera evita ese tipo de deadlock. Ordenar globalmente la adquisición de locks rompe la espera circular.</p>
 
   <h3 id="r02-ipc">IPC entre procesos</h3>
   <div class="table-wrap"><table>
@@ -1411,7 +1416,7 @@ cliente TCP:
 
     </section>
 
-    <section class="chapter" id="r03" data-title="paralelizacion arquitectura fisica descomponer trabajo amdahl gustafson work span particion balance arquitecturas procesamiento nombres direcciones discovery documentar una vista minima para final">
+    <section class="chapter" id="r03" data-title="paralelizacion arquitectura fisica descomponer trabajo amdahl gustafson work span particion balance arquitecturas procesamiento nombres direcciones discovery documentar una que debe mostrar cada diagrama vista minima para final">
       <div class="chapter-head">
         <div class="chapter-number">03</div>
         <div><h2>Paralelización y arquitectura física</h2></div>
@@ -1470,11 +1475,13 @@ work pool dinamico:
     <li><b>NUMA:</b> cada procesador tiene memoria cercana más rápida y accede a memoria remota con mayor costo.</li>
   </ul>
   <p>En un <b>multicomputer</b>, cada nodo tiene memoria privada y se conecta por red. Escala capacidad y dominio físico, pero cualquier dato compartido debe convertirse en mensajes, replicación o almacenamiento remoto.</p>
+  <div class="callout"><b>MIMD, multiprocessor contra multicomputer.</b> En ambos hay múltiples flujos de instrucciones y datos. Un multiprocessor comparte memoria o reloj de hardware; un multicomputer está formado por computadoras completas sin memoria ni reloj compartidos. Un sistema distribuido pertenece a esta segunda familia.</div>
   <div class="callout warning">NUMA tiene espacio de direcciones compartido, aunque el costo dependa de la ubicación. Multicomputing no tiene memoria compartida de hardware. Esa diferencia determina el modelo de programación.</div>
 
   <h3 id="r03-nombres">Nombres, direcciones y discovery</h3>
   <div class="callout"><b>Nombre.</b> Identificador lógico de una entidad.</div>
   <div class="callout"><b>Dirección.</b> Información que permite alcanzarla en una ubicación o transporte.</div>
+  <div class="callout"><b>Direccionamiento.</b> Mapeo entre el nombre estable de una entidad y una dirección que puede cambiar o reutilizarse.</div>
   <p>Separarlos permite mover, replicar o reemplazar una entidad sin cambiar a sus consumidores. La resolución transforma nombre en una o más direcciones y puede incluir versión, salud, prioridad y balanceo.</p>
   <p><b>DNS</b> es jerárquico y distribuido: resolvers consultan servidores raíz, de dominio superior y autoritativos, con caches gobernadas por TTL. Un registro A o AAAA da una dirección, CNAME un alias, MX un destino de correo y SRV puede expresar servicio, puerto, prioridad y peso.</p>
   <p><b>Service discovery</b> adapta la idea a instancias efímeras:</p>
@@ -1501,7 +1508,18 @@ work pool dinamico:
       <tr><td>Topología</td><td>¿Qué conexiones físicas o lógicas existen?</td><td>Enlaces, dirección, multiplicidad</td></tr>
     </tbody>
   </table></div>
-  <p>Un buen diagrama tiene título y objetivo, alcance explícito, leyenda, flechas con dirección y protocolo, multiplicidades relevantes y el nivel justo de detalle. No mezclar clases, procesos y máquinas sin distinguirlos visualmente.</p>
+  <p>Un buen diagrama tiene título y objetivo, alcance explícito, leyenda, flechas con dirección y protocolo, multiplicidades relevantes y el nivel justo de detalle. No mezclar clases, procesos y máquinas sin distinguirlos visualmente. Como guía cognitiva, el principio de Miller sugiere mantener aproximadamente entre cinco y nueve elementos principales por vista y abrir otra vista para el detalle.</p>
+  <h4 id="r03-catalogo-diagramas">Qué debe mostrar cada diagrama</h4>
+  <ul class="study-list">
+    <li><b>Casos de uso:</b> actores externos, objetivos que obtienen del sistema y relaciones include, extend o generalización cuando realmente aclaran reutilización.</li>
+    <li><b>Paquetes:</b> agrupaciones lógicas y dirección de dependencias. Sirve para detectar ciclos y capas que conocen demasiado.</li>
+    <li><b>Actividad:</b> acciones, decisiones, forks y joins. Modela flujo de control, no máquinas físicas.</li>
+    <li><b>Componentes:</b> piezas reemplazables, interfaces provistas y requeridas. Explica contratos, no la secuencia temporal.</li>
+    <li><b>Secuencia:</b> lifelines y mensajes ordenados de arriba hacia abajo. Debe incluir respuestas, alternativas, loops y operaciones asincrónicas relevantes.</li>
+    <li><b>Despliegue:</b> nodos físicos o entornos de ejecución y artefactos instalados. Acá se ven réplicas, zonas y protocolos.</li>
+    <li><b>Robustez:</b> boundary recibe interacción, control coordina el caso de uso y entity conserva información del dominio. El flujo normal es actor, boundary, control, entity, sin que una entity conozca la interfaz.</li>
+    <li><b>DAG:</b> tareas como nodos y dependencias de datos como aristas. Una arista A a B significa que B no puede ejecutar hasta disponer del resultado de A.</li>
+  </ul>
   <h4 id="r03-vista-fisica">Vista física mínima para un final</h4>
   <pre><code>[Clientes]
     | HTTPS
@@ -1530,10 +1548,12 @@ replicacion, flujo normal y comportamiento ante fallos.</code></pre>
   <div class="callout"><b>Layer.</b> División lógica de responsabilidades. Cada capa ofrece servicios a la superior y usa servicios de la inferior.</div>
   <div class="callout"><b>Tier.</b> Unidad física de despliegue. Indica en qué proceso o máquina corre una parte.</div>
   <p>Presentación, negocio y persistencia pueden ser tres layers dentro de un único ejecutable, o desplegarse en tres tiers. Cambiar layers mejora modularidad. Cambiar tiers modifica latencia, seguridad, escalabilidad y fallos.</p>
+  <p>Un modelo lógico frecuente separa Presentation y API como entradas, Services como coordinación de casos de uso, Core Business como reglas y entidades, y Persistence como acceso a datos. Security y Audit son responsabilidades transversales. En un despliegue 3 tier, el cliente corre presentación, un servidor ejecuta negocio y otro aloja la base. Los layers no deben confundirse con esas máquinas.</p>
   <p>Una dependencia normal baja desde una capa de mayor nivel hacia una abstracción de menor nivel. Un <b>upcall</b> permite que una capa inferior notifique a una superior mediante callback, evento o interfaz invertida. Si dos layers se conocen mutuamente por sus implementaciones aparece dependencia circular, que dificulta probar y reemplazar.</p>
   <div class="callout warning">“Arquitectura de tres capas” no dice cuántas máquinas hay. “Arquitectura de tres tiers” sí afirma una separación de despliegue, pero no prueba que cada tier tenga una sola responsabilidad lógica.</div>
 
   <h3 id="r04-contratos">Interfaces y contratos</h3>
+  <div class="callout"><b>Interfaz.</b> Frontera pública que permite comunicar componentes, servicios o sistemas mediante un contrato, ocultando la implementación privada.</div>
   <p>Una interfaz lista operaciones accesibles. Un contrato además fija precondiciones, postcondiciones, invariantes, tipos, errores y semántica observable. En una interfaz remota también debe definir:</p>
   <ul>
     <li>identidad y versionado de recursos;</li>
@@ -1544,11 +1564,15 @@ replicacion, flujo normal y comportamiento ante fallos.</code></pre>
     <li>compatibilidad hacia atrás de consumidores y productores.</li>
   </ul>
   <p>Un contrato <b>orientado a entidades</b> expone recursos y cambios de estado. Uno <b>orientado a procesos</b> expone acciones o procedimientos. Ninguno es universalmente mejor: entidades favorecen una interfaz uniforme y procesos modelan operaciones de negocio complejas sin fingir que todo es CRUD.</p>
+  <div class="callout example">Orientados a entidades: <code>GET /users/{id}</code> y <code>POST /products</code>. Orientados a procesos: <code>POST /search</code> y <code>POST /transform/html-to-pdf</code>. El primero identifica sustantivos y usa la operación estándar; el segundo nombra una acción cuyo resultado no se modela naturalmente como CRUD.</div>
+  <p>Las interfaces también se clasifican por alcance: Web API con HTTP, API remota custom sobre TCP o UDP, API orientada a procedimientos como gRPC, API orientada a objetos como CORBA o RMI, biblioteca o framework dentro del proceso, y API de sistema operativo como POSIX o WinAPI.</p>
 
   <h3 id="r04-protocolo">Qué define un protocolo</h3>
   <div class="callout"><b>Protocolo.</b> Acuerdo sobre formato, significado, orden y temporización de mensajes entre participantes.</div>
   <p>La sintaxis indica campos y codificación. La semántica indica qué significa cada valor y qué efecto produce. La secuencia indica qué mensajes son válidos en cada estado. La temporización define timeouts, retransmisiones y vigencia.</p>
   <p>Cada capa intercambia una PDU compuesta por control propio y payload de la capa superior. Al enviar, las capas encapsulan. Al recibir, desencapsulan y validan.</p>
+  <div class="callout"><b>PDU.</b> Unidad de datos que un protocolo entrega a la capa inferior para ser encapsulada.</div>
+  <p>Si una PDU supera el máximo inferior, se segmenta y cada fragmento repite headers. Si varias PDUs pequeñas caben juntas, batching amortiza headers a costa de esperar y sumar latencia. El protocolo de aplicación debe conocer qué garantiza la capa inferior: una imagen grande sobre UDP puede perderse completa por faltar un solo fragmento.</p>
 
   <h4 id="r04-formato">Formato y framing</h4>
   <div class="table-wrap"><table>
@@ -1602,6 +1626,7 @@ body:
     <li><b>Sistema por capas:</b> el cliente no necesita saber si habla con origen, proxy o cache.</li>
     <li><b>Code on demand opcional:</b> el servidor puede enviar código ejecutable.</li>
   </ul>
+  <p>La parte de hipermedia se conoce como <b>HATEOAS</b>: una representación incluye links a acciones o estados siguientes para que el cliente los descubra. Es parte de la definición académica de REST, aunque muchas APIs HTTP de producción no la implementan de forma completa.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Método</th><th>Intención</th><th>Safe</th><th>Idempotente</th></tr></thead>
     <tbody>
@@ -1614,6 +1639,8 @@ body:
   </table></div>
   <p>Códigos típicos: 200 lectura exitosa, 201 creación, 202 aceptado para procesar luego, 204 éxito sin body, 400 pedido inválido, 401 falta autenticación, 403 identidad sin permiso, 404 inexistente, 409 conflicto de estado, 429 límite, 500 fallo interno y 503 indisponibilidad transitoria.</p>
   <p>Las URLs identifican entidades, no pantallas ni verbos arbitrarios: <code>/orders/42</code>. Relaciones se expresan con subrecursos o enlaces. El versionado puede estar en path, header o media type; la regla importante es hacer cambios aditivos y tolerar campos desconocidos antes de romper consumidores.</p>
+  <div class="callout"><b>Semantic Versioning.</b> Versión <code>Major.Minor.Patch</code>: Major cambia ante incompatibilidad de contrato, Minor agrega funcionalidad compatible y Patch corrige sin cambiar la interfaz.</div>
+  <p>Versionar la API no es versionar una entidad. La primera decisión permite que consumidores viejos convivan durante una migración. El versionado histórico conserva estados sucesivos del mismo recurso, por ejemplo revisiones de una página. Una API puede exponer <code>/v2</code> y, dentro de ella, muchas revisiones de cada entidad.</p>
 
   <h3 id="r04-rpc">RPC y gRPC</h3>
   <div class="callout"><b>RPC.</b> Abstracción que permite invocar un procedimiento remoto mediante una interfaz parecida a una llamada local.</div>
@@ -1661,11 +1688,24 @@ origen.extraer(tx, 1000)
 destino.acreditar(tx, 1000)
 coordinador.commit(tx)        # requiere protocolo como 2PC</code></pre>
   <p>Sin coordinador transaccional, una caída entre ambas llamadas deja un efecto parcial. También se puede modelar una transferencia como recurso con estado e idempotency key y completar por saga. La frontera de objeto no reemplaza el protocolo de commit.</p>
+  <pre><code>CLIENTE
+  AccountProxy("CA-1234") ----\
+                               \ RPC
+  AccountProxy("CA-5678") ------&gt; DISPATCHER DEL SERVIDOR
+                                      |
+                                      +-&gt; Account CA-1234
+                                      |     saldo: 1000 -&gt; 800
+                                      |
+                                      \-&gt; Account CA-5678
+                                            saldo: 500 -&gt; 700
+
+El proxy conserva referencia remota, no una copia del saldo.
+El dispatcher usa identidad de objeto para dirigir cada invocacion.</code></pre>
   <div class="callout exam">Para comparar REST y RPC, no alcanza con JSON contra binario. Compará orientación del contrato, descubribilidad, generación de clientes, streaming, cache, compatibilidad y tratamiento de fallos remotos.</div>
 
     </section>
 
-    <section class="chapter" id="r05" data-title="patrones middleware mensajeria mom grupos difusion atomicidad comunicacion request reply producer consumer publisher subscriber pipeline dag ack reintentos idempotencia sockets tcp contra rabbitmq zeromq recetas pseudocodigo para barrera distribuida repartir trabajo agregar chat por">
+    <section class="chapter" id="r05" data-title="patrones middleware mensajeria mom grupos difusion atomicidad comunicacion request reply producer consumer publisher subscriber pipeline dag ack reintentos idempotencia sockets tcp contra rabbitmq zeromq recetas pseudocodigo para barrera distribuida repartir trabajo agregar chat por cola turnos">
       <div class="chapter-head">
         <div class="chapter-number">05</div>
         <div><h2>Patrones, middleware y mensajería</h2></div>
@@ -1680,8 +1720,10 @@ coordinador.commit(tx)        # requiere protocolo como 2PC</code></pre>
   <p>Un bus de información distribuye eventos a suscriptores. Una cola entrega trabajo a consumidores, normalmente uno por mensaje. Un broker media direcciones, buffers y políticas. ZeroMQ ofrece abstracciones de mensajería sin imponer un broker central.</p>
 
   <h3 id="r05-grupos">Grupos, difusión y atomicidad</h3>
-  <p>Un grupo permite dirigir un mensaje a un conjunto lógico. <b>Broadcast</b> intenta alcanzar a todos en un dominio. <b>Multicast</b> alcanza a miembros de un grupo. <b>Unicast</b> tiene un destino. <b>Anycast</b> alcanza una instancia apropiada entre varias.</p>
+  <div class="callout"><b>Grupo de comunicación.</b> Colección dinámica de procesos tratada como una entidad lógica, con primitivas para crear, unir, abandonar y enviar al conjunto.</div>
+  <p><b>Broadcast</b> intenta alcanzar a todos en un dominio. <b>Multicast</b> alcanza a miembros de un grupo. <b>Unicast</b> tiene un destino. <b>Anycast</b> alcanza una instancia apropiada entre varias.</p>
   <p>La membresía puede ser estática o dinámica. Con cambios dinámicos hace falta acordar vistas, altas, bajas y sospechas de fallo. Entrega atómica de grupo significa que el mensaje se entrega a todos los miembros correctos de una vista o a ninguno, no que cada handler sea transaccional.</p>
+  <div class="callout"><b>Atomicidad de mensajes.</b> Un mensaje dirigido a un grupo se entrega a todos los destinatarios de la vista acordada o no se entrega a ninguno.</div>
   <p>Un middleware de grupos mantiene <code>join(grupo, miembro)</code>, <code>leave</code> y <code>send(grupo, mensaje)</code>. El servicio asigna una vista numerada, persiste o retransmite por miembro y entrega solo dentro de la vista acordada. Para atomicidad, un coordinador puede difundir, reunir ACK de todos y recién emitir <code>DELIVER</code>; si no llega a todos, emite <code>ABORT</code>. Esto cuesta dos rondas y puede bloquear ante fallos. Protocolos de reliable atomic multicast reemplazan el coordinador único con orden y acuerdo de vista.</p>
 
   <h3 id="r05-patrones">Patrones de comunicación</h3>
@@ -1710,6 +1752,15 @@ coordinador.commit(tx)        # requiere protocolo como 2PC</code></pre>
   <h4 id="r05-pipeline-dag">Pipeline y DAG</h4>
   <p>Un pipeline procesa elementos en streaming: cuando una etapa termina el elemento A puede recibir B mientras la siguiente procesa A. El throughput queda limitado por la etapa más lenta. Replicarla requiere una política de reparto y, si importa el orden, una de recomposición.</p>
   <p>Un DAG generaliza dependencias. Una tarea queda lista cuando completan todos sus predecesores. Si el grafo contiene un ciclo de espera no es DAG y puede haber deadlock. Conviene distinguir <b>worker por etapa</b>, especializado pero potencialmente ocioso, de <b>worker por item</b>, que ejecuta varias transformaciones y reduce transferencias.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Concepto</th><th>Artefactos posibles</th><th>Garantía que hay que agregar</th></tr></thead>
+    <tbody>
+      <tr><td>Filter</td><td>Función, thread, proceso, worker remoto u operador Flink</td><td>Determinismo, idempotencia o estado explícito</td></tr>
+      <tr><td>Pipe</td><td>Pipe del SO, socket, cola de MOM, PUSH PULL de ZeroMQ o stream</td><td>Buffer, framing, orden, backpressure y recuperación</td></tr>
+      <tr><td>Source</td><td>Archivo, socket, tópico o sensor</td><td>Posición y replay si se recupera</td></tr>
+      <tr><td>Sink</td><td>Archivo, base, servicio o tópico</td><td>Commit o deduplicación del efecto</td></tr>
+    </tbody>
+  </table></div>
 
   <h3 id="r05-entrega">ACK, reintentos e idempotencia</h3>
   <p>Un ACK confirma un punto preciso. Puede significar recibido en memoria, persistido, entregado al proceso o efecto confirmado. Si no se define ese punto, “tiene ACK” no expresa una garantía.</p>
@@ -1764,6 +1815,7 @@ espera_real = aleatorio(0, espera)       # full jitter</code></pre>
 
   <h3 id="r05-zeromq">ZeroMQ</h3>
   <p>ZeroMQ es una biblioteca de sockets con patrones de mensajería. Los procesos se conectan directamente o mediante un proxy construido con los mismos sockets. No ofrece por sí misma persistencia durable ni administración central.</p>
+  <p><code>bind</code> crea un endpoint y <code>connect</code> se conecta a él. No equivalen necesariamente a servidor y cliente: un worker puede hacer connect hacia un ventilador central, mientras el patrón del socket define qué secuencias de mensajes son válidas. ZeroMQ transporta frames, pero la serialización y evolución del contenido quedan a cargo de la aplicación.</p>
   <ul class="study-list">
     <li><b>REQ REP:</b> alternancia estricta request y reply. Simple, pero un peer caído bloquea el ciclo si no se diseña timeout y reconstrucción.</li>
     <li><b>PUSH PULL:</b> pipeline y distribución de trabajo. PUSH reparte, PULL recibe.</li>
@@ -1799,6 +1851,23 @@ coordinador al recibir ARRIVE:
         enviar RELEASE(generacion) a los N
         persistir generacion + 1</code></pre>
   <p>Con request reply, cada worker deja su request pendiente hasta liberar. Con MOM, ARRIVE entra a una cola y RELEASE puede publicarse a una cola por worker o tópico, con mensajes durables e idempotentes. Con blocking queues locales, cada worker pone un token y espera una señal propia. Deben definirse caída de un worker, timeout, participantes fijos y reutilización.</p>
+  <pre><code>barrera correcta con blocking queues, N workers:
+    arrivals = BlockingQueue()
+    release[i] = BlockingQueue() para cada worker i
+
+worker i:
+    arrivals.put((generacion, i))
+    if i == coordinador:
+        vistos = set()
+        while size(vistos) &lt; N:
+            (g, j) = arrivals.take()
+            if g == generacion: vistos.add(j)
+        for j in 0..N-1:
+            release[j].put(generacion)
+    release[i].take()
+
+Una sola cola donde cada worker hace put y luego take no es barrera:
+el primer take consume el primer put y cruza sin esperar a los demas.</code></pre>
 
   <h4 id="r05-work-pool">Repartir trabajo y agregar</h4>
   <pre><code>coordinador:
@@ -1815,9 +1884,40 @@ worker:
         resultado = procesar(request)
         responder(request.task_id, resultado)</code></pre>
   <p>Request reply requiere correlación y timeout por worker. Producer consumer ya implementa la competencia mediante una cola. Publisher subscriber difunde, por lo que no reparte solo: hay que asignar particiones por worker o publicar tareas en canales filtrados y usar otro tópico para resultados.</p>
+  <pre><code>XOR de un archivo por bloques con N workers:
+    acumulado = 0
+    pendientes = mapa task_id -&gt; worker
+    por cada bloque de 4 bytes:
+        asignar task_id una sola vez
+        enviar request(task_id, bloque) a un worker libre
+    por cada respuesta aun pendiente:
+        parcial = response.valor
+        acumulado = acumulado XOR parcial
+        eliminar task_id de pendientes
+    imprimir acumulado
+
+Un retry conserva task_id. Una respuesta duplicada no vuelve a entrar
+porque el task_id ya fue eliminado o marcado como procesado.</code></pre>
+  <pre><code>suma con Publisher Subscriber y P workers conocidos:
+    coordinador divide vector en P rangos
+    publica TASK(worker_id, rango, valores)
+
+    cada worker recibe todos pero procesa solo su worker_id
+    publica RESULT(job_id, worker_id, suma_parcial)
+
+    agregador deduplica por (job_id, worker_id)
+    al reunir P resultados: suma las parciales
+
+stream por ventanas de 1.000.000:
+    asignar window_id = floor(seq / 1_000_000)
+    cada parcial lleva (window_id, sum, count)
+    cerrar cuando las P particiones marcaron fin de ventana
+    promedio = sum_total / count_total</code></pre>
 
   <h4 id="r05-chat">Chat por grupos</h4>
   <p>Un chat de equipos modela cada equipo como grupo. La API mínima es <code>join(team, player)</code>, <code>publish(team, message_id, body)</code>, <code>subscribe(team, offset)</code> y <code>leave</code>. El servidor autoriza membresía, asigna secuencia por equipo, retiene historia según política y permite reanudar desde offset. El cliente deduplica por <code>message_id</code>. Presencia y chat son flujos distintos: perder un heartbeat no debe borrar mensajes.</p>
+  <h4 id="r05-siguiente-numero">Cola distribuida de turnos</h4>
+  <p>Para que hasta diez agentes tomen el siguiente número de una fila, el estado autoritativo no puede ser una variable local en cada agente. Un servicio de turnos conserva <code>ultimo_asignado</code> en almacenamiento con incremento atómico y expone <code>next(agent_id, request_id)</code>. La misma <code>request_id</code> devuelve el mismo turno si hay retry. Otra opción es precargar una cola durable y hacer que cada agente consuma con ACK, pero hay que decidir qué ocurre con un turno entregado si el agente cae antes de iniciar la llamada.</p>
   <div class="callout exam">En ejercicios con mensajes, dibujá canal, dirección, cardinalidad y ACK. Después recorré el fallo entre “aplicar efecto” y “confirmar”: ahí aparece la necesidad de idempotencia.</div>
 
     </section>
@@ -1851,7 +1951,7 @@ reduce(k2, vals)  -&gt; lista de resultados</code></pre>
   <ol>
     <li>Particionar archivos de entrada en splits.</li>
     <li>Asignar cada split a un mapper, preferentemente cerca de sus datos.</li>
-    <li>El mapper emite pares intermedios y los divide por reducer con una función de partición.</li>
+    <li>El mapper emite pares intermedios, los divide por reducer con una función de partición y materializa archivos intermedios locales para el shuffle.</li>
     <li>Un combiner opcional agrega localmente si la operación es asociativa y conmutativa.</li>
     <li>Shuffle transfiere cada partición al reducer correspondiente y sort agrupa claves.</li>
     <li>Cada reducer procesa una clave y escribe output durable.</li>
@@ -1886,6 +1986,7 @@ las tres ramas se unen solo para publicar el reporte</code></pre>
   <h3 id="r06-mpi">MPI y Open MPI</h3>
   <div class="callout"><b>MPI.</b> Estándar de pasaje de mensajes para programas paralelos donde procesos conocidos coordinan explícitamente comunicación punto a punto y colectiva.</div>
   <p>Todos los procesos ejecutan el mismo programa en el modelo SPMD, pero usan su <b>rank</b> dentro de un communicator para tomar roles diferentes. El tamaño del communicator indica cuántos participan.</p>
+  <p>Las operaciones colectivas se invocan en el mismo orden desde todos los ranks del communicator. En <code>Bcast</code>, por ejemplo, el root aporta el buffer y los demás participan en la misma llamada para recibirlo. Saltear la colectiva en un rank puede bloquear al resto.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Primitiva</th><th>Efecto</th></tr></thead>
     <tbody>
@@ -1953,6 +2054,7 @@ las tres ramas se unen solo para publicar el reporte</code></pre>
 
   <h3 id="r07-escalabilidad">Escalabilidad</h3>
   <div class="callout"><b>Escalabilidad.</b> Capacidad de conservar objetivos de servicio cuando crecen usuarios, datos, operaciones o distribución geográfica mediante una cantidad razonable de recursos.</div>
+  <p>La cátedra distingue tres dimensiones: <b>tamaño</b>, más usuarios, datos o recursos; <b>geografía</b>, mayor distancia y cantidad de ubicaciones; y <b>administración</b>, nuevas organizaciones, políticas, sintaxis, semánticas o servicios que deben interoperar. Un sistema puede escalar en una dimensión y fallar en otra.</p>
   <p>Antes de elegir tecnología se identifica la dimensión que crece y el recurso limitante: CPU, memoria, disco, IOPS, ancho de banda, conexiones, locks, coordinador o capacidad de una partición.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Técnica</th><th>Qué alivia</th><th>Problema nuevo</th></tr></thead>
@@ -2036,6 +2138,8 @@ las tres ramas se unen solo para publicar el reporte</code></pre>
       <tr><td>Serverless</td><td>Función o servicio administrado</td><td>Escala automática y pago por uso</td><td>Cold start, límites, lock in y estado externo</td></tr>
     </tbody>
   </table></div>
+  <div class="callout"><b>SOA.</b> Arquitectura que descompone aplicaciones en servicios alineados con procesos de negocio, publicados en un registro, comunicados mediante un bus y combinados por orquestaciones de nivel superior.</div>
+  <div class="callout"><b>Microservicio.</b> Servicio cohesivo que encapsula lógica y ownership de sus datos, se despliega y escala de forma independiente y se integra mediante contratos de red.</div>
   <p>La granularidad se elige por cohesión, autonomía de datos, ritmo de cambio y propiedad del equipo, no por cantidad arbitraria de líneas. Una transición segura extrae una capacidad con frontera clara, observa su tráfico y evita compartir tablas como contrato permanente.</p>
   <p>SOA suele integrar servicios más gruesos y puede usar un Enterprise Service Bus. Microservicios enfatizan equipos autónomos, despliegue independiente, automatización y endpoints livianos. Ambos son arquitecturas orientadas a servicios.</p>
   <p>Un <b>API Gateway</b> ofrece un frente estable para clientes: termina autenticación, aplica cuotas, enruta, traduce versiones y puede agregar respuestas. Evita que el cliente conozca cada instancia o servicio interno. No debe concentrar lógica de negocio ni convertirse en un monolito oculto. Se replica y su configuración se versiona.</p>
@@ -2132,18 +2236,51 @@ si W &gt; N/2, dos escrituras de quorum intersectan</code></pre>
 
   <h3 id="r08-dsm">Distributed Shared Memory</h3>
   <div class="callout"><b>DSM.</b> Abstracción que presenta un espacio de memoria compartido sobre máquinas con memoria físicamente separada.</div>
-  <p>El enfoque ingenuo guarda todo en un servidor y convierte cada acceso en remoto, con cuello de botella. Migrar páginas acerca una página a quien la usa, pero puede causar ping pong por false sharing. Replicar páginas de solo lectura escala lecturas. Permitir escritura en varias copias exige invalidación o actualización y un modelo de consistencia.</p>
-  <p>DSM simplifica algunos algoritmos, pero oculta una diferencia de costo enorme entre acceso local y remoto. La granularidad de página puede transferir datos sin relación y convertir dos variables independientes en contención.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Variante</th><th>Operación</th><th>Consistencia y costo</th></tr></thead>
+    <tbody>
+      <tr><td>Naive</td><td>Todas las páginas viven en un servidor. Cada read o write es un request y el servidor serializa con locks.</td><td>Consistencia simple, red en cada acceso, cuello y fallo único.</td></tr>
+      <tr><td>Migración</td><td>El servidor presta una página completa a un cliente. Si otro la pide, espera o la página migra desde el dueño actual.</td><td>Una sola copia escribible evita conflictos, pero una página disputada hace ping pong.</td></tr>
+      <tr><td>Réplicas de solo lectura</td><td>Los reads crean mirrors locales. Los writes van al servidor, que invalida todos los mirrors.</td><td>Lecturas locales rápidas, escrituras caras y tormenta de recarga si cambian seguido.</td></tr>
+      <tr><td>Réplicas de lectura y escritura</td><td>Los clientes escriben copias y un secuenciador central ordena y difunde cada actualización.</td><td>Más concurrencia, pero coherencia, orden y recuperación son complejos.</td></tr>
+    </tbody>
+  </table></div>
+  <pre><code>replicacion de solo lectura:
+    cliente sin pagina -&gt; READ_PAGE al servidor
+    servidor registra al cliente y devuelve mirror
+    cliente lee localmente
+
+    WRITE siempre llega al servidor
+    servidor actualiza version
+    servidor -&gt; INVALIDATE(version) a cada mirror
+    cada cliente descarta y vuelve a pedir cuando necesite</code></pre>
+  <p>Esta variante conviene cuando hay muchas lecturas y pocas escrituras, por ejemplo tablas de configuración grandes que cambian raramente. Es perjudicial con escrituras frecuentes o false sharing, porque cada cambio invalida páginas completas y obliga a transferirlas de nuevo.</p>
+  <p>DSM simplifica algunos algoritmos, pero oculta una diferencia de costo enorme entre acceso local y remoto. La granularidad de página puede transferir datos sin relación y convertir dos variables independientes en contención. También desalienta diseñar particiones y ownership explícitos, por eso no suele ser la primera elección en multicomputing.</p>
 
   <h3 id="r08-dfs">Distributed File Systems</h3>
   <p>Un DFS presenta archivos remotos con nombres, permisos y operaciones conocidas. Las preguntas centrales son ubicación de metadata, cache, consistencia, replicación, tamaño de bloque y conducta ante desconexión.</p>
   <h4 id="r08-nfs">NFS</h4>
   <p>NFS permite montar un filesystem remoto. Una VFS del cliente traduce operaciones a RPC contra el servidor. Los file handles identifican objetos sin depender de una sesión permanente. El cache del cliente reduce red, pero obliga a definir cuándo revalidar atributos y datos. El diseño históricamente stateless simplifica reinicio del servidor, aunque locks y versiones modernas agregan estado.</p>
+  <pre><code>aplicacion cliente
+    -&gt; VFS del kernel
+        +-&gt; filesystem local
+        \-&gt; NFS client -&gt; RPC -&gt; NFS server -&gt; VFS -&gt; disco
+
+RPC Bind informa el puerto del servicio.
+La misma interfaz POSIX decide si la operacion es local o remota.</code></pre>
   <p>Conviene para compartir directorios y archivos con semántica familiar en una LAN. Es perjudicial para procesamiento masivo con muchas operaciones pequeñas o para un dataset que excede y satura un servidor central.</p>
 
   <h4 id="r08-hdfs">HDFS</h4>
   <p>HDFS optimiza archivos grandes y acceso secuencial. El NameNode mantiene namespace y mapa de bloques. DataNodes guardan bloques grandes replicados. El cliente consulta metadata y transfiere datos directamente con DataNodes. Para escribir, el bloque atraviesa un pipeline de réplicas y se confirma según la política.</p>
-  <p>HDFS mueve cómputo hacia datos y tolera caída de nodos re replicando bloques. No está pensado para baja latencia, millones de archivos diminutos ni escrituras aleatorias generales. Su consistencia y patrón de append son deliberadamente más restringidos que POSIX.</p>
+  <pre><code>lectura:
+    cliente -&gt; NameNode: ubicaciones del bloque
+    cliente -&gt; DataNode cercano: bytes
+
+escritura con factor 3:
+    cliente -&gt; DN1 -&gt; DN2 -&gt; DN3
+    ACK vuelve DN3 -&gt; DN2 -&gt; DN1 -&gt; cliente</code></pre>
+  <p>Los DataNodes envían heartbeats y reportes de bloques. Si uno cae, el NameNode ordena re replicar hasta recuperar el factor. Rack awareness ubica copias en dominios distintos. Los bloques grandes reducen metadata y favorecen throughput; el costo es desperdicio o metadata excesiva con archivos pequeños.</p>
+  <p>HDFS mueve cómputo hacia datos y tolera hardware commodity. No está pensado para baja latencia, millones de archivos diminutos ni escrituras aleatorias generales. Su consistencia y patrón write once o append son deliberadamente más restringidos que POSIX.</p>
   <div class="table-wrap"><table>
     <thead><tr><th></th><th>NFS</th><th>HDFS</th></tr></thead>
     <tbody>
@@ -2366,11 +2503,13 @@ DELETE /snippets/{id}
   <p class="intro">Tolerar fallos empieza por distinguir causa, estado incorrecto y servicio incorrecto. Después se elige detección, redundancia y recuperación. La coordinación distribuida agrega protocolos para exclusión y commit, pero ningún protocolo puede convertir una detección incierta en conocimiento perfecto.</p>
 
   <h3 id="r11-terminologia">Fallo, error y avería</h3>
+  <div class="callout"><b>Fallo parcial.</b> Un componente falla mientras el resto del sistema sigue operando. Es la diferencia central respecto de un único programa que se detiene como conjunto.</div>
   <div class="callout"><b>Fault.</b> Causa adjudicada o hipotética de un error, por ejemplo un bit alterado, un bug o un corte.</div>
   <div class="callout"><b>Error.</b> Estado interno incorrecto que puede conducir a servicio incorrecto.</div>
   <div class="callout"><b>Failure o avería.</b> Desviación observable del servicio respecto de su especificación.</div>
   <pre><code>fault se activa -&gt; error interno -&gt; cruza la frontera -&gt; failure observable</code></pre>
   <p>Contener el error antes de la frontera evita que se convierta en avería. Un checksum detecta corrupción, una réplica puede enmascararla y una validación puede impedir propagarla.</p>
+  <div class="callout"><b>Tolerancia a fallos.</b> Capacidad de continuar con un comportamiento definido como aceptable en presencia de fallos. Puede significar servicio completo, degradación controlada o transición a un estado seguro.</div>
 
   <h3 id="r11-clasificacion">Modelos de fallo</h3>
   <div class="table-wrap"><table>
@@ -2385,6 +2524,7 @@ DELETE /snippets/{id}
     </tbody>
   </table></div>
   <p>Un sistema puede ser sincrónico, parcialmente sincrónico o asincrónico según qué cotas conoce sobre cómputo, mensajes y relojes. El detector de fallos usa señales y timeouts, pero en un modelo asincrónico una ausencia de respuesta solo genera sospecha. La exactitud y rapidez del detector compiten.</p>
+  <p>Por persistencia, un fallo puede ser <b>transiente</b>, aparece una vez y desaparece; <b>intermitente</b>, aparece y desaparece de forma recurrente; o <b>permanente</b>, continúa hasta reparar o reemplazar. La estrategia cambia: retry puede resolver uno transiente, ocultar uno intermitente y empeorar la carga, y no corrige uno permanente.</p>
 
   <h3 id="r11-estrategias">Manejo de fallos</h3>
   <ul class="study-list">
@@ -2404,6 +2544,11 @@ DELETE /snippets/{id}
       <tr><td>Semi activa, leader follower</td><td>Leader decide, followers acompañan</td><td>Se elige follower actualizado</td><td>Equilibrio, requiere consenso de término y log</td></tr>
     </tbody>
   </table></div>
+  <ul class="study-list">
+    <li><b>Pasiva:</b> usa menos cómputo y permite implementación no determinista, pero el backup puede quedar atrasado y el failover demora mientras recupera estado.</li>
+    <li><b>Activa:</b> failover casi inmediato y comparación de respuestas puede detectar divergencia, pero todas las réplicas gastan cómputo, deben recibir orden total y ejecutar determinísticamente.</li>
+    <li><b>Semi activa:</b> followers mantienen un log actualizado sin responder normalmente. Reduce el tiempo de recuperación, pero todavía necesita elección de leader y evitar split brain.</li>
+  </ul>
   <p>Redundancia espacial usa componentes simultáneos. Redundancia temporal reintenta. Redundancia de información agrega checksum o códigos. Réplicas idénticas no protegen contra el mismo bug o configuración: safety crítica puede exigir diversidad de diseño.</p>
 
   <h3 id="r11-recuperacion">Recuperación y dependability</h3>
@@ -2414,7 +2559,14 @@ DELETE /snippets/{id}
     <li><b>Infraestructura inmutable:</b> reemplazar una instancia por una conocida en vez de repararla manualmente.</li>
   </ul>
   <p>RPO mide cuántos datos se acepta perder en tiempo. RTO mide cuánto puede tardar la restauración. Backup sin restauración probada no demuestra recuperación. Disaster recovery debe cubrir credenciales, configuración, dependencias externas y procedimientos, no solo archivos.</p>
-  <p>Un sistema dependable se evalúa por availability, reliability, safety y maintainability. Availability es tiempo servido, reliability continuidad sin avería, safety ausencia de consecuencias catastróficas y maintainability facilidad y velocidad de reparación. Un servicio que se apaga cada domingo puede ser confiable durante cada período, pero tiene menor disponibilidad.</p>
+  <p>Un sistema dependable se evalúa por:</p>
+  <ul class="study-list">
+    <li><b>Availability:</b> probabilidad de estar operando en un instante.</li>
+    <li><b>Reliability:</b> continuidad de servicio correcto durante un intervalo. Un sistema siempre encendido que alterna respuestas actuales y viejas puede estar disponible pero ser poco fiable.</li>
+    <li><b>Durability:</b> probabilidad de recuperar un dato que el sistema confirmó como persistido.</li>
+    <li><b>Safety:</b> ausencia de consecuencias catastróficas cuando falla, no seguridad contra atacantes.</li>
+    <li><b>Maintainability:</b> facilidad y tiempo necesarios para reparar, actualizar o restaurar.</li>
+  </ul>
 
   <h3 id="r11-exclusion">Exclusión mutua distribuida</h3>
   <p>El objetivo es que un solo proceso acceda a un recurso crítico, con progreso y, si se pide, orden justo. No hay memoria compartida para un mutex.</p>
@@ -2480,6 +2632,7 @@ Fase 2, decision:
   <p class="intro">Los relojes físicos aproximan tiempo real, los lógicos representan causalidad. A partir de causalidad se definen órdenes de entrega y cortes consistentes. Esta sección desarrolla algoritmos y condiciones, porque son preguntas centrales de final.</p>
 
   <h3 id="r12-fisicos">Relojes físicos, drift y skew</h3>
+  <div class="callout"><b>Tiempo.</b> Magnitud usada para medir duración y separación entre eventos. En cómputo se modela de forma discreta y monotónica: una fuente usada para duraciones no debe retroceder.</div>
   <div class="callout"><b>Drift.</b> Diferencia entre la velocidad de un reloj y la del tiempo ideal.</div>
   <div class="callout"><b>Skew.</b> Diferencia instantánea entre dos lecturas de reloj.</div>
   <p>Si la tasa de drift está acotada por <code>rho</code>, dos relojes que se sincronizaron juntos pueden separarse hasta aproximadamente <code>2 * rho * tiempo</code>. Para mantener skew menor que <code>delta</code> hay que resincronizar antes de <code>delta / (2 * rho)</code>.</p>
@@ -2493,10 +2646,12 @@ incertidumbre aproximada = RTT/2</code></pre>
   <p>Se repite y se prefiere la muestra con menor RTT, porque probablemente tuvo menos cola. Si ida y vuelta son asimétricas, el error puede acercarse a esa asimetría.</p>
 
   <h4 id="r12-ntp">NTP</h4>
+  <div class="callout"><b>NTP.</b> Protocolo para sincronizar muchos relojes contra UTC con tolerancia a demoras y caídas, diseñado para sincronización, alta disponibilidad y escalabilidad.</div>
   <p>Con cuatro timestamps, <code>t1</code> salida cliente, <code>t2</code> recepción servidor, <code>t3</code> salida servidor y <code>t4</code> recepción cliente:</p>
   <pre><code>offset theta = ((t2 - t1) + (t3 - t4)) / 2
 delay  delta = (t4 - t1) - (t3 - t2)</code></pre>
-  <p>NTP organiza servidores en estratos respecto de fuentes de referencia. Modos: cliente servidor, simétrico entre peers y broadcast o multicast con menor precisión. Filtra muestras, estima drift y evita depender de una única fuente.</p>
+  <p>NTP organiza servidores en estratos: 0 son fuentes físicas como GPS o relojes atómicos, 1 se conecta directamente a ellas y cada estrato N se sincroniza con fuentes de N menos 1. Los peers del mismo estrato pueden darse backup mutuo. Modos: cliente servidor, simétrico entre peers y broadcast o multicast con menor precisión.</p>
+  <p>La tolerancia a fallos no depende de una sola medición: usa servidores y rutas redundantes, consulta varias fuentes, descarta muestras dispersas o con RTT alto y cambia de fuente si una se vuelve inválida. Usa UDP 123 porque una medición perdida se reemplaza por otra y retransmitir alteraría la demora que se intenta estimar.</p>
 
   <h3 id="r12-causalidad">Eventos y happened before</h3>
   <div class="callout"><b>Happened before.</b> Relación <code>a -&gt; b</code> si ambos eventos pertenecen al mismo proceso y a ocurre antes, si a es envío y b su recepción, o por transitividad.</div>
@@ -2524,9 +2679,13 @@ recepcion en i de vector W:
   <pre><code>a -&gt; b  si y solo si  V(a) &lt; V(b)
 a || b  si V(a) y V(b) son incomparables</code></pre>
   <p>Lamport cuesta un entero por mensaje y no detecta concurrencia. Vectores cuestan N y requieren gestionar membresía, pero capturan causalidad exactamente.</p>
+  <div class="callout example">En tres procesos, <code>a = [1,0,0]</code> y <code>b = [2,1,0]</code>: <code>a &lt; b</code>, por lo tanto a ocurrió antes que b. En cambio <code>c = [2,1,0]</code> y <code>d = [1,0,1]</code> son incomparables: c supera a d en los dos primeros componentes y d supera a c en el tercero, por lo tanto son concurrentes. Para reconstruir un diagrama, cada incremento identifica un evento local y un salto en otro componente revela información recibida mediante un mensaje.</div>
 
   <h3 id="r12-sincronismo">Sincronismo de comunicación</h3>
-  <p><b>Steadiness</b> describe regularidad del intervalo entre mensajes. <b>Tightness</b> describe cercanía temporal de copias del mismo mensaje en distintos receptores. Son propiedades distintas.</p>
+  <div class="callout"><b>Sincronismo distribuido.</b> Un protocolo es sincrónico si sus acciones tienen cotas temporales conocidas; parcialmente sincrónico si las cotas existen pero se desconocen o aparecen después de un momento incierto; asincrónico si no se presupone una cota.</div>
+  <div class="callout"><b>Steadiness, sigma.</b> Máxima diferencia entre el mayor y el menor tiempo de delivery observado por un proceso: <code>sigma = max(TDmax - TDmin)</code>. Mide qué tan regular es su recepción.</div>
+  <div class="callout"><b>Tightness, tau.</b> Máxima diferencia entre los tiempos de delivery del mismo mensaje en dos receptores: <code>tau = max |tD_p(m) - tD_q(m)|</code>. Mide qué tan simultáneamente lo observan.</div>
+  <p>Steadiness compara mensajes diferentes desde el punto de vista de un receptor. Tightness compara receptores para el mismo mensaje. Un flujo puede llegar regularmente a cada nodo y, sin embargo, con mucha diferencia entre nodos.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Protocolo</th><th>Garantía temporal</th><th>Mecanismo</th></tr></thead>
     <tbody>
@@ -2540,7 +2699,8 @@ a || b  si V(a) y V(b) son incomparables</code></pre>
   <p>Un sistema sincrónico conoce cotas de cómputo, transmisión y clock drift. Uno asincrónico no las presupone. Parcialmente sincrónico significa que las cotas existen después de un momento desconocido o son desconocidas para el algoritmo.</p>
 
   <h3 id="r12-orden">Órdenes de mensajes</h3>
-  <p>Recepción es llegada al middleware. Delivery es exposición a la aplicación. Una <b>hold back queue</b> retiene mensajes hasta satisfacer la condición del orden.</p>
+  <div class="callout"><b>Delivery.</b> Procesamiento de un mensaje por la aplicación, eventualmente con cambio de estado. Es distinto de la recepción física por el nodo.</div>
+  <p>Una <b>hold back queue</b> retiene mensajes recibidos hasta satisfacer la condición del orden.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Orden</th><th>Condición</th><th>Metadata típica</th></tr></thead>
     <tbody>
@@ -2551,6 +2711,7 @@ a || b  si V(a) y V(b) son incomparables</code></pre>
     </tbody>
   </table></div>
   <p>FIFO no ordena emisores diferentes. Causal ordena solo dependencias. Total puede decidir <code>m2, m1</code> en todos y aun violar causalidad si <code>m1 -&gt; m2</code>. Para total causal se combinan ambas condiciones.</p>
+  <div class="callout example">P1 envía <code>m1 = "¿estado?"</code> a P2. Después de recibirlo, P2 envía <code>m2 = "listo"</code> al grupo, por lo tanto <code>m1 -&gt; m2</code>. Un sequencer puede asignar primero a m2 y hacer que todos entreguen <code>m2, m1</code>: hay orden total porque todos coinciden, pero se violó causalidad porque entregaron la respuesta antes que la pregunta. Si los emisores fueran independientes, invertirlos no demostraría una violación causal.</div>
   <pre><code>FIFO desde emisor j:
     entregar m si seq(m) == siguiente[j]
     luego incrementar y revisar buffer
@@ -2561,9 +2722,13 @@ causal con vector W recibido en proceso i:
   <p>Orden total puede implementarse con sequencer que asigna número global, token que serializa emisiones o consenso por posición de log. El sequencer es simple pero necesita replicación para no ser único punto de fallo.</p>
 
   <h3 id="r12-estado">Estado global y cortes</h3>
-  <p>Un estado global combina un estado local de cada proceso y el estado de canales. Un corte elige un prefijo de la historia de cada proceso.</p>
+  <div class="callout"><b>Estado local.</b> Tupla de todas las variables internas de un proceso en un punto de su historia.</div>
+  <div class="callout"><b>Estado global.</b> Unión de los estados locales de todos los procesos y el estado de los canales, formado por mensajes enviados pero todavía no entregados.</div>
+  <div class="callout"><b>Historia.</b> Secuencia de eventos procesados por un proceso considerado como máquina de estados.</div>
+  <div class="callout"><b>Corte.</b> Unión de un prefijo de la historia de cada proceso. Su frontera contiene el último evento incluido de cada proceso.</div>
   <div class="callout"><b>Corte consistente.</b> Si contiene un evento, contiene todas sus causas. En particular, no contiene una recepción sin contener el envío correspondiente.</div>
   <p>Puede contener un envío sin recepción: el mensaje está en tránsito y pertenece al estado del canal. Un corte inconsistente describe un estado global imposible.</p>
+  <div class="callout example">P0 tiene $100, descuenta $10 y envía una transferencia a P1, que parte de $0 y acredita al recibir. <code>{P0: 90, P1: 0, canal: $10}</code> es válido. <code>{P0: 100, P1: 10}</code> es inválido: contiene la recepción sin el envío y crea dinero sin causa.</div>
 
   <h4 id="r12-chandy">Snapshot de Chandy y Lamport</h4>
   <p>Supuestos: canales confiables FIFO, procesos que no se detienen y grafo conectado.</p>
@@ -2585,6 +2750,7 @@ al recibir primer MARKER por canal c:
 termina cuando cada proceso recibio MARKER por todos sus canales entrantes</code></pre>
   <p>FIFO garantiza que los mensajes previos al marker por un canal llegan antes que él. En el canal que trae el primer marker, no puede quedar un mensaje pre snapshot por registrar. El algoritmo no congela el sistema: captura un corte consistente mientras continúa.</p>
   <p>Usos: checkpoint distribuido, detectar terminación, deadlock, tokens perdidos y propiedades estables. Después hay que recolectar estados locales y de canal para analizarlos.</p>
+  <div class="callout"><b>Comunicación confiable.</b> Garantiza integridad, los datos no llegan corruptos; validez, lo entregado corresponde a lo enviado; y atomicidad de delivery, el mensaje se entrega completo y, en grupos, a todos los destinatarios acordados o a ninguno.</div>
   <div class="callout exam">En Lamport, nunca afirmar la inversa. En snapshots, dibujá al menos un mensaje en tránsito y explicá por qué una recepción sin envío vuelve inconsistente al corte.</div>
 
     </section>
@@ -2597,6 +2763,7 @@ termina cuando cada proceso recibio MARKER por todos sus canales entrantes</code
   <p class="intro">Consenso hace que procesos correctos decidan un mismo valor pese a fallos. Elegir líder resuelve quién coordina durante una época, pero no alcanza para preservar decisiones entre líderes. Paxos y Raft combinan quorums, términos y logs para conservar safety durante cambios.</p>
 
   <h3 id="r13-lider">Elección de líder</h3>
+  <div class="callout"><b>Elección de líder.</b> Algoritmo que selecciona un proceso del grupo para un rol particular y permite reelegir cuando el líder se retira o falla.</div>
   <p>Propiedades esperadas:</p>
   <ul class="study-list">
     <li><b>Safety:</b> a lo sumo un líder válido por término o vista.</li>
@@ -2618,6 +2785,7 @@ COORDINATOR(max_id): segunda vuelta para informar</code></pre>
   <p>En el peor caso genera O(N cuadrado) mensajes. Presupone conocer a todos y poder contactarlos. El mayor ID gana, no el más capaz salvo que el ID codifique esa política.</p>
 
   <h3 id="r13-consenso">Problema del consenso</h3>
+  <div class="callout"><b>Consenso.</b> Dado un conjunto de procesos y un punto de decisión, todos los procesos correctos deben acordar el mismo valor.</div>
   <p>Cada proceso propone un valor y debe decidir:</p>
   <ul class="study-list">
     <li><b>Agreement:</b> procesos correctos no deciden distinto.</li>
@@ -2626,6 +2794,7 @@ COORDINATOR(max_id): segunda vuelta para informar</code></pre>
     <li><b>Termination:</b> procesos correctos finalmente deciden.</li>
   </ul>
   <p>En un sistema completamente asincrónico con al menos un posible crash, ningún algoritmo determinista garantiza siempre termination. Los protocolos prácticos preservan safety sin tiempo y obtienen liveness bajo sincronía parcial, timeouts y períodos estables.</p>
+  <div class="callout"><b>Quorum de mayoría.</b> Para tolerar <code>f</code> caídas y todavía decidir por mayoría se requieren al menos <code>N = 2f + 1</code> procesos. Cualquier par de mayorías se intersecta.</div>
 
   <h4 id="r13-rondas">Consenso sincrónico por rondas</h4>
   <p>Si se conoce una cota de <code>f</code> crashes y las rondas tienen entrega acotada, cada proceso difunde los valores conocidos durante <code>f + 1</code> rondas. La ronda extra permite que un valor recibido justo antes de caer se propague. Al final todos aplican la misma función determinista, por ejemplo mínimo.</p>
@@ -2637,8 +2806,10 @@ decidir min(known)</code></pre>
   <p>La prueba depende de rondas y límites conocidos. Sin ellos, no recibir en una ronda no distingue crash de demora.</p>
 
   <h3 id="r13-bizantinos">Generales bizantinos</h3>
+  <div class="callout"><b>Falla bizantina.</b> Comportamiento arbitrario en tiempo y respuesta, incluso enviando información diferente a participantes distintos o actuando de forma maliciosa.</div>
   <p>Un participante bizantino puede mentir, omitir o enviar valores diferentes. En el problema clásico de mensajes orales sin firmas, para tolerar <code>f</code> traidores hacen falta:</p>
   <pre><code>N &gt;= 3f + 1</code></pre>
+  <div class="callout"><b>Quorum bizantino.</b> Para tolerar <code>f</code> procesos bizantinos en el modelo clásico se requieren al menos <code>3f + 1</code> procesos, de los cuales al menos <code>2f + 1</code> son correctos.</div>
   <p>Con tres generales y un traidor, los leales no pueden distinguir si el comandante mintió o el mensajero alteró. Con cuatro y uno, cada general reenvía lo que recibió y la mayoría permite filtrar una versión inconsistente.</p>
   <p>El algoritmo OM(f) reenvía recursivamente valores por caminos de longitud hasta <code>f + 1</code> y aplica mayoría. Su costo crece rápidamente. Firmas digitales cambian supuestos porque un traidor no puede falsificar lo dicho por otro, aunque todavía puede omitir.</p>
   <div class="callout warning">Tolerar crash con mayoría de <code>2f + 1</code> réplicas no equivale a tolerar Byzantine. Con actores arbitrarios, la cota clásica es <code>3f + 1</code>.</div>
@@ -2655,6 +2826,7 @@ decidir min(known)</code></pre>
   <p>Cuatro servicios miden <code>1010, 1000, 1000, 1030</code>. Un algoritmo válido debe declarar la función de decisión. En una ronda sin fallos, cada uno difunde <code>(id, medición)</code>, espera los cuatro valores y aplica mediana inferior o mayoría de valor si existe. Con mediana ordena <code>[1000, 1000, 1010, 1030]</code> y todos deciden 1000 por la misma regla. Si se tolera un crash en rondas sincrónicas, se propagan conjuntos durante dos rondas antes de decidir. El protocolo acuerda un valor, no demuestra que el sensor sea físicamente correcto.</p>
 
   <h3 id="r13-paxos">Paxos</h3>
+  <div class="callout"><b>Paxos.</b> Protocolo de consenso que elige un único valor entre propuestas concurrentes mientras pueda comunicarse una mayoría de acceptors.</div>
   <p>Paxos decide un valor por instancia. Roles lógicos:</p>
   <ul class="study-list">
     <li><b>Proposer:</b> propone número y valor.</li>
@@ -2761,7 +2933,7 @@ leader -&gt; cliente: resultado</code></pre>
   <p>Un retry puede mejorar probabilidad de entrega pero consumir el tiempo restante. La política correcta pregunta cuántos intentos caben antes del deadline y qué modo seguro se activa si no alcanzan.</p>
 
   <h4 id="r14-industrial">Arquitecturas industriales</h4>
-  <p>La automatización clásica usa niveles: sensores y actuadores, controladores PLC, supervisión SCADA, ejecución de manufactura y planificación empresarial. Los niveles bajos requieren tiempos más estrictos y redes deterministas; los altos agregan y planifican.</p>
+  <p>La automatización clásica usa niveles: sensores y actuadores, controladores PLC, supervisión SCADA, ejecución de manufactura y planificación empresarial. Los niveles bajos requieren tiempos más estrictos y redes deterministas como fieldbus, Profibus o Profinet; los altos agregan y planifican. Ethernet o TCP sin una política temporal adicional no garantizan deadline solo por ser rápidos.</p>
   <p>En automoción, una arquitectura distribuida por función conecta muchas ECUs. Una arquitectura zonal agrupa dispositivos por ubicación física en controladores de zona y lleva backbone de alta velocidad hacia cómputo central. Reduce cableado y consolida cómputo, pero vuelve críticos backbone y controladores centrales, que deben redundarse y aislarse.</p>
 
   <h3 id="r14-paradigmas">Event triggered y time triggered</h3>
@@ -2786,6 +2958,10 @@ leader -&gt; cliente: resultado</code></pre>
     <li><b>Actuador:</b> aplica la acción sobre la planta.</li>
     <li><b>Perturbación:</b> influencia externa no controlada.</li>
   </ul>
+  <div class="callout"><b>Variable controlada.</b> Salida o condición que se desea llevar a un valor, por ejemplo la temperatura de una habitación.</div>
+  <div class="callout"><b>Variable manipulada.</b> Cantidad que el controlador modifica para afectar la variable controlada, por ejemplo potencia o velocidad del ventilador.</div>
+  <div class="callout"><b>Lazo abierto.</b> La acción de control no usa la salida medida. No corrige perturbaciones ni error real.</div>
+  <div class="callout"><b>Lazo cerrado.</b> La salida se mide, se compara con la referencia y el error realimenta la decisión del controlador.</div>
   <pre><code>         error              accion
 setpoint -&gt; [Controlador] -&gt; [Actuador] -&gt; [Planta] -&gt; salida
    ^                                              |
@@ -2795,6 +2971,7 @@ setpoint -&gt; [Controlador] -&gt; [Actuador] -&gt; [Planta] -&gt; salida
 
   <h3 id="r14-programacion">Programación y scheduling</h3>
   <p>Una tarea RT debe tener ejecución acotada: evitar memoria dinámica impredecible, page faults, locks sin cota, I/O desconocido y garbage collection no controlado. Las interrupciones y drivers también consumen presupuesto.</p>
+  <p>Un backoff exponencial sin cantidad máxima es incompatible con hard RT porque no tiene peor caso finito útil. Si se permiten retries, cantidad, timeout y demora deben caber explícitamente dentro del deadline y terminar en una acción segura.</p>
   <div class="callout"><b>Inversión de prioridades.</b> Una tarea alta queda bloqueada por un lock de una baja, mientras tareas medias impiden que la baja ejecute y libere.</div>
   <p><b>Priority inheritance</b> eleva temporalmente la prioridad de quien retiene el recurso. <b>Priority ceiling</b> asigna un techo a recursos y limita bloqueos de forma más analizable.</p>
   <p>En un conjunto periódico simple, utilización es <code>U = suma(Ci / Ti)</code>, donde <code>Ci</code> es WCET y <code>Ti</code> período. Que <code>U &lt; 1</code> es necesario en un procesador, pero no siempre suficiente bajo cualquier scheduler y blocking. La prueba real incluye deadlines, prioridades, interferencia y secciones críticas.</p>

@@ -3,11 +3,13 @@
   <p class="intro">Tolerar fallos empieza por distinguir causa, estado incorrecto y servicio incorrecto. Después se elige detección, redundancia y recuperación. La coordinación distribuida agrega protocolos para exclusión y commit, pero ningún protocolo puede convertir una detección incierta en conocimiento perfecto.</p>
 
   <h3 id="r11-terminologia">Fallo, error y avería</h3>
+  <div class="def"><b>Fallo parcial.</b> Un componente falla mientras el resto del sistema sigue operando. Es la diferencia central respecto de un único programa que se detiene como conjunto.</div>
   <div class="def"><b>Fault.</b> Causa adjudicada o hipotética de un error, por ejemplo un bit alterado, un bug o un corte.</div>
   <div class="def"><b>Error.</b> Estado interno incorrecto que puede conducir a servicio incorrecto.</div>
   <div class="def"><b>Failure o avería.</b> Desviación observable del servicio respecto de su especificación.</div>
   <pre><code>fault se activa -&gt; error interno -&gt; cruza la frontera -&gt; failure observable</code></pre>
   <p>Contener el error antes de la frontera evita que se convierta en avería. Un checksum detecta corrupción, una réplica puede enmascararla y una validación puede impedir propagarla.</p>
+  <div class="def"><b>Tolerancia a fallos.</b> Capacidad de continuar con un comportamiento definido como aceptable en presencia de fallos. Puede significar servicio completo, degradación controlada o transición a un estado seguro.</div>
 
   <h3 id="r11-clasificacion">Modelos de fallo</h3>
   <div class="tablewrap"><table>
@@ -22,6 +24,7 @@
     </tbody>
   </table></div>
   <p>Un sistema puede ser sincrónico, parcialmente sincrónico o asincrónico según qué cotas conoce sobre cómputo, mensajes y relojes. El detector de fallos usa señales y timeouts, pero en un modelo asincrónico una ausencia de respuesta solo genera sospecha. La exactitud y rapidez del detector compiten.</p>
+  <p>Por persistencia, un fallo puede ser <b>transiente</b>, aparece una vez y desaparece; <b>intermitente</b>, aparece y desaparece de forma recurrente; o <b>permanente</b>, continúa hasta reparar o reemplazar. La estrategia cambia: retry puede resolver uno transiente, ocultar uno intermitente y empeorar la carga, y no corrige uno permanente.</p>
 
   <h3 id="r11-estrategias">Manejo de fallos</h3>
   <ul>
@@ -41,6 +44,11 @@
       <tr><td>Semi activa, leader follower</td><td>Leader decide, followers acompañan</td><td>Se elige follower actualizado</td><td>Equilibrio, requiere consenso de término y log</td></tr>
     </tbody>
   </table></div>
+  <ul>
+    <li><b>Pasiva:</b> usa menos cómputo y permite implementación no determinista, pero el backup puede quedar atrasado y el failover demora mientras recupera estado.</li>
+    <li><b>Activa:</b> failover casi inmediato y comparación de respuestas puede detectar divergencia, pero todas las réplicas gastan cómputo, deben recibir orden total y ejecutar determinísticamente.</li>
+    <li><b>Semi activa:</b> followers mantienen un log actualizado sin responder normalmente. Reduce el tiempo de recuperación, pero todavía necesita elección de leader y evitar split brain.</li>
+  </ul>
   <p>Redundancia espacial usa componentes simultáneos. Redundancia temporal reintenta. Redundancia de información agrega checksum o códigos. Réplicas idénticas no protegen contra el mismo bug o configuración: safety crítica puede exigir diversidad de diseño.</p>
 
   <h3 id="r11-recuperacion">Recuperación y dependability</h3>
@@ -51,7 +59,14 @@
     <li><b>Infraestructura inmutable:</b> reemplazar una instancia por una conocida en vez de repararla manualmente.</li>
   </ul>
   <p>RPO mide cuántos datos se acepta perder en tiempo. RTO mide cuánto puede tardar la restauración. Backup sin restauración probada no demuestra recuperación. Disaster recovery debe cubrir credenciales, configuración, dependencias externas y procedimientos, no solo archivos.</p>
-  <p>Un sistema dependable se evalúa por availability, reliability, safety y maintainability. Availability es tiempo servido, reliability continuidad sin avería, safety ausencia de consecuencias catastróficas y maintainability facilidad y velocidad de reparación. Un servicio que se apaga cada domingo puede ser confiable durante cada período, pero tiene menor disponibilidad.</p>
+  <p>Un sistema dependable se evalúa por:</p>
+  <ul>
+    <li><b>Availability:</b> probabilidad de estar operando en un instante.</li>
+    <li><b>Reliability:</b> continuidad de servicio correcto durante un intervalo. Un sistema siempre encendido que alterna respuestas actuales y viejas puede estar disponible pero ser poco fiable.</li>
+    <li><b>Durability:</b> probabilidad de recuperar un dato que el sistema confirmó como persistido.</li>
+    <li><b>Safety:</b> ausencia de consecuencias catastróficas cuando falla, no seguridad contra atacantes.</li>
+    <li><b>Maintainability:</b> facilidad y tiempo necesarios para reparar, actualizar o restaurar.</li>
+  </ul>
 
   <h3 id="r11-exclusion">Exclusión mutua distribuida</h3>
   <p>El objetivo es que un solo proceso acceda a un recurso crítico, con progreso y, si se pide, orden justo. No hay memoria compartida para un mutex.</p>

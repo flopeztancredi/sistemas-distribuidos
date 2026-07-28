@@ -54,11 +54,13 @@ work pool dinamico:
     <li><b>NUMA:</b> cada procesador tiene memoria cercana más rápida y accede a memoria remota con mayor costo.</li>
   </ul>
   <p>En un <b>multicomputer</b>, cada nodo tiene memoria privada y se conecta por red. Escala capacidad y dominio físico, pero cualquier dato compartido debe convertirse en mensajes, replicación o almacenamiento remoto.</p>
+  <div class="def"><b>MIMD, multiprocessor contra multicomputer.</b> En ambos hay múltiples flujos de instrucciones y datos. Un multiprocessor comparte memoria o reloj de hardware; un multicomputer está formado por computadoras completas sin memoria ni reloj compartidos. Un sistema distribuido pertenece a esta segunda familia.</div>
   <div class="warn">NUMA tiene espacio de direcciones compartido, aunque el costo dependa de la ubicación. Multicomputing no tiene memoria compartida de hardware. Esa diferencia determina el modelo de programación.</div>
 
   <h3 id="r03-nombres">Nombres, direcciones y discovery</h3>
   <div class="def"><b>Nombre.</b> Identificador lógico de una entidad.</div>
   <div class="def"><b>Dirección.</b> Información que permite alcanzarla en una ubicación o transporte.</div>
+  <div class="def"><b>Direccionamiento.</b> Mapeo entre el nombre estable de una entidad y una dirección que puede cambiar o reutilizarse.</div>
   <p>Separarlos permite mover, replicar o reemplazar una entidad sin cambiar a sus consumidores. La resolución transforma nombre en una o más direcciones y puede incluir versión, salud, prioridad y balanceo.</p>
   <p><b>DNS</b> es jerárquico y distribuido: resolvers consultan servidores raíz, de dominio superior y autoritativos, con caches gobernadas por TTL. Un registro A o AAAA da una dirección, CNAME un alias, MX un destino de correo y SRV puede expresar servicio, puerto, prioridad y peso.</p>
   <p><b>Service discovery</b> adapta la idea a instancias efímeras:</p>
@@ -85,7 +87,18 @@ work pool dinamico:
       <tr><td>Topología</td><td>¿Qué conexiones físicas o lógicas existen?</td><td>Enlaces, dirección, multiplicidad</td></tr>
     </tbody>
   </table></div>
-  <p>Un buen diagrama tiene título y objetivo, alcance explícito, leyenda, flechas con dirección y protocolo, multiplicidades relevantes y el nivel justo de detalle. No mezclar clases, procesos y máquinas sin distinguirlos visualmente.</p>
+  <p>Un buen diagrama tiene título y objetivo, alcance explícito, leyenda, flechas con dirección y protocolo, multiplicidades relevantes y el nivel justo de detalle. No mezclar clases, procesos y máquinas sin distinguirlos visualmente. Como guía cognitiva, el principio de Miller sugiere mantener aproximadamente entre cinco y nueve elementos principales por vista y abrir otra vista para el detalle.</p>
+  <h4 id="r03-catalogo-diagramas">Qué debe mostrar cada diagrama</h4>
+  <ul>
+    <li><b>Casos de uso:</b> actores externos, objetivos que obtienen del sistema y relaciones include, extend o generalización cuando realmente aclaran reutilización.</li>
+    <li><b>Paquetes:</b> agrupaciones lógicas y dirección de dependencias. Sirve para detectar ciclos y capas que conocen demasiado.</li>
+    <li><b>Actividad:</b> acciones, decisiones, forks y joins. Modela flujo de control, no máquinas físicas.</li>
+    <li><b>Componentes:</b> piezas reemplazables, interfaces provistas y requeridas. Explica contratos, no la secuencia temporal.</li>
+    <li><b>Secuencia:</b> lifelines y mensajes ordenados de arriba hacia abajo. Debe incluir respuestas, alternativas, loops y operaciones asincrónicas relevantes.</li>
+    <li><b>Despliegue:</b> nodos físicos o entornos de ejecución y artefactos instalados. Acá se ven réplicas, zonas y protocolos.</li>
+    <li><b>Robustez:</b> boundary recibe interacción, control coordina el caso de uso y entity conserva información del dominio. El flujo normal es actor, boundary, control, entity, sin que una entity conozca la interfaz.</li>
+    <li><b>DAG:</b> tareas como nodos y dependencias de datos como aristas. Una arista A a B significa que B no puede ejecutar hasta disponer del resultado de A.</li>
+  </ul>
   <h4 id="r03-vista-fisica">Vista física mínima para un final</h4>
   <pre><code>[Clientes]
     | HTTPS

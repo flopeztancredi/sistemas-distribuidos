@@ -6,10 +6,12 @@
   <div class="def"><b>Layer.</b> División lógica de responsabilidades. Cada capa ofrece servicios a la superior y usa servicios de la inferior.</div>
   <div class="def"><b>Tier.</b> Unidad física de despliegue. Indica en qué proceso o máquina corre una parte.</div>
   <p>Presentación, negocio y persistencia pueden ser tres layers dentro de un único ejecutable, o desplegarse en tres tiers. Cambiar layers mejora modularidad. Cambiar tiers modifica latencia, seguridad, escalabilidad y fallos.</p>
+  <p>Un modelo lógico frecuente separa Presentation y API como entradas, Services como coordinación de casos de uso, Core Business como reglas y entidades, y Persistence como acceso a datos. Security y Audit son responsabilidades transversales. En un despliegue 3 tier, el cliente corre presentación, un servidor ejecuta negocio y otro aloja la base. Los layers no deben confundirse con esas máquinas.</p>
   <p>Una dependencia normal baja desde una capa de mayor nivel hacia una abstracción de menor nivel. Un <b>upcall</b> permite que una capa inferior notifique a una superior mediante callback, evento o interfaz invertida. Si dos layers se conocen mutuamente por sus implementaciones aparece dependencia circular, que dificulta probar y reemplazar.</p>
   <div class="warn">“Arquitectura de tres capas” no dice cuántas máquinas hay. “Arquitectura de tres tiers” sí afirma una separación de despliegue, pero no prueba que cada tier tenga una sola responsabilidad lógica.</div>
 
   <h3 id="r04-contratos">Interfaces y contratos</h3>
+  <div class="def"><b>Interfaz.</b> Frontera pública que permite comunicar componentes, servicios o sistemas mediante un contrato, ocultando la implementación privada.</div>
   <p>Una interfaz lista operaciones accesibles. Un contrato además fija precondiciones, postcondiciones, invariantes, tipos, errores y semántica observable. En una interfaz remota también debe definir:</p>
   <ul>
     <li>identidad y versionado de recursos;</li>
@@ -20,11 +22,15 @@
     <li>compatibilidad hacia atrás de consumidores y productores.</li>
   </ul>
   <p>Un contrato <b>orientado a entidades</b> expone recursos y cambios de estado. Uno <b>orientado a procesos</b> expone acciones o procedimientos. Ninguno es universalmente mejor: entidades favorecen una interfaz uniforme y procesos modelan operaciones de negocio complejas sin fingir que todo es CRUD.</p>
+  <div class="ej">Orientados a entidades: <code>GET /users/{id}</code> y <code>POST /products</code>. Orientados a procesos: <code>POST /search</code> y <code>POST /transform/html-to-pdf</code>. El primero identifica sustantivos y usa la operación estándar; el segundo nombra una acción cuyo resultado no se modela naturalmente como CRUD.</div>
+  <p>Las interfaces también se clasifican por alcance: Web API con HTTP, API remota custom sobre TCP o UDP, API orientada a procedimientos como gRPC, API orientada a objetos como CORBA o RMI, biblioteca o framework dentro del proceso, y API de sistema operativo como POSIX o WinAPI.</p>
 
   <h3 id="r04-protocolo">Qué define un protocolo</h3>
   <div class="def"><b>Protocolo.</b> Acuerdo sobre formato, significado, orden y temporización de mensajes entre participantes.</div>
   <p>La sintaxis indica campos y codificación. La semántica indica qué significa cada valor y qué efecto produce. La secuencia indica qué mensajes son válidos en cada estado. La temporización define timeouts, retransmisiones y vigencia.</p>
   <p>Cada capa intercambia una PDU compuesta por control propio y payload de la capa superior. Al enviar, las capas encapsulan. Al recibir, desencapsulan y validan.</p>
+  <div class="def"><b>PDU.</b> Unidad de datos que un protocolo entrega a la capa inferior para ser encapsulada.</div>
+  <p>Si una PDU supera el máximo inferior, se segmenta y cada fragmento repite headers. Si varias PDUs pequeñas caben juntas, batching amortiza headers a costa de esperar y sumar latencia. El protocolo de aplicación debe conocer qué garantiza la capa inferior: una imagen grande sobre UDP puede perderse completa por faltar un solo fragmento.</p>
 
   <h4 id="r04-formato">Formato y framing</h4>
   <div class="tablewrap"><table>
@@ -78,6 +84,7 @@ body:
     <li><b>Sistema por capas:</b> el cliente no necesita saber si habla con origen, proxy o cache.</li>
     <li><b>Code on demand opcional:</b> el servidor puede enviar código ejecutable.</li>
   </ul>
+  <p>La parte de hipermedia se conoce como <b>HATEOAS</b>: una representación incluye links a acciones o estados siguientes para que el cliente los descubra. Es parte de la definición académica de REST, aunque muchas APIs HTTP de producción no la implementan de forma completa.</p>
   <div class="tablewrap"><table>
     <thead><tr><th>Método</th><th>Intención</th><th>Safe</th><th>Idempotente</th></tr></thead>
     <tbody>
@@ -90,6 +97,8 @@ body:
   </table></div>
   <p>Códigos típicos: 200 lectura exitosa, 201 creación, 202 aceptado para procesar luego, 204 éxito sin body, 400 pedido inválido, 401 falta autenticación, 403 identidad sin permiso, 404 inexistente, 409 conflicto de estado, 429 límite, 500 fallo interno y 503 indisponibilidad transitoria.</p>
   <p>Las URLs identifican entidades, no pantallas ni verbos arbitrarios: <code>/orders/42</code>. Relaciones se expresan con subrecursos o enlaces. El versionado puede estar en path, header o media type; la regla importante es hacer cambios aditivos y tolerar campos desconocidos antes de romper consumidores.</p>
+  <div class="def"><b>Semantic Versioning.</b> Versión <code>Major.Minor.Patch</code>: Major cambia ante incompatibilidad de contrato, Minor agrega funcionalidad compatible y Patch corrige sin cambiar la interfaz.</div>
+  <p>Versionar la API no es versionar una entidad. La primera decisión permite que consumidores viejos convivan durante una migración. El versionado histórico conserva estados sucesivos del mismo recurso, por ejemplo revisiones de una página. Una API puede exponer <code>/v2</code> y, dentro de ella, muchas revisiones de cada entidad.</p>
 
   <h3 id="r04-rpc">RPC y gRPC</h3>
   <div class="def"><b>RPC.</b> Abstracción que permite invocar un procedimiento remoto mediante una interfaz parecida a una llamada local.</div>
@@ -137,5 +146,18 @@ origen.extraer(tx, 1000)
 destino.acreditar(tx, 1000)
 coordinador.commit(tx)        # requiere protocolo como 2PC</code></pre>
   <p>Sin coordinador transaccional, una caída entre ambas llamadas deja un efecto parcial. También se puede modelar una transferencia como recurso con estado e idempotency key y completar por saga. La frontera de objeto no reemplaza el protocolo de commit.</p>
+  <pre><code>CLIENTE
+  AccountProxy("CA-1234") ----\
+                               \ RPC
+  AccountProxy("CA-5678") ------&gt; DISPATCHER DEL SERVIDOR
+                                      |
+                                      +-&gt; Account CA-1234
+                                      |     saldo: 1000 -&gt; 800
+                                      |
+                                      \-&gt; Account CA-5678
+                                            saldo: 500 -&gt; 700
+
+El proxy conserva referencia remota, no una copia del saldo.
+El dispatcher usa identidad de objeto para dirigir cada invocacion.</code></pre>
   <div class="examen">Para comparar REST y RPC, no alcanza con JSON contra binario. Compará orientación del contrato, descubribilidad, generación de clientes, streaming, cache, compatibilidad y tratamiento de fallos remotos.</div>
 </section>

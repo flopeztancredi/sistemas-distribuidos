@@ -3,6 +3,8 @@
   <p class="intro">Antes de distribuir entre máquinas hay que dominar los mismos problemas dentro de una: intercalaciones, exclusión, espera y comunicación. La red cambia los mecanismos disponibles, pero no elimina las invariantes que deben preservarse.</p>
 
   <h3 id="r02-modelos">Threads, procesos y computadoras</h3>
+  <div class="def"><b>Concurrencia.</b> Varias actividades progresan durante el mismo intervalo y sus eventos pueden intercalarse, incluso sobre un único procesador.</div>
+  <div class="def"><b>Paralelismo.</b> Varias actividades ejecutan simultáneamente sobre recursos físicos distintos.</div>
   <div class="tablewrap"><table>
     <thead><tr><th>Modelo</th><th>Memoria</th><th>Comunicación</th><th>Aislamiento</th></tr></thead>
     <tbody>
@@ -51,7 +53,7 @@ lock:
   <h4 id="r02-problemas-clasicos">Problemas clásicos</h4>
   <p><b>Productor consumidor</b> requiere exclusión sobre el buffer, espera si está vacío y, si es acotado, espera si está lleno. <b>Lectores escritores</b> permite lectores simultáneos pero excluye escritores; priorizar siempre a un grupo puede dejar al otro sin progreso. <b>Filósofos comensales</b> muestra deadlock si todos retienen un recurso mientras esperan el siguiente.</p>
   <div class="def"><b>Deadlock.</b> Conjunto de actividades que esperan circularmente recursos retenidos por otras del mismo conjunto.</div>
-  <p>Las condiciones de Coffman son exclusión mutua, retención mientras se espera, ausencia de desalojo y espera circular. Romper cualquiera evita ese tipo de deadlock. Ordenar globalmente la adquisición de locks rompe la espera circular.</p>
+  <p>Un grafo wait for dibuja una arista de Pi a Pj cuando Pi espera un recurso retenido por Pj. Un ciclo indica posibilidad de deadlock. Las condiciones de Coffman son exclusión mutua, retención mientras se espera, ausencia de desalojo y espera circular. Romper cualquiera evita ese tipo de deadlock. Ordenar globalmente la adquisición de locks rompe la espera circular.</p>
 
   <h3 id="r02-ipc">IPC entre procesos</h3>
   <div class="tablewrap"><table>
