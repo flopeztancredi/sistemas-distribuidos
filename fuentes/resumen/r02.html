@@ -1,0 +1,104 @@
+<section class="unidad" id="r02" data-titulo="Concurrencia y comunicación local">
+  <h2>Concurrencia y comunicación local</h2>
+  <p class="intro">Antes de distribuir entre máquinas hay que dominar los mismos problemas dentro de una: intercalaciones, exclusión, espera y comunicación. La red cambia los mecanismos disponibles, pero no elimina las invariantes que deben preservarse.</p>
+
+  <h3 id="r02-modelos">Threads, procesos y computadoras</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Modelo</th><th>Memoria</th><th>Comunicación</th><th>Aislamiento</th></tr></thead>
+    <tbody>
+      <tr><td>Multithreading</td><td>Compartida dentro del proceso</td><td>Variables y primitivas de sincronización</td><td>Bajo, un fallo puede afectar todo el proceso</td></tr>
+      <tr><td>Multiprocessing</td><td>Privada por proceso en una máquina</td><td>IPC del sistema operativo</td><td>Mayor, con costo de cambio y copia</td></tr>
+      <tr><td>Multicomputing</td><td>Privada por nodo</td><td>Mensajes por red</td><td>Físico, con fallos parciales</td></tr>
+    </tbody>
+  </table></div>
+  <p><b>Concurrencia</b> significa que varias actividades progresan con posibles intercalaciones. <b>Paralelismo</b> significa que dos actividades ejecutan simultáneamente sobre recursos distintos. Puede haber concurrencia en un solo core y paralelismo entre tareas que nunca comparten estado.</p>
+
+  <h3 id="r02-correccion">Safety, liveness y atomicidad</h3>
+  <div class="def"><b>Propiedad de safety.</b> Algo malo nunca ocurre, por ejemplo dos procesos nunca ocupan juntos una sección crítica.</div>
+  <div class="def"><b>Propiedad de liveness.</b> Algo bueno finalmente ocurre, por ejemplo todo proceso que espera termina entrando.</div>
+  <p>Una operación es <b>atómica</b> cuando los demás observan que ocurrió completa o no ocurrió. Una sección crítica agrupa operaciones que deben verse como una unidad respecto de un recurso compartido.</p>
+  <p>Los algoritmos de exclusión puramente por software, como Peterson para dos participantes, dependen de lecturas y escrituras atómicas y de un modelo de memoria específico. En hardware moderno se usan instrucciones de lectura, modificación y escritura como <b>compare and swap</b>:</p>
+  <pre><code>CAS(direccion, esperado, nuevo):
+    atomico:
+        anterior = *direccion
+        if anterior == esperado:
+            *direccion = nuevo
+        return anterior
+
+lock:
+    while CAS(estado, LIBRE, OCUPADO) != LIBRE:
+        esperar_o_ceder_cpu()</code></pre>
+  <div class="warn">Un spinlock preserva exclusión, pero puede desperdiciar CPU y sufrir starvation. Corrección no implica buen rendimiento ni equidad.</div>
+
+  <h3 id="r02-primitivas">Primitivas de sincronización</h3>
+  <ul>
+    <li><b>Mutex:</b> exclusión con propiedad de dueño. Quien lo adquiere debe liberarlo.</li>
+    <li><b>Semáforo:</b> contador atómico. <code>wait</code> decrementa o bloquea; <code>signal</code> incrementa y puede despertar a alguien. El binario sirve como exclusión, el contador representa unidades disponibles.</li>
+    <li><b>Monitor:</b> encapsula estado, operaciones y exclusión. Solo un thread ejecuta dentro del monitor.</li>
+    <li><b>Condition variable:</b> permite dormir hasta que un predicado sea verdadero. Se verifica con <code>while</code>, porque el estado puede cambiar antes de recuperar el lock.</li>
+    <li><b>Barrera:</b> ningún participante cruza hasta que llegan los N esperados.</li>
+    <li><b>Rendezvous:</b> dos actividades se encuentran en un punto y ambas esperan a la otra.</li>
+  </ul>
+  <pre><code>consumir():
+    lock(m)
+    while cola.vacia():
+        not_empty.wait(m)
+    item = cola.pop()
+    not_full.signal()
+    unlock(m)
+    return item</code></pre>
+
+  <h4 id="r02-problemas-clasicos">Problemas clásicos</h4>
+  <p><b>Productor consumidor</b> requiere exclusión sobre el buffer, espera si está vacío y, si es acotado, espera si está lleno. <b>Lectores escritores</b> permite lectores simultáneos pero excluye escritores; priorizar siempre a un grupo puede dejar al otro sin progreso. <b>Filósofos comensales</b> muestra deadlock si todos retienen un recurso mientras esperan el siguiente.</p>
+  <div class="def"><b>Deadlock.</b> Conjunto de actividades que esperan circularmente recursos retenidos por otras del mismo conjunto.</div>
+  <p>Las condiciones de Coffman son exclusión mutua, retención mientras se espera, ausencia de desalojo y espera circular. Romper cualquiera evita ese tipo de deadlock. Ordenar globalmente la adquisición de locks rompe la espera circular.</p>
+
+  <h3 id="r02-ipc">IPC entre procesos</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Mecanismo</th><th>Uso</th><th>Detalle que importa</th></tr></thead>
+    <tbody>
+      <tr><td>Signals</td><td>Notificación asíncrona simple</td><td>Llevan muy poca información y el handler tiene restricciones</td></tr>
+      <tr><td>Shared memory</td><td>Gran volumen con pocas copias</td><td>La sincronización queda a cargo de la aplicación</td></tr>
+      <tr><td>File locks</td><td>Coordinar acceso a archivos</td><td>Pueden ser advisory y su alcance depende del sistema</td></tr>
+      <tr><td>Pipe</td><td>Flujo de bytes entre procesos relacionados</td><td>Usualmente unidireccional y sin límites de mensaje</td></tr>
+      <tr><td>FIFO</td><td>Pipe con nombre entre procesos no relacionados</td><td>Persiste el nombre, no necesariamente los datos</td></tr>
+      <tr><td>Message queue</td><td>Mensajes discretos y prioridades</td><td>Hay límites de tamaño, capacidad y persistencia</td></tr>
+      <tr><td>Socket</td><td>Comunicación local o por red</td><td>Expone endpoint, transporte y manejo explícito de fallos</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3 id="r02-red">TCP, UDP y sockets</h3>
+  <p>El modelo TCP/IP organiza responsabilidades en enlace, Internet, transporte y aplicación. El modelo OSI agrega presentación y sesión como capas conceptuales separadas. Encapsular significa que cada capa agrega su header y trata el contenido superior como payload.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>TCP</th><th>UDP</th></tr></thead>
+    <tbody>
+      <tr><td>Abstracción</td><td>Stream de bytes bidireccional</td><td>Datagramas</td></tr>
+      <tr><td>Garantías</td><td>Entrega ordenada sin duplicados mientras la conexión sea válida</td><td>Mejor esfuerzo, puede perder, duplicar o reordenar</td></tr>
+      <tr><td>Control</td><td>Conexión, retransmisión, flujo y congestión</td><td>La aplicación agrega lo que necesite</td></tr>
+      <tr><td>Uso típico</td><td>Cuando importa completar un flujo</td><td>Tiempo real, multicast, consultas breves o protocolo propio</td></tr>
+    </tbody>
+  </table></div>
+  <p>TCP no conserva fronteras de mensaje. Un <code>send</code> no corresponde a un <code>recv</code>. La aplicación necesita <b>framing</b>: longitud fija, delimitador escapable, prefijo de longitud o combinación de header fijo y payload variable.</p>
+  <pre><code>servidor TCP:
+    s = socket()
+    bind(s, ip, puerto)
+    listen(s)
+    while true:
+        c = accept(s)
+        atender(c)       # recv puede devolver menos bytes que los pedidos
+
+cliente TCP:
+    c = socket()
+    connect(c, ip, puerto)
+    send_all(c, frame(request))
+    response = read_frame(c)</code></pre>
+  <p>Una comunicación <b>sincrónica</b> bloquea el progreso lógico hasta recibir respuesta. Una <b>asincrónica</b> desacopla la aceptación del pedido de su resultado. Esto es independiente de que la API del socket bloquee un thread: se puede implementar un protocolo asincrónico con sockets bloqueantes y threads, o uno sincrónico con I/O no bloqueante.</p>
+
+  <h4 id="r02-healthcheck">Health check por UDP o TCP</h4>
+  <p>UDP conviene para heartbeats frecuentes cuando cada datagrama es autocontenido, perder alguno es aceptable, el estado más nuevo reemplaza al anterior y se quiere evitar una conexión por cliente. Cada mensaje lleva versión, identidad, secuencia y timestamp; el receptor declara sospecha recién después de varias ausencias. TCP conviene si hay una sesión existente, importa recibir cada cambio ordenado o la cantidad de clientes permite mantener conexiones.</p>
+  <p>UDP no confirma que la aplicación remota procesó. TCP tampoco prueba salud de negocio solo porque la conexión siga abierta. Un health check útil valida la capacidad que se quiere enrutar, con deadline y sin depender circularmente del componente observado.</p>
+
+  <h4 id="r02-congestion">Flujo y congestión</h4>
+  <p>El control de flujo evita saturar al receptor. El control de congestión evita saturar la red. Si productores ilimitados alimentan consumidores más lentos, siempre hace falta una política de <b>backpressure</b>: bloquear, rechazar, descartar, muestrear, degradar calidad o persistir hasta un límite. Una cola sin límite solo transforma sobrecarga en agotamiento de memoria y latencia creciente.</p>
+  <div class="examen">Al comparar modelos, nombrá la memoria compartida, el mecanismo de comunicación, el aislamiento y el tipo de fallo. Al diseñar sobre TCP, explicá framing, lecturas parciales, timeouts y qué representa el cierre de conexión.</div>
+</section>

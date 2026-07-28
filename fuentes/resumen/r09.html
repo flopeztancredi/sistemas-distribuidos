@@ -1,0 +1,78 @@
+<section class="unidad" id="r09" data-titulo="App Engine y BigTable">
+  <h2>App Engine y BigTable</h2>
+  <p class="intro">Google App Engine muestra cómo una PaaS fuerza aplicaciones replicables y administra versiones, instancias, colas y almacenamiento. BigTable muestra el soporte de datos: tabla dispersa, particionada por rangos y servida por tablet servers coordinados mediante metadata y Chubby.</p>
+
+  <h3 id="r09-paas">PaaS en detalle</h3>
+  <p>Una PaaS recibe código o un artefacto y administra runtime, aislamiento, despliegue, balanceo, escalado, health checks, logs y servicios asociados. Para poder crear y destruir instancias libremente, la aplicación debe:</p>
+  <ul>
+    <li>no depender del disco local para estado durable;</li>
+    <li>responder pedidos dentro de límites;</li>
+    <li>usar servicios externos para datos, cache y colas;</li>
+    <li>tolerar múltiples instancias y reintentos;</li>
+    <li>declarar configuración y dependencias de modo reproducible.</li>
+  </ul>
+  <p>La plataforma restringe para ganar capacidad de operación. El costo es menor control del host, límites de runtime y dependencia de APIs del proveedor.</p>
+
+  <h3 id="r09-appengine">Google App Engine</h3>
+  <p>La jerarquía lógica es:</p>
+  <pre><code>aplicacion
+  servicio A
+    version A1 -&gt; instancias xN
+    version A2 -&gt; instancias xM
+  servicio B
+    version B1 -&gt; instancias xK</code></pre>
+  <ul>
+    <li><b>Aplicación:</b> unidad administrativa y de recursos.</li>
+    <li><b>Servicio:</b> componente con configuración y escala propias.</li>
+    <li><b>Versión:</b> artefacto desplegado e inmutable, útil para rollback y tráfico gradual.</li>
+    <li><b>Instancia:</b> proceso concreto creado según demanda.</li>
+  </ul>
+  <p>Un frontend recibe tráfico, resuelve aplicación, servicio y versión, y balancea entre instancias. El scheduler puede crear instancias por carga y retirarlas. Separar versión de instancia permite canary, blue green y rollback sin editar procesos vivos.</p>
+  <p>El entorno original restringía filesystem, sockets y duración para que cualquier request pudiera ejecutarse en cualquier instancia. Las tareas largas se enviaban a colas. Aunque los runtimes modernos sean más flexibles, la idea de diseño se conserva: estado durable fuera de la instancia.</p>
+
+  <h4 id="r09-colas">Push, pull y leasing</h4>
+  <p>En una <b>push queue</b>, la plataforma invoca un handler HTTP y reintenta si no obtiene éxito. El handler debe ser idempotente. Tasa, concurrencia y backoff protegen al servicio.</p>
+  <p>En una <b>pull queue</b>, workers piden tareas y reciben un <b>lease</b>. Durante el lease nadie más debería tomarlas. Si el worker termina, elimina la tarea. Si cae, el lease vence y otro la recibe. Un lease reduce ejecución simultánea, pero no evita duplicado si el worker produjo el efecto y cayó antes de borrar.</p>
+  <pre><code>tarea disponible
+    -&gt; lease por T segundos
+        -&gt; exito: delete
+        -&gt; fallo o timeout: vuelve a disponible</code></pre>
+
+  <h3 id="r09-datastore">Datastore y partición</h3>
+  <p>Datastore ofrece entidades con key y propiedades sobre una infraestructura particionada. La clave determina identidad y ubicación. Los grupos de entidades permiten transacciones fuertes dentro de un alcance acotado, pero una raíz demasiado popular concentra escrituras.</p>
+  <p>La lección general es que el límite transaccional debe coincidir con el agregado del dominio. Una transacción global fácil de pedir es difícil de escalar. Índices permiten consultas, pero cada índice agrega escrituras y almacenamiento.</p>
+
+  <h3 id="r09-bigtable">Modelo de BigTable</h3>
+  <div class="def"><b>BigTable.</b> Mapa ordenado, distribuido, persistente y disperso indexado por <code>(row key, column key, timestamp)</code>.</div>
+  <p>Las filas se ordenan lexicográficamente por row key. Las columnas se agrupan en <b>column families</b> declaradas, mientras calificadores pueden aparecer dinámicamente. Cada celda conserva versiones por timestamp. “Disperso” significa que una celda inexistente no ocupa lugar.</p>
+  <pre><code>(row_key, family:qualifier, timestamp) -&gt; bytes
+
+web.example/page42
+  contenido:html  @t3 -&gt; ...
+  metricas:vistas @t5 -&gt; 918
+  links:a         @t2 -&gt; destino</code></pre>
+  <p>La row key domina localidad y carga. Campos que se consultan juntos conviene que queden en filas cercanas. Una clave monotónica concentra escrituras nuevas en el último rango. Se evita anteponiendo hash, bucket o identificador distribuido, aceptando que ciertas consultas por rango necesitarán fan out.</p>
+
+  <h3 id="r09-tablets">Tablets y jerarquía</h3>
+  <div class="def"><b>Tablet.</b> Rango contiguo de filas servido como unidad de partición y asignación.</div>
+  <p>La localización usa tres niveles conceptuales:</p>
+  <ol>
+    <li>Chubby conserva la ubicación del root tablet.</li>
+    <li>El root tablet contiene ubicaciones de tablets de metadata.</li>
+    <li>Las tablets de metadata indican qué tablet de usuario contiene una row key.</li>
+  </ol>
+  <p>El cliente cachea ubicaciones. Si consulta el tablet equivocado, invalida y vuelve a resolver. La jerarquía evita un directorio central enorme en cada lookup.</p>
+
+  <h4 id="r09-componentes">Master, tablet servers y Chubby</h4>
+  <ul>
+    <li><b>Master:</b> asigna tablets, detecta altas y bajas, balancea y coordina cambios de esquema. No está en el camino normal de cada lectura o escritura.</li>
+    <li><b>Tablet server:</b> sirve tablets, mantiene memoria, logs y archivos persistentes, y divide tablets grandes.</li>
+    <li><b>Chubby:</b> servicio de locks y archivos pequeños con consistencia fuerte, usado para elección de master, membresía y bootstrap.</li>
+  </ul>
+  <p>Separar control y datos evita que el master sea cuello de botella de I/O. Si cae, los tablet servers pueden seguir sirviendo durante un período mientras se elige otro, aunque cambios de asignación se pausen.</p>
+
+  <h4 id="r09-escritura">Camino de escritura y lectura</h4>
+  <p>Una escritura llega al tablet server, se agrega a un commit log durable y a una estructura en memoria. Cuando crece, se vuelca a archivos ordenados inmutables. Compactions combinan archivos y descartan versiones vencidas. Una lectura consulta memoria y archivos relevantes, ayudada por índices y filtros.</p>
+  <p>Cuando una tablet supera un umbral, se divide por rango. El master reasigna partes. El balance depende de que las row keys no concentren tráfico en una única tablet, aunque haya muchas máquinas libres.</p>
+  <div class="examen">En BigTable casi toda pregunta vuelve a la row key. Hay que poder dibujar la jerarquía Chubby, root, metadata, tablet y explicar por qué una clave monotónica crea hotspot.</div>
+</section>

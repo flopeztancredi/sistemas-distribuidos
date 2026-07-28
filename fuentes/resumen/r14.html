@@ -1,0 +1,92 @@
+<section class="unidad" id="r14" data-titulo="Sistemas de tiempo real">
+  <h2>Sistemas de tiempo real</h2>
+  <p class="intro">En tiempo real, una respuesta correcta fuera de plazo es incorrecta. El objetivo principal es previsibilidad: acotar ejecución, comunicación y recuperación. El lazo de control conecta software con un proceso físico, por eso una demora puede tener consecuencias materiales.</p>
+
+  <h3 id="r14-definicion">Hard y soft real time</h3>
+  <div class="def"><b>Sistema de tiempo real.</b> Sistema cuya corrección depende del resultado lógico y del instante en que se produce.</div>
+  <ul>
+    <li><b>Hard RT:</b> incumplir un deadline es una falla del sistema, potencialmente catastrófica.</li>
+    <li><b>Soft RT:</b> un incumplimiento degrada calidad o valor, pero puede tolerarse ocasionalmente.</li>
+  </ul>
+  <p>Performance promedio alta no implica tiempo real. Una tarea de 1 ms promedio con pausas impredecibles de 1 s no sirve para un deadline de 10 ms. Importan WCET, latencia máxima, jitter, blocking y distribución de prioridades.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Término</th><th>Significado</th></tr></thead>
+    <tbody>
+      <tr><td>Release time</td><td>Instante desde el que la tarea puede ejecutar</td></tr>
+      <tr><td>Deadline</td><td>Último instante aceptable de finalización</td></tr>
+      <tr><td>WCET</td><td>Peor tiempo de ejecución asumido</td></tr>
+      <tr><td>Período</td><td>Intervalo entre activaciones periódicas</td></tr>
+      <tr><td>Jitter</td><td>Variación temporal respecto del instante esperado</td></tr>
+      <tr><td>Latencia</td><td>Tiempo entre estímulo y respuesta</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3 id="r14-comunicacion">Comunicación previsible</h3>
+  <p>Ethernet convencional y colas compartidas tienen contención variable. Un diseño RT necesita cotas o reserva:</p>
+  <ul>
+    <li>prioridades y colas acotadas;</li>
+    <li>admisión de carga para no prometer más de lo ejecutable;</li>
+    <li>slots temporales como TDMA;</li>
+    <li>redundancia de red y caminos deterministas;</li>
+    <li>sincronización de relojes con error conocido;</li>
+    <li>timeouts derivados del deadline, no valores arbitrarios.</li>
+  </ul>
+  <p>Un retry puede mejorar probabilidad de entrega pero consumir el tiempo restante. La política correcta pregunta cuántos intentos caben antes del deadline y qué modo seguro se activa si no alcanzan.</p>
+
+  <h4 id="r14-industrial">Arquitecturas industriales</h4>
+  <p>La automatización clásica usa niveles: sensores y actuadores, controladores PLC, supervisión SCADA, ejecución de manufactura y planificación empresarial. Los niveles bajos requieren tiempos más estrictos y redes deterministas; los altos agregan y planifican.</p>
+  <p>En automoción, una arquitectura distribuida por función conecta muchas ECUs. Una arquitectura zonal agrupa dispositivos por ubicación física en controladores de zona y lleva backbone de alta velocidad hacia cómputo central. Reduce cableado y consolida cómputo, pero vuelve críticos backbone y controladores centrales, que deben redundarse y aislarse.</p>
+
+  <h3 id="r14-paradigmas">Event triggered y time triggered</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>Event triggered</th><th>Time triggered</th></tr></thead>
+    <tbody>
+      <tr><td>Activación</td><td>Llegada de evento</td><td>Calendario global</td></tr>
+      <tr><td>Ventaja</td><td>Usa recursos cuando hay trabajo</td><td>Latencia y colisiones previsibles</td></tr>
+      <tr><td>Riesgo</td><td>Ráfagas, contención, timing variable</td><td>Slots ociosos y necesidad de sincronización</td></tr>
+      <tr><td>Uso</td><td>Carga irregular, soft RT</td><td>Control crítico y tráfico periódico</td></tr>
+    </tbody>
+  </table></div>
+  <p>Protocolos event triggered pueden usar ACK, timeout y fases. Los clock driven asignan ventanas o slots. Una ventana delta acepta mensajes dentro de un intervalo. TDMA asigna un emisor por slot y elimina colisiones si todos respetan calendario y error de reloj.</p>
+
+  <h3 id="r14-control">Sistemas de control</h3>
+  <p>Elementos:</p>
+  <ul>
+    <li><b>Planta:</b> proceso físico controlado.</li>
+    <li><b>Setpoint:</b> valor deseado.</li>
+    <li><b>Sensor:</b> mide la salida.</li>
+    <li><b>Controlador:</b> calcula acción a partir del objetivo y medición.</li>
+    <li><b>Actuador:</b> aplica la acción sobre la planta.</li>
+    <li><b>Perturbación:</b> influencia externa no controlada.</li>
+  </ul>
+  <pre><code>         error              accion
+setpoint -&gt; [Controlador] -&gt; [Actuador] -&gt; [Planta] -&gt; salida
+   ^                                              |
+   |                 [Sensor] &lt;-------------------+
+   +---------------- realimentacion ---------------</code></pre>
+  <p>En <b>lazo abierto</b> no se mide resultado, por lo que no se corrigen perturbaciones. En <b>lazo cerrado</b> la realimentación ajusta el error. Muestrear demasiado lento pierde dinámica. Demora y jitter pueden volver inestable un controlador que matemáticamente funcionaba sin red.</p>
+
+  <h3 id="r14-programacion">Programación y scheduling</h3>
+  <p>Una tarea RT debe tener ejecución acotada: evitar memoria dinámica impredecible, page faults, locks sin cota, I/O desconocido y garbage collection no controlado. Las interrupciones y drivers también consumen presupuesto.</p>
+  <div class="def"><b>Inversión de prioridades.</b> Una tarea alta queda bloqueada por un lock de una baja, mientras tareas medias impiden que la baja ejecute y libere.</div>
+  <p><b>Priority inheritance</b> eleva temporalmente la prioridad de quien retiene el recurso. <b>Priority ceiling</b> asigna un techo a recursos y limita bloqueos de forma más analizable.</p>
+  <p>En un conjunto periódico simple, utilización es <code>U = suma(Ci / Ti)</code>, donde <code>Ci</code> es WCET y <code>Ti</code> período. Que <code>U &lt; 1</code> es necesario en un procesador, pero no siempre suficiente bajo cualquier scheduler y blocking. La prueba real incluye deadlines, prioridades, interferencia y secciones críticas.</p>
+
+  <h3 id="r14-fallos">Fallos temporales y estado seguro</h3>
+  <p>Un resultado tardío puede descartarse, porque aplicarlo después puede ser peor que omitirlo. Watchdogs detectan ausencia de progreso. Redundancia temporal solo sirve si el retry cabe. Redundancia espacial puede votar, pero las réplicas deben recibir datos comparables dentro de una ventana.</p>
+  <p>Un sistema safety critical define <b>fail safe</b>, estado seguro ante fallo, y <b>fail operational</b>, continuidad durante cierta cantidad de fallos. Frenar puede ser seguro para una máquina industrial y peligroso para un avión, por lo que “apagarse” no es una política universal.</p>
+
+  <h3 id="r14-casos">Casos que fijan las ideas</h3>
+  <h4 id="r14-pathfinder">Mars Pathfinder</h4>
+  <p>Una tarea de alta prioridad esperaba un mutex retenido por una baja, mientras una media desplazaba a la baja. El watchdog reiniciaba el sistema. Habilitar priority inheritance permitió que la baja heredara prioridad, liberara y dejara avanzar a la alta.</p>
+
+  <h4 id="r14-therac">Therac 25</h4>
+  <p>Condiciones de carrera, overflow y confianza excesiva en software permitieron dosis peligrosas. Versiones anteriores tenían interlocks de hardware. La lección es defensa en profundidad: software concurrente no debe ser la única barrera contra una acción física catastrófica.</p>
+
+  <h4 id="r14-ariane">Ariane 5</h4>
+  <p>Una conversión numérica fuera de rango en software reutilizado apagó sistemas redundantes que ejecutaban el mismo código y recibían el mismo dato. Redundancia idéntica no cubre fallos de diseño comunes. También deben revisarse supuestos al cambiar el contexto de uso.</p>
+
+  <h4 id="r14-mtgox">Mt. Gox como contraste</h4>
+  <p>No fue un caso RT, pero muestra que un error sin reconciliación ni mecanismo independiente de detección puede acumularse. Observabilidad y auditoría forman parte de la tolerancia: detectar tarde convierte un fallo pequeño en pérdida sistémica.</p>
+  <div class="examen">La respuesta central de tiempo real es “previsible, no necesariamente rápido”. Toda arquitectura debe mostrar deadline, peor caso, política de scheduling, comunicación y estado seguro.</div>
+</section>

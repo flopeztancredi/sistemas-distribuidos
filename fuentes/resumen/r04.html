@@ -1,0 +1,141 @@
+<section class="unidad" id="r04" data-titulo="Protocolos e invocación remota">
+  <h2>Protocolos e invocación remota</h2>
+  <p class="intro">Esta sección concentra las decisiones que permiten que dos componentes se entiendan: separación lógica y física, contratos, protocolo de mensajes y abstracciones de invocación. Cliente servidor, REST, RPC y objetos distribuidos se comparan acá como alternativas completas, sin anticipos en otros capítulos.</p>
+
+  <h3 id="r04-layers-tiers">Layers y tiers</h3>
+  <div class="def"><b>Layer.</b> División lógica de responsabilidades. Cada capa ofrece servicios a la superior y usa servicios de la inferior.</div>
+  <div class="def"><b>Tier.</b> Unidad física de despliegue. Indica en qué proceso o máquina corre una parte.</div>
+  <p>Presentación, negocio y persistencia pueden ser tres layers dentro de un único ejecutable, o desplegarse en tres tiers. Cambiar layers mejora modularidad. Cambiar tiers modifica latencia, seguridad, escalabilidad y fallos.</p>
+  <p>Una dependencia normal baja desde una capa de mayor nivel hacia una abstracción de menor nivel. Un <b>upcall</b> permite que una capa inferior notifique a una superior mediante callback, evento o interfaz invertida. Si dos layers se conocen mutuamente por sus implementaciones aparece dependencia circular, que dificulta probar y reemplazar.</p>
+  <div class="warn">“Arquitectura de tres capas” no dice cuántas máquinas hay. “Arquitectura de tres tiers” sí afirma una separación de despliegue, pero no prueba que cada tier tenga una sola responsabilidad lógica.</div>
+
+  <h3 id="r04-contratos">Interfaces y contratos</h3>
+  <p>Una interfaz lista operaciones accesibles. Un contrato además fija precondiciones, postcondiciones, invariantes, tipos, errores y semántica observable. En una interfaz remota también debe definir:</p>
+  <ul>
+    <li>identidad y versionado de recursos;</li>
+    <li>autenticación, autorización y límites de uso;</li>
+    <li>timeouts esperados y cancelación;</li>
+    <li>idempotencia y deduplicación;</li>
+    <li>orden, consistencia y visibilidad de escrituras;</li>
+    <li>compatibilidad hacia atrás de consumidores y productores.</li>
+  </ul>
+  <p>Un contrato <b>orientado a entidades</b> expone recursos y cambios de estado. Uno <b>orientado a procesos</b> expone acciones o procedimientos. Ninguno es universalmente mejor: entidades favorecen una interfaz uniforme y procesos modelan operaciones de negocio complejas sin fingir que todo es CRUD.</p>
+
+  <h3 id="r04-protocolo">Qué define un protocolo</h3>
+  <div class="def"><b>Protocolo.</b> Acuerdo sobre formato, significado, orden y temporización de mensajes entre participantes.</div>
+  <p>La sintaxis indica campos y codificación. La semántica indica qué significa cada valor y qué efecto produce. La secuencia indica qué mensajes son válidos en cada estado. La temporización define timeouts, retransmisiones y vigencia.</p>
+  <p>Cada capa intercambia una PDU compuesta por control propio y payload de la capa superior. Al enviar, las capas encapsulan. Al recibir, desencapsulan y validan.</p>
+
+  <h4 id="r04-formato">Formato y framing</h4>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Decisión</th><th>Ventaja</th><th>Costo</th></tr></thead>
+    <tbody>
+      <tr><td>Texto</td><td>Legible, depurable, evoluciona con facilidad</td><td>Más bytes y parseo</td></tr>
+      <tr><td>Binario</td><td>Compacto, rápido, tipos precisos</td><td>Herramientas y compatibilidad más exigentes</td></tr>
+      <tr><td>Bloque fijo</td><td>Offset y lectura simples</td><td>Desperdicio y límite rígido</td></tr>
+      <tr><td>Delimitador</td><td>Streaming sencillo</td><td>Debe escaparse dentro del contenido</td></tr>
+      <tr><td>Prefijo de longitud</td><td>Payload arbitrario y reserva exacta</td><td>Hay que validar longitud antes de reservar</td></tr>
+      <tr><td>Header fijo y body variable</td><td>Extensible y eficiente</td><td>Dos fases de lectura</td></tr>
+    </tbody>
+  </table></div>
+  <pre><code>header fijo:
+  version:     1 byte
+  tipo:        1 byte
+  flags:       2 bytes
+  request_id:  8 bytes
+  body_length: 4 bytes
+body:
+  body_length bytes</code></pre>
+  <p>El receptor valida versión, tipo, longitud máxima, checksum si existe y coherencia entre flags. Una longitud controlada por un atacante nunca se usa para reservar memoria sin límite.</p>
+  <h4 id="r04-ejemplo-protocolo">Dos protocolos para el mismo registro</h4>
+  <p>Para <code>{email: string, nacimiento: date}</code>, una alternativa textual es una línea JSON en UTF-8 terminada por salto:</p>
+  <pre><code>{"email":"ana@example.com","nacimiento":"2001-04-23"}\n</code></pre>
+  <p>Es legible y extensible, pero el delimitador debe respetar strings escapados y el parseo cuesta más. Una alternativa binaria usa header fijo y campos con longitud:</p>
+  <pre><code>version:u8 | email_len:u16 | email:bytes | dias_desde_epoch:i32</code></pre>
+  <p>Es compacta y determinista, pero necesita acordar endianness, encoding, rango de fecha y evolución. Ejemplos no binarios conocidos son HTTP en su forma textual, JSON y SMTP. Protocolos o formatos binarios incluyen Protocol Buffers, MessagePack y las capas binarias modernas de HTTP/2.</p>
+
+  <h3 id="r04-cliente-servidor">Cliente servidor y peer to peer</h3>
+  <div class="def"><b>Cliente servidor.</b> El cliente inicia pedidos y el servidor escucha, procesa y responde. El rol describe una interacción, no necesariamente una máquina permanente.</div>
+  <p>Ventajas: autoridad y estado fáciles de ubicar, clientes simples, seguridad y operación centralizadas. Límites: capacidad concentrada, dependencia del servidor y necesidad de escalar o replicar ese rol.</p>
+  <p>Un servidor no inicia espontáneamente una conexión cliente servidor, pero puede entregar novedades de varias formas:</p>
+  <ul>
+    <li><b>Polling:</b> el cliente pregunta periódicamente. Simple, con demora o tráfico inútil.</li>
+    <li><b>Long polling:</b> el servidor retiene el pedido hasta tener novedad o vencer.</li>
+    <li><b>Streaming:</b> una conexión iniciada por el cliente permanece abierta y transporta eventos.</li>
+    <li><b>Callback:</b> el cliente ofrece otro endpoint y pasa a ser servidor para esa devolución.</li>
+  </ul>
+  <div class="def"><b>Peer to peer.</b> Participantes con roles equivalentes se descubren y se comunican directamente según un protocolo común.</div>
+  <p>P2P distribuye recursos y evita una autoridad de datos única, pero complica membresía, búsqueda, NAT, firewalls, confianza y consistencia. Un diseño híbrido suele usar registro central para discovery y conexiones directas para datos.</p>
+
+  <h3 id="r04-http-rest">HTTP y REST</h3>
+  <p>HTTP es un protocolo request response. Método, URL, headers y body forman el pedido; status, headers y body forman la respuesta. Es stateless a nivel de protocolo: cada pedido debe incluir el contexto necesario, aunque la aplicación pueda mantener sesión externa.</p>
+  <p>Una arquitectura REST respeta:</p>
+  <ul>
+    <li><b>Cliente servidor:</b> separación de interfaz y almacenamiento.</li>
+    <li><b>Stateless:</b> cada request se interpreta por sí mismo.</li>
+    <li><b>Cache:</b> las respuestas declaran si pueden reutilizarse.</li>
+    <li><b>Interfaz uniforme:</b> recursos identificados por URI, representaciones, mensajes autodescriptivos e hipermedia cuando corresponde.</li>
+    <li><b>Sistema por capas:</b> el cliente no necesita saber si habla con origen, proxy o cache.</li>
+    <li><b>Code on demand opcional:</b> el servidor puede enviar código ejecutable.</li>
+  </ul>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Método</th><th>Intención</th><th>Safe</th><th>Idempotente</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td>Leer representación</td><td>Sí</td><td>Sí</td></tr>
+      <tr><td>POST</td><td>Crear subordinado o ejecutar acción</td><td>No</td><td>No por defecto</td></tr>
+      <tr><td>PUT</td><td>Reemplazar estado en URI conocida</td><td>No</td><td>Sí</td></tr>
+      <tr><td>PATCH</td><td>Modificar parcialmente</td><td>No</td><td>Depende de la operación</td></tr>
+      <tr><td>DELETE</td><td>Eliminar recurso</td><td>No</td><td>Sí respecto del estado final</td></tr>
+    </tbody>
+  </table></div>
+  <p>Códigos típicos: 200 lectura exitosa, 201 creación, 202 aceptado para procesar luego, 204 éxito sin body, 400 pedido inválido, 401 falta autenticación, 403 identidad sin permiso, 404 inexistente, 409 conflicto de estado, 429 límite, 500 fallo interno y 503 indisponibilidad transitoria.</p>
+  <p>Las URLs identifican entidades, no pantallas ni verbos arbitrarios: <code>/orders/42</code>. Relaciones se expresan con subrecursos o enlaces. El versionado puede estar en path, header o media type; la regla importante es hacer cambios aditivos y tolerar campos desconocidos antes de romper consumidores.</p>
+
+  <h3 id="r04-rpc">RPC y gRPC</h3>
+  <div class="def"><b>RPC.</b> Abstracción que permite invocar un procedimiento remoto mediante una interfaz parecida a una llamada local.</div>
+  <p>Una IDL define operaciones y tipos sin depender del lenguaje. Un generador produce <b>client stub</b> y <b>server stub</b>. El stub cliente serializa argumentos, envía y espera. El servidor deserializa, invoca la implementación y serializa resultado o error. <b>Marshalling</b> incluye representación portable de tipos, endianness, strings y referencias.</p>
+  <pre><code>aplicacion cliente
+    -&gt; client stub
+        -&gt; marshalling -&gt; transporte -&gt; unmarshalling
+            -&gt; server stub -&gt; procedimiento
+    &lt;- resultado o error por el camino inverso</code></pre>
+  <h4 id="r04-semanticas-rpc">Fallos y call semantics</h4>
+  <p>Si vence un timeout, el cliente no sabe si el servidor no recibió, ejecutó y perdió la respuesta, o sigue trabajando. Las semánticas posibles son:</p>
+  <ul>
+    <li><b>Maybe:</b> se intenta una vez, puede no ejecutarse.</li>
+    <li><b>At least once:</b> se reintenta hasta observar respuesta, puede ejecutar varias veces.</li>
+    <li><b>At most once:</b> se usan identificadores y cache de resultados para suprimir duplicados, puede no ejecutar si no se recupera.</li>
+    <li><b>Exactly once:</b> requiere que efecto y registro de deduplicación sean atómicos y recuperables. No surge solo por usar RPC.</li>
+  </ul>
+  <p>Las operaciones idempotentes toleran repeticiones respecto de su estado final. Para las demás, el cliente envía una <b>idempotency key</b> estable y el servidor persiste clave, estado y resultado.</p>
+  <p>Para trabajos de minutos no se deja una llamada bloqueada indefinidamente:</p>
+  <pre><code>POST trabajo(idempotency_key) -&gt; 202 {job_id}
+GET  trabajo/{job_id}        -&gt; pendiente | ejecutando | listo | error
+GET  trabajo/{job_id}/resultado</code></pre>
+  <p>gRPC usa contratos Protocol Buffers, generación de stubs y HTTP/2. Soporta llamada unaria, stream del servidor, stream del cliente y stream bidireccional. Deadlines y cancelación deben propagarse. Su interfaz orientada a procedimientos es útil entre servicios controlados, mientras REST suele ser más accesible para APIs web públicas.</p>
+
+  <h3 id="r04-objetos">Objetos distribuidos, CORBA y RMI</h3>
+  <p>Un objeto distribuido expone identidad, estado y métodos remotos. Un middleware conserva referencias y enruta invocaciones. RPC llama procedimientos de un servicio; el modelo de objetos intenta extender semántica orientada a objetos a través de la red.</p>
+  <p><b>CORBA</b> define IDL independiente del lenguaje, ORB para localizar objetos y transportar invocaciones, stubs, skeletons y servicios auxiliares. <b>Java RMI</b> aplica una idea similar dentro del ecosistema Java: interfaz remota, registry, stubs y serialización de objetos.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>RPC</th><th>Objetos distribuidos</th></tr></thead>
+    <tbody>
+      <tr><td>Unidad</td><td>Servicio y procedimiento</td><td>Objeto con identidad y métodos</td></tr>
+      <tr><td>Estado</td><td>Explícito en request o servicio</td><td>Asociado a la referencia remota</td></tr>
+      <tr><td>Acoplamiento</td><td>Contrato de mensajes</td><td>Modelo de objetos, ciclo de vida y tipos</td></tr>
+      <tr><td>Fallo</td><td>Error de llamada explícito</td><td>La ilusión local tiende a ocultarlo</td></tr>
+    </tbody>
+  </table></div>
+  <p>Su uso disminuyó porque referencias remotas, garbage collection distribuido, compatibilidad de tipos y llamadas pequeñas encadenadas vuelven frágil la abstracción. Hoy se prefieren servicios más gruesos y contratos explícitos.</p>
+  <h4 id="r04-objetos-transaccion">Operaciones sobre varios objetos</h4>
+  <p>Que dos cuentas sean objetos remotos no vuelve atómica una transferencia:</p>
+  <pre><code>origen = registry.lookup("CA-1234")
+destino = registry.lookup("CA-5678")
+
+tx = coordinador.begin()
+origen.extraer(tx, 1000)
+destino.acreditar(tx, 1000)
+coordinador.commit(tx)        # requiere protocolo como 2PC</code></pre>
+  <p>Sin coordinador transaccional, una caída entre ambas llamadas deja un efecto parcial. También se puede modelar una transferencia como recurso con estado e idempotency key y completar por saga. La frontera de objeto no reemplaza el protocolo de commit.</p>
+  <div class="examen">Para comparar REST y RPC, no alcanza con JSON contra binario. Compará orientación del contrato, descubribilidad, generación de clientes, streaming, cache, compatibilidad y tratamiento de fallos remotos.</div>
+</section>

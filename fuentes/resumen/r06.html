@@ -1,0 +1,117 @@
+<section class="unidad" id="r06" data-titulo="Cómputo distribuido">
+  <h2>Cómputo distribuido</h2>
+  <p class="intro">Distribuir cómputo exige asignar trabajo, mover datos, detectar terminación y recuperarse. MapReduce, MPI, Flink y Beam eligen puntos distintos del espacio: batch tolerante a fallos, coordinación explícita de alto rendimiento, streaming con estado y modelo portable.</p>
+
+  <h3 id="r06-coordinacion">Coordinar actividades</h3>
+  <p>Un coordinador debe responder:</p>
+  <ul>
+    <li>qué tareas existen y cuáles están listas;</li>
+    <li>qué worker tiene cada tarea y qué lease limita esa asignación;</li>
+    <li>dónde viven input, estado intermedio y output;</li>
+    <li>cómo detectar caída sin confundirla con lentitud;</li>
+    <li>cuándo reintentar y cómo evitar doble efecto;</li>
+    <li>cómo saber que el trabajo global terminó.</li>
+  </ul>
+  <p>La arquitectura master worker funciona bien cuando las tareas son independientes y el master maneja metadata, no todo el flujo de datos. Para evitar cuello de botella, los workers leen y escriben directamente en almacenamiento distribuido.</p>
+
+  <h3 id="r06-mapreduce">MapReduce</h3>
+  <div class="def"><b>MapReduce.</b> Modelo batch que transforma pares clave valor con una fase paralela <code>map</code>, agrupa por clave y aplica una fase <code>reduce</code> por grupo.</div>
+  <pre><code>map(k1, v1)       -&gt; lista de (k2, v2)
+shuffle y sort    -&gt; k2, [v2, v2, ...]
+reduce(k2, vals)  -&gt; lista de resultados</code></pre>
+  <div class="ej">Contar palabras: <code>map</code> emite <code>(palabra, 1)</code> por aparición. Shuffle agrupa todos los unos de una palabra. <code>reduce</code> los suma.</div>
+  <p>Una ejecución típica:</p>
+  <ol>
+    <li>Particionar archivos de entrada en splits.</li>
+    <li>Asignar cada split a un mapper, preferentemente cerca de sus datos.</li>
+    <li>El mapper emite pares intermedios y los divide por reducer con una función de partición.</li>
+    <li>Un combiner opcional agrega localmente si la operación es asociativa y conmutativa.</li>
+    <li>Shuffle transfiere cada partición al reducer correspondiente y sort agrupa claves.</li>
+    <li>Cada reducer procesa una clave y escribe output durable.</li>
+  </ol>
+  <p>Si un mapper cae se reejecuta porque su input es durable y su salida intermedia es regenerable. Si un reducer cae, se repite desde los intermedios. Tareas lentas pueden ejecutarse especulativamente en otro worker y aceptar el primer resultado. Esto exige funciones deterministas o efectos controlados.</p>
+  <div class="warn">MapReduce no es cualquier master worker. Su forma clave valor, shuffle y reejecución determinista son lo que permiten paralelizar y recuperar automáticamente.</div>
+  <h4 id="r06-mapreduce-varias-salidas">Diseñar varias salidas</h4>
+  <p>Para logs <code>(email, url, fecha)</code> se pueden ejecutar jobs o ramas:</p>
+  <pre><code>navegaciones por dia:
+    map:    emit(dia_semana(fecha), 1)
+    reduce: emit(dia, sum(valores))
+
+URL mas vista:
+    map:    emit(url, 1)
+    reduce: emit(url, sum(valores))
+    job final: max por cantidad
+
+emails con mas de 10:
+    map:    emit(email, 1)
+    reduce: total = sum(valores); emitir si total &gt; 10</code></pre>
+  <p>Calcular “más que la media global” suele requerir dos pasos: primero suma y cantidad global, luego filtrar entidades con ese umbral. Una condición de días consecutivos requiere que el reducer reciba todas las fechas de una cuenta, las ordene o las represente como conjunto y detecte adyacencia.</p>
+
+  <h4 id="r06-dag-ejemplo">DAG para métricas de ventas</h4>
+  <pre><code>leer ventas
+  +-&gt; expandir items -&gt; sumar cantidad por producto -&gt; top 10
+  +-&gt; total por venta -&gt; min, max, suma, count -&gt; promedio
+  \-&gt; contar items por venta -&gt; filtrar mayor que 3 -&gt; count
+
+las tres ramas se unen solo para publicar el reporte</code></pre>
+  <p>El grafo muestra paralelismo y dependencias. Cada agregación parcial debe ser asociativa para combinarse jerárquicamente sin un único reducer prematuro.</p>
+
+  <h3 id="r06-mpi">MPI y Open MPI</h3>
+  <div class="def"><b>MPI.</b> Estándar de pasaje de mensajes para programas paralelos donde procesos conocidos coordinan explícitamente comunicación punto a punto y colectiva.</div>
+  <p>Todos los procesos ejecutan el mismo programa en el modelo SPMD, pero usan su <b>rank</b> dentro de un communicator para tomar roles diferentes. El tamaño del communicator indica cuántos participan.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Primitiva</th><th>Efecto</th></tr></thead>
+    <tbody>
+      <tr><td><code>Send / Recv</code></td><td>Mensaje punto a punto identificado por origen, destino y tag</td></tr>
+      <tr><td><code>Bcast</code></td><td>Un root envía el mismo dato a todos</td></tr>
+      <tr><td><code>Scatter</code></td><td>El root reparte una porción distinta a cada proceso</td></tr>
+      <tr><td><code>Gather</code></td><td>El root junta una porción de cada proceso</td></tr>
+      <tr><td><code>Reduce</code></td><td>Combina valores con suma, máximo u otra operación</td></tr>
+      <tr><td><code>Allreduce</code></td><td>Reduce y entrega resultado a todos</td></tr>
+      <tr><td><code>Barrier</code></td><td>Bloquea hasta que llegan todos</td></tr>
+    </tbody>
+  </table></div>
+  <pre><code>estimar pi por Montecarlo:
+    rank, n = MPI.rank(), MPI.size()
+    muestras_locales = dividir(total, n, rank)
+    aciertos = contar_puntos_dentro_del_circulo(muestras_locales)
+    aciertos_totales = MPI.Reduce(aciertos, SUM, root=0)
+    if rank == 0:
+        pi = 4 * aciertos_totales / total</code></pre>
+  <p>MPI apunta a performance y control, no a elasticidad o recuperación automática de procesos. Un <code>Send</code> bloqueante puede esperar buffer o recepción según implementación y tamaño. Dos procesos que hacen envíos bloqueantes cruzados antes de recibir pueden quedar trabados. Se evita ordenando operaciones o usando variantes no bloqueantes y luego <code>Wait</code>.</p>
+
+  <h3 id="r06-flink">Apache Flink</h3>
+  <p>Flink ejecuta dataflows con operadores y streams. Un batch es un stream acotado. Los operadores pueden mantener estado particionado por clave y procesar eventos continuamente.</p>
+  <h4 id="r06-tiempo-stream">Tiempo y ventanas</h4>
+  <ul>
+    <li><b>Processing time:</b> reloj de la máquina que procesa. Baja latencia, resultado dependiente de demoras.</li>
+    <li><b>Event time:</b> timestamp del evento. Permite reconstruir la semántica del origen aunque llegue tarde.</li>
+    <li><b>Ingestion time:</b> timestamp al entrar al sistema, compromiso menos expresivo.</li>
+  </ul>
+  <p>Una <b>tumbling window</b> divide intervalos sin solapamiento. Una <b>sliding window</b> solapa intervalos según tamaño y paso. Una <b>session window</b> agrupa actividad separada por gaps. Una ventana global requiere un trigger adicional.</p>
+  <div class="def"><b>Watermark.</b> Estimación de que no llegarán eventos con event time menor que cierto valor. Permite cerrar ventanas tolerando un atraso configurado.</div>
+  <p>Los eventos más tardíos que el margen pueden descartarse, actualizar resultados o ir a una salida lateral. No existe un watermark perfecto sin esperar para siempre.</p>
+
+  <h4 id="r06-flink-arquitectura">Arquitectura y recuperación</h4>
+  <p>El JobManager coordina jobs, scheduling y checkpoints. TaskManagers ofrecen slots y ejecutan subtareas. Los operadores se encadenan cuando conviene para evitar serialización y red. <code>keyBy</code> particiona estado y eventos de una misma clave hacia la misma instancia lógica.</p>
+  <p>Los checkpoints insertan barreras en los streams. Cuando un operador recibió la barrera de todos sus inputs, captura un estado consistente y propaga. Ante caída, se restaura el último checkpoint y se reproducen fuentes capaces de replay. Exactly once respecto de un sink externo requiere un conector transaccional o idempotente, no solo checkpoint interno.</p>
+
+  <h3 id="r06-beam">Apache Beam</h3>
+  <p>Beam separa un modelo de programación de sus motores de ejecución. El programa construye un pipeline de <b>PCollections</b> y <b>PTransforms</b>. Un runner lo ejecuta sobre Flink, Spark, Dataflow u otro backend compatible.</p>
+  <p>Su modelo responde cuatro preguntas para agregaciones no acotadas:</p>
+  <ul>
+    <li><b>Qué:</b> qué valores se agregan.</li>
+    <li><b>Dónde en event time:</b> qué ventana los agrupa.</li>
+    <li><b>Cuándo:</b> qué trigger emite resultados.</li>
+    <li><b>Cómo:</b> si cada emisión descarta o acumula resultados anteriores.</li>
+  </ul>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>MapReduce</th><th>MPI</th><th>Flink</th><th>Beam</th></tr></thead>
+    <tbody>
+      <tr><td>Foco</td><td>Batch clave valor</td><td>HPC explícito</td><td>Streams con estado</td><td>Modelo portable</td></tr>
+      <tr><td>Fallos</td><td>Reejecución de tareas</td><td>Responsabilidad del programa o runtime</td><td>Checkpoint y replay</td><td>Depende del runner</td></tr>
+      <tr><td>Control</td><td>Restringido</td><td>Máximo</td><td>Operadores y estado</td><td>API común</td></tr>
+    </tbody>
+  </table></div>
+  <div class="examen">Si piden dibujar MapReduce, incluí input splits, mappers, partición, shuffle, sort, reducers y almacenamiento. Si piden streaming, diferenciá event time, watermark, ventana y política para eventos tardíos.</div>
+</section>

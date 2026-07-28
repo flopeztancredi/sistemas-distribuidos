@@ -1,0 +1,113 @@
+<section class="unidad" id="r10" data-titulo="Diseño de gran escala">
+  <h2>Diseño de gran escala</h2>
+  <p class="intro">Diseñar para un final no consiste en nombrar componentes conocidos. NALSD obliga a fijar números, límites, flujos y fallos para que cada caja del diagrama tenga una razón cuantitativa. Los casos prácticos de la materia se reducen a un método repetible.</p>
+
+  <h3 id="r10-metodo">Método NALSD</h3>
+  <div class="def"><b>NALSD.</b> Non Abstract Large System Design, diseño de gran escala basado en requisitos concretos, estimaciones y arquitectura física verificable.</div>
+  <ol>
+    <li><b>Scope:</b> listar casos de uso incluidos y excluidos.</li>
+    <li><b>SLO:</b> latencia, disponibilidad, frescura, durabilidad y recuperación.</li>
+    <li><b>Entidades y API:</b> datos, identidad, relaciones y operaciones.</li>
+    <li><b>Volumen:</b> requests por segundo, bytes, retención, picos y crecimiento.</li>
+    <li><b>Flujos:</b> camino de escritura, lectura, procesamiento y errores.</li>
+    <li><b>Arquitectura:</b> componentes, partición, replicación, colas, caches y geografía.</li>
+    <li><b>Fallos:</b> recorrer duplicados, caída, retry, backlog, pérdida de zona y recuperación.</li>
+    <li><b>Tradeoffs:</b> declarar qué se prioriza y qué se acepta degradar.</li>
+  </ol>
+  <p>Las estimaciones usan órdenes de magnitud. No buscan adivinar hardware exacto, sino revelar qué domina:</p>
+  <pre><code>QPS_promedio = operaciones_por_dia / 86400
+QPS_pico     = QPS_promedio * factor_pico
+ingesta_dia  = eventos_dia * bytes_evento
+storage      = ingesta_dia * retencion_dias * replicas * overhead
+ancho_banda  = eventos_segundo * bytes_evento
+workers      = QPS_pico * tiempo_servicio_segundos / utilizacion_objetivo</code></pre>
+  <div class="ej">Si llegan 40.000 imágenes diarias de 650 KB, la ingesta ronda 26 GB por día, 9,5 TB por año antes de réplicas. El promedio es menor a 1 imagen por segundo, pero una salida laboral puede concentrar miles en minutos. Dimensionar solo por promedio es incorrecto.</div>
+
+  <h3 id="r10-api">API y datos antes de las cajas</h3>
+  <p>Los endpoints demuestran que el alcance es operable. Para videos de aulas:</p>
+  <pre><code>POST /classrooms
+POST /classrooms/{id}/videos       -&gt; metadata + upload_url
+GET  /classrooms/{id}
+GET  /videos/{id}/playback-url
+POST /videos/{id}/comments
+GET  /videos/{id}/comments?cursor=...
+GET  /rankings/videos?window=...</code></pre>
+  <p>El binario grande usa object storage mediante URL prefirmada, no atraviesa la API. Metadata y comentarios usan base adecuada a sus consultas. Reproducciones se registran como eventos y el ranking se agrega por ventana, porque actualizar un contador global en cada play crea contención.</p>
+
+  <h3 id="r10-vistas">Vistas que debe tener la solución</h3>
+  <ul>
+    <li><b>Contexto:</b> usuarios, sistema y externos.</li>
+    <li><b>Secuencia:</b> flujo principal y respuesta asincrónica.</li>
+    <li><b>DAG:</b> dependencias de procesamiento.</li>
+    <li><b>Física:</b> regiones, zonas, instancias, stores, colas y enlaces.</li>
+    <li><b>Datos:</b> entidades, claves de partición, índices y retención.</li>
+  </ul>
+  <p>Un diagrama físico útil anota multiplicidad, protocolo, dirección, estado y dominio de fallo. Una caja “cloud” que contiene todo no permite evaluar escalabilidad.</p>
+
+  <h3 id="r10-crawler">Caso Web Crawler</h3>
+  <p>Requisitos: partir de URLs, descargar hasta una profundidad, extraer links, evitar repetir, almacenar resultados y monitorear.</p>
+  <pre><code>[Seeds]
+   -&gt; [Frontier particionada] -&gt; [Fetchers xN] -&gt; [Parsers xN]
+            ^                                      |
+            | links nuevos, depth + 1              v
+       [Deduplicacion] &lt;- hash(URL canonica)   [Object store]
+
+[Eventos de estado] -&gt; [Metricas y monitoreo]</code></pre>
+  <p>La URL se canoniza antes de deduplicar. La frontier es una cola durable particionada por host para aplicar politeness y no sobrecargar un dominio. El fetch usa timeout, límite de tamaño y retry acotado. El parser emite links con profundidad. Al alcanzar el límite, guarda pero no realimenta.</p>
+  <p>Terminar no equivale a observar cola vacía: puede haber mensajes en vuelo que producirán nuevos links. El coordinador cuenta trabajo pendiente más leases activos, o usa una barrera de épocas. Contenido y metadata van a storage durable; monitoreo viaja por un flujo separado para no frenar el crawler.</p>
+
+  <h3 id="r10-carrito">Caso Shopping Cart</h3>
+  <p>Requisitos típicos: carrito, stock, pago, pedido, notificaciones y seguimiento. La invariantes crítica es no vender más unidades de las disponibles y no cobrar dos veces.</p>
+  <pre><code>Cliente -&gt; API -&gt; Order Service -&gt; base de pedidos
+                       |
+                       +-&gt; comando reservar -&gt; Inventory
+                       +-&gt; comando cobrar   -&gt; Payments
+                       +-&gt; evento           -&gt; Notifications
+
+estado: CREADO -&gt; RESERVADO -&gt; PAGADO -&gt; CONFIRMADO
+            \-&gt; RECHAZADO     \-&gt; COMPENSANDO</code></pre>
+  <p>La API acepta con una idempotency key y devuelve <code>order_id</code>. Reservar stock es atómico dentro de la partición del producto, por ejemplo <code>UPDATE ... SET stock = stock - q WHERE stock &gt;= q</code>. El pago usa otra clave idempotente.</p>
+  <p>No hay una transacción ACID única entre inventario, pago y notificación. Una saga persiste estado y ejecuta pasos con compensaciones: si el cobro falla, libera reserva; si se cobró pero la confirmación se demora, retry consulta por la misma clave. Un outbox escrito en la misma transacción que el pedido evita guardar estado sin publicar su evento.</p>
+
+  <h3 id="r10-trafico">Caso Traffic Violation Detector</h3>
+  <p>Muchas cámaras producen imágenes, pero pocas contienen eventos relevantes. Filtrar en el borde reduce ancho de banda y almacenamiento central.</p>
+  <pre><code>[Camaras] -&gt; [Hub zonal: filtro y buffer]
+                    |
+          solo candidatos + metadata
+                    v
+             [Ingesta regional]
+               |           |
+          [Object store] [Cola]
+                            v
+                    [Reconocimiento xN]
+                            v
+                 [Casos y auditoria]</code></pre>
+  <p>El hub tolera desconexión con buffer local y sube luego. Cada captura tiene ID global para deduplicar. La imagen grande va a object storage; la cola transporta referencia y metadata. El reconocimiento escala por backlog. Casos dudosos pasan a revisión humana y se conserva trazabilidad del modelo y evidencia.</p>
+  <p>La geografía importa: cámaras se agrupan en hubs cercanos, regiones reciben sus hubs y una capa global agrega metadata necesaria. Enviar todo crudo a un centro aumenta costo y crea una dependencia WAN.</p>
+
+  <h3 id="r10-snippets">Caso Shared Code Snippets</h3>
+  <p>Separar metadata de contenido permite consultas y almacenamiento adecuados. Una clave aleatoria evita hotspot y dificulta enumeración. Si el contenido es inmutable, CDN y cache funcionan bien. Editar puede crear nueva versión y conservar historial.</p>
+  <pre><code>POST /snippets {contenido, lenguaje, expiracion}
+  -&gt; {id, url}
+GET /snippets/{id}
+DELETE /snippets/{id}
+
+[CDN] -&gt; [API xN] -&gt; [Metadata DB]
+                    \-&gt; [Object o blob store]
+                         |
+                    lifecycle por expiracion</code></pre>
+  <p>La expiración no debe depender de un único cron que recorra toda la tabla. Se usa TTL nativo, índice por bucket temporal o lifecycle del store. El borrado lógico puede ocultar al instante y el físico ocurrir después.</p>
+
+  <h3 id="r10-checklist">Checklist de defensa</h3>
+  <ul>
+    <li>¿Cuál es la clave de partición y puede calentarse?</li>
+    <li>¿Qué componente conserva cada estado?</li>
+    <li>¿Qué se confirma antes de responder éxito?</li>
+    <li>¿Qué mensaje puede duplicarse y cómo se deduplica?</li>
+    <li>¿Qué pasa si cada caja cae?</li>
+    <li>¿Cómo se limita backlog y sobrecarga?</li>
+    <li>¿Cómo se despliega una versión nueva y se revierte?</li>
+    <li>¿Qué métricas prueban el SLO?</li>
+  </ul>
+  <div class="examen">En finales de diseño se evalúa la cadena de razonamiento. Una respuesta sólida puede usar tecnologías distintas si demuestra volumen, flujo, estado, fallos y tradeoffs de forma coherente.</div>
+</section>

@@ -1,0 +1,102 @@
+<section class="unidad" id="r01" data-titulo="Modelo distribuido y decisiones de diseño">
+  <h2>Modelo distribuido y decisiones de diseño</h2>
+  <p class="intro">Un sistema distribuido coordina computadoras autónomas mediante mensajes para ofrecer un resultado común. El punto de partida no es memorizar arquitecturas, sino entender qué cambia cuando no hay memoria, reloj ni destino de fallo compartidos, y qué decisiones compensan esas limitaciones.</p>
+
+  <h3 id="r01-definicion">Qué hace distribuido a un sistema</h3>
+  <div class="def"><b>Sistema distribuido.</b> Conjunto de computadoras independientes conectadas por una red que coordinan acciones intercambiando mensajes y que, para quien lo usa, se comportan como un sistema coherente.</div>
+  <p>La definición combina dos perspectivas que deben cumplirse a la vez:</p>
+  <ul>
+    <li><b>Perspectiva interna:</b> hay procesos autónomos, cada uno con memoria y control propios. La única evidencia directa sobre otro nodo llega por mensajes.</li>
+    <li><b>Perspectiva externa:</b> la distribución no obliga al usuario a conocer dónde vive cada recurso ni qué nodo resolvió cada operación.</li>
+  </ul>
+  <p>De la autonomía aparecen los problemas centrales de la materia:</p>
+  <ul>
+    <li><b>No hay memoria global:</b> dos nodos pueden observar versiones diferentes de un dato.</li>
+    <li><b>No hay reloj global perfecto:</b> los timestamps físicos no bastan para reconstruir causalidad.</li>
+    <li><b>La red demora, reordena, duplica o pierde:</b> un timeout no permite distinguir un nodo caído de una respuesta lenta.</li>
+    <li><b>Hay fallos parciales:</b> una parte puede funcionar mientras otra falla. El sistema debe decidir con información incompleta.</li>
+    <li><b>La concurrencia es inevitable:</b> varios participantes operan sobre recursos relacionados sin un orden total natural.</li>
+  </ul>
+  <div class="idea">Distribuir compra capacidad, cercanía geográfica y aislamiento de fallos, pero se paga con coordinación. Conviene distribuir solo aquello cuyo beneficio supera ese costo.</div>
+
+  <h3 id="r01-objetivos">Objetivos y parámetros de diseño</h3>
+  <p>Los parámetros no son una lista de virtudes independientes. Funcionan como preguntas de diseño y suelen competir entre sí.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Parámetro</th><th>Pregunta concreta</th><th>Mecanismos</th><th>Costo habitual</th></tr></thead>
+    <tbody>
+      <tr><td>Transparencia</td><td>¿Qué detalles de la distribución se ocultan?</td><td>Nombres lógicos, proxies, replicación, reintentos</td><td>Complejidad y fallos menos visibles</td></tr>
+      <tr><td>Apertura</td><td>¿Componentes de distintos proveedores pueden interoperar?</td><td>Contratos públicos, protocolos estándar, formatos portables</td><td>Menor libertad para optimizaciones propietarias</td></tr>
+      <tr><td>Escalabilidad</td><td>¿Qué recurso se satura al crecer usuarios, datos o distancia?</td><td>Partición, réplicas, caches, asincronismo</td><td>Consistencia y operación más difíciles</td></tr>
+      <tr><td>Concurrencia</td><td>¿Qué invariantes deben sobrevivir a operaciones simultáneas?</td><td>Atomicidad, exclusión, control de versiones, idempotencia</td><td>Contención o lógica de reconciliación</td></tr>
+      <tr><td>Tolerancia a fallos</td><td>¿Qué fallos se toleran y con qué degradación?</td><td>Redundancia, detección, recuperación, consenso</td><td>Recursos extra y más estados posibles</td></tr>
+      <tr><td>Seguridad</td><td>¿Quién puede hacer qué, sobre qué dato y desde dónde?</td><td>Autenticación, autorización, cifrado, auditoría</td><td>Latencia y gestión de identidades y claves</td></tr>
+    </tbody>
+  </table></div>
+
+  <h4 id="r01-transparencia">Transparencia, con alcance explícito</h4>
+  <p>Decir que un sistema es transparente sin aclarar qué oculta es incompleto. Las dimensiones clásicas son:</p>
+  <ul>
+    <li><b>Acceso:</b> la operación se expresa igual aunque el recurso sea local o remoto.</li>
+    <li><b>Ubicación:</b> el nombre no revela la dirección física.</li>
+    <li><b>Migración y relocalización:</b> el recurso puede moverse, incluso mientras se usa, sin cambiar cómo se lo referencia.</li>
+    <li><b>Replicación:</b> el cliente no elige ni coordina copias.</li>
+    <li><b>Concurrencia:</b> varios usuarios comparten recursos sin romper invariantes.</li>
+    <li><b>Fallo:</b> ciertos fallos se enmascaran mediante redundancia o reintentos.</li>
+    <li><b>Persistencia:</b> se usa igual un objeto temporal que uno reconstruido desde almacenamiento.</li>
+  </ul>
+  <div class="warn">La transparencia total no siempre es deseable. Fingir que una llamada remota es local oculta latencia, serialización y ambigüedad ante fallos. Una buena abstracción simplifica el caso normal, pero deja visibles las diferencias que el programa necesita manejar.</div>
+
+  <h4 id="r01-apertura">Apertura e interoperabilidad</h4>
+  <p>Un sistema abierto publica la sintaxis y la semántica de sus interfaces. <b>Interoperabilidad</b> significa que implementaciones diferentes cooperan. <b>Portabilidad</b> significa que una aplicación puede cambiar de implementación con pocos cambios. Una URL pública no alcanza: también deben estar definidos tipos, errores, compatibilidad, autenticación, orden y semántica de reintentos.</p>
+
+  <h4 id="r01-metodo">Cómo usar los parámetros en un ejercicio</h4>
+  <ol>
+    <li>Fijar requisitos medibles: carga, latencia, disponibilidad, consistencia, recuperación y costo.</li>
+    <li>Encontrar el recurso limitante y el dominio de fallo.</li>
+    <li>Elegir un mecanismo para cada requisito, explicando qué sacrifica.</li>
+    <li>Dibujar componentes, flujos, almacenamiento y límites de responsabilidad.</li>
+    <li>Recorrer fallos concretos: mensaje perdido, duplicado, nodo lento, caída durante una escritura y partición de red.</li>
+  </ol>
+  <div class="ej">Si una venta no puede descontar stock dos veces, “usar una cola” no resuelve por sí solo el requisito. Hay que explicar quién conserva el estado, cómo identifica duplicados, dónde ocurre la operación atómica y qué sucede si el consumidor cae después de guardar pero antes de confirmar el mensaje.</div>
+
+  <h3 id="r01-centralizacion">Centralización, distribución y descentralización</h3>
+  <div class="def"><b>Centralizado.</b> Un componente concentra una decisión o un recurso crítico.</div>
+  <div class="def"><b>Distribuido.</b> El cómputo o los datos viven en más de una computadora.</div>
+  <div class="def"><b>Descentralizado.</b> Ningún participante tiene control exclusivo y la decisión emerge de la coordinación entre pares.</div>
+  <p>Distribuido no implica descentralizado: puede haber cien workers gobernados por un único coordinador. Tampoco centralizado implica una sola máquina: un servicio lógico central puede estar replicado. La pregunta útil es qué autoridad, estado o flujo queda concentrado y qué ocurre si deja de estar disponible.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Forma</th><th>Ventaja</th><th>Riesgo</th><th>Cuándo conviene</th></tr></thead>
+    <tbody>
+      <tr><td>Control central</td><td>Decisiones simples y observables</td><td>Cuello de botella o único dominio de fallo</td><td>Escala acotada, coordinación fuerte</td></tr>
+      <tr><td>Jerarquía</td><td>Agrega y delega por niveles</td><td>Los niveles altos siguen siendo críticos</td><td>Geografía, agregación, organizaciones grandes</td></tr>
+      <tr><td>Pares</td><td>Elimina autoridad única</td><td>Discovery, consenso y seguridad difíciles</td><td>Participantes autónomos o alta distribución</td></tr>
+    </tbody>
+  </table></div>
+  <p>Las topologías expresan quién puede comunicarse directamente: estrella simplifica administración pero concentra tránsito; árbol escala agregación pero depende de sus ancestros; anillo limita conexiones pero aumenta el camino; malla ofrece rutas alternativas a mayor costo; bus comparte medio y contención; pipeline encadena etapas con dependencias claras.</p>
+  <p><b>Ley de Conway:</b> la arquitectura de un sistema tiende a copiar la estructura de comunicación de la organización que lo construye. Si dos equipos no pueden coordinar cambios, una frontera de servicio entre ellos necesita un contrato mucho más estable que una frontera dentro del mismo equipo.</p>
+
+  <h3 id="r01-virtualizacion">Virtualización y aislamiento</h3>
+  <p>La virtualización desacopla una carga de trabajo del hardware físico. Esto permite consolidar recursos, reproducir ambientes, aislar fallos y mover capacidad con menos dependencia de una máquina.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>Máquina virtual</th><th>Contenedor</th></tr></thead>
+    <tbody>
+      <tr><td>Aislamiento</td><td>Hardware virtual y kernel propio</td><td>Procesos aislados que comparten kernel</td></tr>
+      <tr><td>Imagen</td><td>Sistema operativo completo</td><td>Aplicación y dependencias de espacio de usuario</td></tr>
+      <tr><td>Inicio y densidad</td><td>Más lento y pesado</td><td>Rápido y de alta densidad</td></tr>
+      <tr><td>Compatibilidad</td><td>Puede ejecutar otro kernel</td><td>Debe ser compatible con el kernel del host</td></tr>
+      <tr><td>Límite de seguridad</td><td>Generalmente más fuerte</td><td>Depende más del aislamiento del kernel</td></tr>
+    </tbody>
+  </table></div>
+  <p>Un <b>hypervisor tipo 1</b> corre sobre el hardware. Uno <b>tipo 2</b> corre sobre un sistema operativo anfitrión. En contenedores, namespaces aíslan vistas de procesos, red y filesystem; cgroups limitan CPU y memoria; una imagen define capas inmutables; el contenedor agrega una capa efímera de escritura.</p>
+  <p>Docker Compose declara varios contenedores, redes, volúmenes, variables y dependencias. No vuelve distribuida a una aplicación ni reemplaza coordinación. Solo hace reproducible su despliegue local.</p>
+  <pre><code>services:
+  api:
+    image: mi-api:1.4
+    depends_on: [db]
+  db:
+    image: postgres:17
+    volumes: [datos:/var/lib/postgresql/data]
+volumes:
+  datos:</code></pre>
+  <div class="examen">En un final, una decisión de diseño completa une requisito, mecanismo y costo. “Replico para disponibilidad” queda incompleto sin indicar qué se replica, cómo se elige una copia, qué consistencia se ofrece y qué fallos cubre.</div>
+</section>

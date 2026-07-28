@@ -394,9 +394,8 @@ def main() -> int:
     doc = re.sub(r'\s*<link rel="apple-touch-icon"[^>]*>', "", doc)
     doc = re.sub(r"\s*<script>[^<]*serviceWorker.*?</script>", "", doc, flags=re.S)
 
-    # 7. el boton de resumen apunta a un archivo que este apunte no tiene
-    doc = re.sub(r'\s*<a class="icon-button wide" href="resumen\.html">.*?</a>', "",
-                 doc, flags=re.S)
+    # 7. el resumen vive como subpagina, con su propio indice y estado de lectura
+    doc = doc.replace('href="resumen.html"', 'href="resumen/"')
 
     # 8. identidad que quedaba de la otra materia: favicon e icono de app
     favicon = (

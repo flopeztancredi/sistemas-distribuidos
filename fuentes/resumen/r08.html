@@ -1,0 +1,96 @@
+<section class="unidad" id="r08" data-titulo="Datos distribuidos">
+  <h2>Datos distribuidos</h2>
+  <p class="intro">Distribuir datos combina tres decisiones distintas: modelo de almacenamiento, replicación y partición. Replicar mejora lecturas y tolerancia a fallos, particionar reparte capacidad, y cada combinación define consistencia, ruteo y recuperación.</p>
+
+  <h3 id="r08-cargas">OLTP, OLAP y modelos físicos</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>OLTP</th><th>OLAP</th></tr></thead>
+    <tbody>
+      <tr><td>Objetivo</td><td>Operación del negocio</td><td>Análisis histórico</td></tr>
+      <tr><td>Consultas</td><td>Cortas, por clave, muchas escrituras</td><td>Agregaciones sobre grandes conjuntos</td></tr>
+      <tr><td>Datos</td><td>Actuales y normalizados</td><td>Históricos, integrados, a veces desnormalizados</td></tr>
+      <tr><td>Optimización</td><td>Latencia, concurrencia, transacciones</td><td>Throughput de lectura y compresión</td></tr>
+    </tbody>
+  </table></div>
+  <p>Una base relacional ofrece esquema, relaciones, constraints y lenguaje de consulta general. NoSQL agrupa modelos clave valor, documentos, columnas anchas y grafos. La elección depende de accesos, invariantes y escala, no de una oposición entre “SQL lento” y “NoSQL rápido”.</p>
+  <ul>
+    <li><b>Almacenamiento por filas:</b> mantiene juntos los campos de una entidad. Conviene leer o escribir filas completas.</li>
+    <li><b>Columnar:</b> mantiene juntos valores de una columna. Comprime bien y lee solo columnas necesarias para analítica.</li>
+    <li><b>Cubo o vista materializada:</b> precalcula agregaciones por dimensiones. Acelera consultas conocidas a costa de almacenamiento y actualización.</li>
+  </ul>
+  <p>En gran escala, los datos atraviesan ingesta, almacenamiento crudo, validación, transformación, serving y archivo. Cada frontera debe definir formato, ownership, reintento, replay y control de calidad.</p>
+
+  <h3 id="r08-replicacion">Replicación</h3>
+  <div class="def"><b>Replicación.</b> Mantener copias del mismo conjunto lógico para aumentar disponibilidad, cercanía o capacidad de lectura.</div>
+  <h4 id="r08-leader">Leader based</h4>
+  <p>Todas las escrituras pasan por un leader, que registra un orden y envía cambios a followers. Las lecturas pueden ir al leader para máxima actualidad o a followers aceptando lag. La replicación sincrónica espera una o más copias antes de confirmar; reduce pérdida ante fallo pero aumenta latencia y puede bloquear. La asincrónica confirma antes y admite perder cambios recientes si el leader cae.</p>
+  <p>El failover requiere detectar caída, elegir nuevo leader y redirigir. Un timeout demasiado corto produce elecciones innecesarias. Si dos lados aceptan escrituras como leader aparece split brain.</p>
+
+  <h4 id="r08-multileader">Multi leader</h4>
+  <p>Varios leaders aceptan escrituras, útil entre regiones o clientes desconectados. Los cambios concurrentes pueden entrar en conflicto. Resolver por último timestamp puede perder datos y depende de relojes. Alternativas: merge específico del dominio, CRDT, conservar hermanos o asignar cada entidad a una región principal.</p>
+
+  <h4 id="r08-leaderless">Leaderless y quorums</h4>
+  <p>El cliente escribe a varias réplicas y lee varias. Con <code>N</code> copias, <code>W</code> confirmaciones de escritura y <code>R</code> respuestas de lectura:</p>
+  <pre><code>si W + R &gt; N, lectura y escritura intersectan al menos una replica
+si W &gt; N/2, dos escrituras de quorum intersectan</code></pre>
+  <p>La intersección no garantiza por sí sola linearizabilidad: hay escrituras concurrentes, versiones, fallos y sloppy quorums. El lector elige la versión mediante números, vectores o reglas de conflicto y puede hacer read repair. Anti entropy compara réplicas en segundo plano.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Modelo</th><th>Fortaleza</th><th>Debilidad</th></tr></thead>
+    <tbody>
+      <tr><td>Leader único</td><td>Orden de escrituras claro</td><td>Failover y cuello de escritura</td></tr>
+      <tr><td>Multi leader</td><td>Escritura local en varias regiones</td><td>Conflictos</td></tr>
+      <tr><td>Leaderless</td><td>Disponibilidad y reparto simétrico</td><td>Resolución de versiones y reparación</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3 id="r08-consistencia">Modelos de consistencia</h3>
+  <ul>
+    <li><b>Linearizable:</b> cada operación parece ocurrir en un punto entre invocación y respuesta y respeta tiempo real.</li>
+    <li><b>Secuencial:</b> existe un orden total consistente con el orden de cada proceso, no necesariamente con tiempo real.</li>
+    <li><b>Causal:</b> todos respetan relaciones causales, operaciones concurrentes pueden verse en distinto orden.</li>
+    <li><b>Eventual:</b> si cesan escrituras, las réplicas convergen, sin limitar cuánto tardan ni qué se lee antes.</li>
+    <li><b>Read your writes:</b> un cliente no pierde de vista sus propias escrituras.</li>
+    <li><b>Monotonic reads:</b> una vez vista una versión, el cliente no vuelve a una anterior.</li>
+  </ul>
+  <p>La consistencia se especifica por operación y requisito. Un catálogo puede tolerar lectura atrasada; confirmar un pago o adquirir un lock suele requerir coordinación fuerte.</p>
+
+  <h3 id="r08-particion">Particionamiento</h3>
+  <div class="def"><b>Partición horizontal.</b> Distribuir filas o entidades según una clave.</div>
+  <div class="def"><b>Partición vertical.</b> Separar columnas o responsabilidades que se acceden de forma diferente.</div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Función</th><th>Ventaja</th><th>Riesgo</th></tr></thead>
+    <tbody>
+      <tr><td>Rango</td><td>Consultas por intervalo y orden</td><td>Claves monotónicas crean hotspot</td></tr>
+      <tr><td>Hash</td><td>Distribución uniforme</td><td>Rangos requieren consultar muchas particiones</td></tr>
+      <tr><td>Directorio</td><td>Ubicación flexible</td><td>Metadata y disponibilidad del directorio</td></tr>
+      <tr><td>Hash consistente</td><td>Mueve una fracción al cambiar nodos</td><td>Balance requiere tokens virtuales y control</td></tr>
+    </tbody>
+  </table></div>
+  <p>La clave debe acompañar el patrón de acceso y tener cardinalidad suficiente. Un tenant gigante puede romper una partición por tenant. Salting agrega un sufijo para repartir una clave caliente, pero obliga a consultar y combinar varios buckets.</p>
+  <p>El ruteo puede residir en el cliente, un proxy o cualquier nodo que reenvía. Resharding mueve rangos y actualiza metadata sin servir dos dueños inconsistentes. Las operaciones entre particiones agregan coordinación o se rediseñan como sagas y agregados independientes.</p>
+
+  <h3 id="r08-dsm">Distributed Shared Memory</h3>
+  <div class="def"><b>DSM.</b> Abstracción que presenta un espacio de memoria compartido sobre máquinas con memoria físicamente separada.</div>
+  <p>El enfoque ingenuo guarda todo en un servidor y convierte cada acceso en remoto, con cuello de botella. Migrar páginas acerca una página a quien la usa, pero puede causar ping pong por false sharing. Replicar páginas de solo lectura escala lecturas. Permitir escritura en varias copias exige invalidación o actualización y un modelo de consistencia.</p>
+  <p>DSM simplifica algunos algoritmos, pero oculta una diferencia de costo enorme entre acceso local y remoto. La granularidad de página puede transferir datos sin relación y convertir dos variables independientes en contención.</p>
+
+  <h3 id="r08-dfs">Distributed File Systems</h3>
+  <p>Un DFS presenta archivos remotos con nombres, permisos y operaciones conocidas. Las preguntas centrales son ubicación de metadata, cache, consistencia, replicación, tamaño de bloque y conducta ante desconexión.</p>
+  <h4 id="r08-nfs">NFS</h4>
+  <p>NFS permite montar un filesystem remoto. Una VFS del cliente traduce operaciones a RPC contra el servidor. Los file handles identifican objetos sin depender de una sesión permanente. El cache del cliente reduce red, pero obliga a definir cuándo revalidar atributos y datos. El diseño históricamente stateless simplifica reinicio del servidor, aunque locks y versiones modernas agregan estado.</p>
+  <p>Conviene para compartir directorios y archivos con semántica familiar en una LAN. Es perjudicial para procesamiento masivo con muchas operaciones pequeñas o para un dataset que excede y satura un servidor central.</p>
+
+  <h4 id="r08-hdfs">HDFS</h4>
+  <p>HDFS optimiza archivos grandes y acceso secuencial. El NameNode mantiene namespace y mapa de bloques. DataNodes guardan bloques grandes replicados. El cliente consulta metadata y transfiere datos directamente con DataNodes. Para escribir, el bloque atraviesa un pipeline de réplicas y se confirma según la política.</p>
+  <p>HDFS mueve cómputo hacia datos y tolera caída de nodos re replicando bloques. No está pensado para baja latencia, millones de archivos diminutos ni escrituras aleatorias generales. Su consistencia y patrón de append son deliberadamente más restringidos que POSIX.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>NFS</th><th>HDFS</th></tr></thead>
+    <tbody>
+      <tr><td>Objetivo</td><td>Filesystem remoto general</td><td>Throughput de Big Data</td></tr>
+      <tr><td>Datos</td><td>Servidor de archivos</td><td>Bloques distribuidos y replicados</td></tr>
+      <tr><td>Acceso</td><td>Archivos y operaciones frecuentes</td><td>Lectura secuencial y archivos grandes</td></tr>
+      <tr><td>Cómputo</td><td>Cliente accede remoto</td><td>Se agenda cerca del bloque</td></tr>
+    </tbody>
+  </table></div>
+  <div class="examen">Si piden elegir una arquitectura de datos, especificá clave de partición, réplicas, ruteo, consistencia y recuperación. Nombrar “NoSQL” no responde ninguna de esas decisiones.</div>
+</section>

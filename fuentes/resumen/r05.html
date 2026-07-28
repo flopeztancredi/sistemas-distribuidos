@@ -1,0 +1,152 @@
+<section class="unidad" id="r05" data-titulo="Patrones, middleware y mensajería">
+  <h2>Patrones, middleware y mensajería</h2>
+  <p class="intro">Los patrones de comunicación describen quién produce, quién recibe y qué acoplamiento existe en tiempo, espacio y cantidad. Un middleware implementa mecanismos comunes, pero las garantías finales dependen del protocolo completo, el almacenamiento y la lógica de aplicación.</p>
+
+  <h3 id="r05-middleware">Middleware y MOM</h3>
+  <div class="def"><b>Middleware.</b> Capa de software entre aplicación y plataforma que ofrece servicios comunes para comunicar, nombrar, serializar, asegurar y coordinar componentes heterogéneos.</div>
+  <p>Puede ser procedural (RPC), orientado a objetos, orientado a mensajes, transaccional o de datos. Sus objetivos son reducir acoplamiento, ocultar heterogeneidad, reutilizar mecanismos y ofrecer una política consistente de operación.</p>
+  <p>Un middleware <b>centralizado</b> concentra discovery, ruteo o persistencia en hosts conocidos. Facilita administración y observabilidad, pero concentra carga y fallos. Uno <b>distribuido</b> embebe agentes en los nodos y reparte esos servicios, con mayor escala y autonomía a costa de coordinación.</p>
+  <div class="def"><b>MOM.</b> Middleware orientado a mensajes que desacopla productores y consumidores mediante canales, colas o tópicos y puede agregar ruteo, persistencia y confirmaciones.</div>
+  <p>Un bus de información distribuye eventos a suscriptores. Una cola entrega trabajo a consumidores, normalmente uno por mensaje. Un broker media direcciones, buffers y políticas. ZeroMQ ofrece abstracciones de mensajería sin imponer un broker central.</p>
+
+  <h3 id="r05-grupos">Grupos, difusión y atomicidad</h3>
+  <p>Un grupo permite dirigir un mensaje a un conjunto lógico. <b>Broadcast</b> intenta alcanzar a todos en un dominio. <b>Multicast</b> alcanza a miembros de un grupo. <b>Unicast</b> tiene un destino. <b>Anycast</b> alcanza una instancia apropiada entre varias.</p>
+  <p>La membresía puede ser estática o dinámica. Con cambios dinámicos hace falta acordar vistas, altas, bajas y sospechas de fallo. Entrega atómica de grupo significa que el mensaje se entrega a todos los miembros correctos de una vista o a ninguno, no que cada handler sea transaccional.</p>
+  <p>Un middleware de grupos mantiene <code>join(grupo, miembro)</code>, <code>leave</code> y <code>send(grupo, mensaje)</code>. El servicio asigna una vista numerada, persiste o retransmite por miembro y entrega solo dentro de la vista acordada. Para atomicidad, un coordinador puede difundir, reunir ACK de todos y recién emitir <code>DELIVER</code>; si no llega a todos, emite <code>ABORT</code>. Esto cuesta dos rondas y puede bloquear ante fallos. Protocolos de reliable atomic multicast reemplazan el coordinador único con orden y acuerdo de vista.</p>
+
+  <h3 id="r05-patrones">Patrones de comunicación</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Patrón</th><th>Flujo</th><th>Acoplamiento</th><th>Uso</th></tr></thead>
+    <tbody>
+      <tr><td>Request Reply</td><td>Uno pide, uno responde</td><td>Conoce destino y correlación</td><td>Consulta o comando con resultado</td></tr>
+      <tr><td>Producer Consumer</td><td>Productores alimentan workers</td><td>Desacople temporal por cola</td><td>Distribuir trabajo</td></tr>
+      <tr><td>Publisher Subscriber</td><td>Cada evento va a todos los interesados</td><td>Desacople espacial, tópico común</td><td>Notificaciones e integración</td></tr>
+      <tr><td>Pipeline</td><td>Etapas transforman un flujo</td><td>Cada etapa conoce canales vecinos</td><td>Procesamiento incremental</td></tr>
+      <tr><td>DAG</td><td>Tareas con dependencias arbitrarias sin ciclos</td><td>Scheduler conoce precedencias</td><td>Workflows y procesamiento batch</td></tr>
+    </tbody>
+  </table></div>
+
+  <h4 id="r05-request-reply">Request Reply</h4>
+  <p>Cada pedido necesita tipo, versión, <code>request_id</code>, operación y payload. La respuesta repite el identificador y lleva resultado o error. Sin correlación, varias operaciones en vuelo no pueden asociarse con su respuesta.</p>
+  <p>Para una operación asincrónica se pueden encadenar dos intercambios: el primero acepta y devuelve un ID, el segundo consulta o retira resultado. Esto evita mantener una conexión por toda la ejecución y permite persistir estado.</p>
+
+  <h4 id="r05-producer-consumer">Producer Consumer</h4>
+  <p>Varios consumidores compiten por mensajes de una cola. Cada unidad de trabajo debe ser suficientemente independiente. La cola absorbe ráfagas, pero no crea capacidad: si la tasa media de llegada supera a la de servicio, el backlog crece sin límite.</p>
+  <p>Backpressure se implementa con capacidad acotada, créditos, pausa de productores, rechazo o autoscaling con un límite. Orden estricto y paralelismo compiten: particionar por clave conserva orden dentro de cada clave y distribuye claves distintas.</p>
+
+  <h4 id="r05-pubsub">Publisher Subscriber</h4>
+  <p>Un publisher emite sin conocer suscriptores. Cada suscriptor interesado recibe una copia lógica. Un <b>canal</b> suele ser una dirección concreta; un <b>tópico</b> clasifica semánticamente y puede permitir patrones. Hay que definir retención, replay, posición del consumidor y conducta de suscriptores lentos.</p>
+
+  <h4 id="r05-pipeline-dag">Pipeline y DAG</h4>
+  <p>Un pipeline procesa elementos en streaming: cuando una etapa termina el elemento A puede recibir B mientras la siguiente procesa A. El throughput queda limitado por la etapa más lenta. Replicarla requiere una política de reparto y, si importa el orden, una de recomposición.</p>
+  <p>Un DAG generaliza dependencias. Una tarea queda lista cuando completan todos sus predecesores. Si el grafo contiene un ciclo de espera no es DAG y puede haber deadlock. Conviene distinguir <b>worker por etapa</b>, especializado pero potencialmente ocioso, de <b>worker por item</b>, que ejecuta varias transformaciones y reduce transferencias.</p>
+
+  <h3 id="r05-entrega">ACK, reintentos e idempotencia</h3>
+  <p>Un ACK confirma un punto preciso. Puede significar recibido en memoria, persistido, entregado al proceso o efecto confirmado. Si no se define ese punto, “tiene ACK” no expresa una garantía.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Semántica</th><th>Mecanismo</th><th>Resultado posible</th></tr></thead>
+    <tbody>
+      <tr><td>At most once</td><td>Sin reintento o deduplicación</td><td>Pérdida, no duplicado visible</td></tr>
+      <tr><td>At least once</td><td>ACK más reintento</td><td>Entrega, con posibles duplicados</td></tr>
+      <tr><td>Exactly once observable</td><td>Deduplicación atómica con el efecto</td><td>Un único efecto dentro del alcance declarado</td></tr>
+    </tbody>
+  </table></div>
+  <pre><code>consumir(mensaje):
+    comenzar_transaccion()
+    if existe(procesados, mensaje.id):
+        confirmar_transaccion()
+        ack(mensaje)
+        return
+    aplicar_efecto(mensaje)
+    insertar(procesados, mensaje.id)
+    confirmar_transaccion()
+    ack(mensaje)</code></pre>
+  <p>El retry usa timeout y backoff exponencial para no repetir la sobrecarga:</p>
+  <pre><code>espera = min(maximo, base * 2^intento)
+espera_real = aleatorio(0, espera)       # full jitter</code></pre>
+  <p>Solo se reintentan errores transitorios. Debe haber máximo de intentos, deadline total y dead letter queue o estado terminal para lo irrecuperable.</p>
+
+  <h4 id="r05-sockets-vs-mom">Sockets TCP contra MOM</h4>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>Sockets TCP</th><th>MOM con broker</th></tr></thead>
+    <tbody>
+      <tr><td>Control</td><td>La aplicación define protocolo, conexiones y buffers</td><td>El broker aporta colas, ruteo y ACK</td></tr>
+      <tr><td>Acoplamiento temporal</td><td>Ambos extremos activos</td><td>El consumidor puede estar desconectado si hay persistencia</td></tr>
+      <tr><td>Latencia</td><td>Menos saltos y overhead</td><td>Salto y persistencia adicionales</td></tr>
+      <tr><td>Recuperación</td><td>Debe diseñarse replay y estado</td><td>Redelivery y retención configurables</td></tr>
+      <tr><td>Topología</td><td>Flexible, administrada por la aplicación</td><td>Canales y políticas explícitos</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3 id="r05-rabbitmq">RabbitMQ</h3>
+  <p>RabbitMQ es un broker AMQP centralizado lógicamente. El productor publica en un <b>exchange</b>, el exchange compara bindings y enruta a cero o más colas, y consumidores reciben desde las colas.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Exchange</th><th>Ruteo</th><th>Ejemplo</th></tr></thead>
+    <tbody>
+      <tr><td>Direct</td><td>Routing key igual al binding</td><td>Cola por tipo exacto</td></tr>
+      <tr><td>Fanout</td><td>A todas las colas vinculadas</td><td>Broadcast</td></tr>
+      <tr><td>Topic</td><td>Patrón por palabras con comodines</td><td><code>ventas.*.creada</code></td></tr>
+      <tr><td>Headers</td><td>Coincidencia de headers</td><td>Reglas fuera de una clave</td></tr>
+    </tbody>
+  </table></div>
+  <p>Para sobrevivir al reinicio se combinan exchange durable, cola durable y mensaje persistente. Aun así, el productor necesita <b>publisher confirms</b> para saber que el broker aceptó según su política. El consumidor usa ACK manual después del efecto; si cae antes, el broker reencola. Prefetch limita mensajes no confirmados y distribuye mejor trabajo.</p>
+  <p>Una cola clásica puede tener un nodo líder. Una quorum queue replica mediante consenso y tolera fallos según mayoría. Replicar el broker no elimina duplicados de aplicación ni garantiza que un mensaje publicado antes de un fallo haya alcanzado el quorum sin confirmación.</p>
+
+  <h3 id="r05-zeromq">ZeroMQ</h3>
+  <p>ZeroMQ es una biblioteca de sockets con patrones de mensajería. Los procesos se conectan directamente o mediante un proxy construido con los mismos sockets. No ofrece por sí misma persistencia durable ni administración central.</p>
+  <ul>
+    <li><b>REQ REP:</b> alternancia estricta request y reply. Simple, pero un peer caído bloquea el ciclo si no se diseña timeout y reconstrucción.</li>
+    <li><b>PUSH PULL:</b> pipeline y distribución de trabajo. PUSH reparte, PULL recibe.</li>
+    <li><b>PUB SUB:</b> difusión por prefijos. Un suscriptor que se conecta tarde pierde mensajes anteriores.</li>
+    <li><b>ROUTER DEALER:</b> asincronismo y multiplexación. ROUTER conserva identidades para devolver a cada origen; permite construir broker y workers.</li>
+    <li><b>XPUB XSUB:</b> proxy pub sub que hace visibles altas y bajas de suscripciones.</li>
+  </ul>
+  <pre><code>clientes REQ
+    -&gt; ROUTER [frontend]
+        -&gt; proxy
+            -&gt; DEALER [backend]
+                -&gt; workers REP</code></pre>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>RabbitMQ</th><th>ZeroMQ</th></tr></thead>
+    <tbody>
+      <tr><td>Forma</td><td>Servicio broker</td><td>Biblioteca embebida</td></tr>
+      <tr><td>Persistencia</td><td>Colas y mensajes durables configurables</td><td>La aplicación debe agregarla</td></tr>
+      <tr><td>Operación</td><td>Administración, métricas, políticas</td><td>Topología bajo control de la aplicación</td></tr>
+      <tr><td>Ventaja</td><td>Desacople temporal confiable</td><td>Baja latencia y flexibilidad</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3 id="r05-recetas">Recetas de pseudocódigo para patrones</h3>
+  <h4 id="r05-barrera">Barrera distribuida</h4>
+  <p>Un coordinador conserva generación y conjunto de llegadas. La generación evita mezclar dos usos sucesivos:</p>
+  <pre><code>worker:
+    send ARRIVE(barrera_id, generacion, worker_id)
+    esperar RELEASE(barrera_id, generacion)
+
+coordinador al recibir ARRIVE:
+    llegadas[generacion].add(worker_id)
+    if size(llegadas[generacion]) == N:
+        enviar RELEASE(generacion) a los N
+        persistir generacion + 1</code></pre>
+  <p>Con request reply, cada worker deja su request pendiente hasta liberar. Con MOM, ARRIVE entra a una cola y RELEASE puede publicarse a una cola por worker o tópico, con mensajes durables e idempotentes. Con blocking queues locales, cada worker pone un token y espera una señal propia. Deben definirse caída de un worker, timeout, participantes fijos y reutilización.</p>
+
+  <h4 id="r05-work-pool">Repartir trabajo y agregar</h4>
+  <pre><code>coordinador:
+    dividir input en tareas con task_id
+    mantener hasta N requests de workers en vuelo
+    al recibir resultado(task_id):
+        ignorar duplicado
+        acumular
+        enviar siguiente tarea al worker libre
+
+worker:
+    repetir:
+        request = pedir_trabajo_o_recibir()
+        resultado = procesar(request)
+        responder(request.task_id, resultado)</code></pre>
+  <p>Request reply requiere correlación y timeout por worker. Producer consumer ya implementa la competencia mediante una cola. Publisher subscriber difunde, por lo que no reparte solo: hay que asignar particiones por worker o publicar tareas en canales filtrados y usar otro tópico para resultados.</p>
+
+  <h4 id="r05-chat">Chat por grupos</h4>
+  <p>Un chat de equipos modela cada equipo como grupo. La API mínima es <code>join(team, player)</code>, <code>publish(team, message_id, body)</code>, <code>subscribe(team, offset)</code> y <code>leave</code>. El servidor autoriza membresía, asigna secuencia por equipo, retiene historia según política y permite reanudar desde offset. El cliente deduplica por <code>message_id</code>. Presencia y chat son flujos distintos: perder un heartbeat no debe borrar mensajes.</p>
+  <div class="examen">En ejercicios con mensajes, dibujá canal, dirección, cardinalidad y ACK. Después recorré el fallo entre “aplicar efecto” y “confirmar”: ahí aparece la necesidad de idempotencia.</div>
+</section>

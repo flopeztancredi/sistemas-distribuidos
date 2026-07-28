@@ -2,8 +2,9 @@
 
 **Se lee en https://flopeztancredi.github.io/sistemas-distribuidos/**
 
-`index.html` es el entregable: un solo archivo autocontenido, sin recursos
-externos. También se abre con doble clic, sin servidor.
+`index.html` es el apunte completo. `resumen/index.html` es una segunda
+presentación autocontenida, organizada por conceptos y con mayor densidad. Los
+dos archivos funcionan sin recursos externos y también se abren con doble clic.
 
 ## Cómo se construye
 
@@ -15,6 +16,7 @@ fragmento y se reconstruye.
 fuentes/sintesis/uNN.html        contenido de cada unidad (17)
 fuentes/sintesis/autoev-a|b|c    partes de la autoevaluación
 fuentes/sintesis/glosario.html   generado, no editar a mano
+fuentes/resumen/rNN.html         capítulos del resumen conceptual
 fuentes/shell-aa.html            shell de diseño (ver abajo)
 ```
 
@@ -26,6 +28,7 @@ python3 lint_fragmentos.py        # valida los fragmentos antes de ensamblar
 python3 armar_autoevaluacion.py   # autoev-a|b|c  ->  autoevaluacion.html
 python3 armar_glosario.py         # los .callout de definición  ->  glosario.html
 python3 adaptar_estetica.py       # todo + shell  ->  ../index.html
+python3 armar_resumen.py          # resumen/* + shell -> ../resumen/index.html
 ```
 
 `adaptar_estetica.py` es el que manda: valida ids únicos, anclas y tokens CSS

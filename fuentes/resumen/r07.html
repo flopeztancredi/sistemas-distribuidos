@@ -1,0 +1,107 @@
+<section class="unidad" id="r07" data-titulo="Escala, disponibilidad y cloud">
+  <h2>Escala, disponibilidad y cloud</h2>
+  <p class="intro">Escalar significa sostener objetivos al crecer una dimensión de carga. Elasticidad agrega adaptación automática hacia arriba y hacia abajo. Alta disponibilidad exige eliminar dependencias cuyo fallo interrumpe el servicio. Cloud, microservicios y serverless son medios posibles, no sustitutos de esas definiciones.</p>
+
+  <h3 id="r07-escalabilidad">Escalabilidad</h3>
+  <div class="def"><b>Escalabilidad.</b> Capacidad de conservar objetivos de servicio cuando crecen usuarios, datos, operaciones o distribución geográfica mediante una cantidad razonable de recursos.</div>
+  <p>Antes de elegir tecnología se identifica la dimensión que crece y el recurso limitante: CPU, memoria, disco, IOPS, ancho de banda, conexiones, locks, coordinador o capacidad de una partición.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Técnica</th><th>Qué alivia</th><th>Problema nuevo</th></tr></thead>
+    <tbody>
+      <tr><td>Escala vertical</td><td>Capacidad de una instancia</td><td>Límite físico, costo no lineal, dominio de fallo</td></tr>
+      <tr><td>Escala horizontal</td><td>CPU y concurrencia agregando instancias</td><td>Balanceo, estado compartido y coordinación</td></tr>
+      <tr><td>Cache</td><td>Lecturas repetidas y latencia</td><td>Invalidación, staleness y stampede</td></tr>
+      <tr><td>Replicación</td><td>Lecturas y disponibilidad</td><td>Lag, conflictos y elección de copia</td></tr>
+      <tr><td>Partición</td><td>Datos y escrituras</td><td>Hotspots, consultas cruzadas y resharding</td></tr>
+      <tr><td>Colas</td><td>Picos y acoplamiento temporal</td><td>Backlog, duplicados y consistencia diferida</td></tr>
+      <tr><td>CDN y edge</td><td>Distancia y ancho de banda de origen</td><td>Invalidación y lógica distribuida</td></tr>
+    </tbody>
+  </table></div>
+  <p>Una instancia de aplicación stateless se replica con facilidad porque cualquier pedido puede ir a cualquiera. Sesión, archivos locales y jobs en memoria vuelven sticky al tráfico o exigen extraer estado a un sistema compartido. Esto no elimina estado, solo lo ubica donde puede escalar y recuperarse.</p>
+  <p>Una plataforma de <b>alta concurrencia</b> mantiene capacidad compartida para muchos pedidos breves. Un sistema <b>ad hoc</b> crea recursos para una tarea específica y los destruye al terminar. El primero amortiza arranque; el segundo aísla y ajusta recursos por trabajo.</p>
+  <h4 id="r07-patrones-carga">Patrones de carga web</h4>
+  <ul>
+    <li><b>Estable:</b> capacidad base y margen conocido.</li>
+    <li><b>Diario o periódico:</b> preescalado antes del pico evita esperar métricas.</li>
+    <li><b>Flash crowd:</b> CDN, cache, cola y límites absorben una subida abrupta mientras escala.</li>
+    <li><b>Crecimiento sostenido:</b> partición y capacity planning, no solo autoscaling de frontend.</li>
+    <li><b>Trabajo costoso aislado:</b> cola y workers separados impiden que una operación agote requests comunes.</li>
+  </ul>
+
+  <h3 id="r07-elasticidad">Elasticidad como lazo de control</h3>
+  <div class="def"><b>Elasticidad.</b> Capacidad de ajustar recursos automáticamente según la carga, agregándolos cuando hacen falta y retirándolos cuando dejan de ser útiles.</div>
+  <p>Una arquitectura elástica necesita:</p>
+  <ol>
+    <li><b>Sensor:</b> mide demanda o saturación, por ejemplo utilización, latencia o backlog.</li>
+    <li><b>Controlador:</b> compara contra un objetivo y decide capacidad deseada.</li>
+    <li><b>Actuador:</b> crea, elimina o reconfigura instancias.</li>
+  </ol>
+  <p>Escalar por CPU sirve si CPU correlaciona con demanda. Para consumidores de cola suele convenir backlog por worker y antigüedad del mensaje más viejo. Hay que considerar tiempo de arranque, cooldown, histéresis, capacidad mínima y máxima. Sin histéresis, pequeñas variaciones producen oscilación.</p>
+  <p>En AWS, métricas y alarmas pueden alimentar Auto Scaling Groups y balanceadores. En Kubernetes, Horizontal Pod Autoscaler ajusta réplicas, scheduler asigna pods a nodos y Cluster Autoscaler ajusta nodos. Readiness evita enviar tráfico antes de estar listo; liveness reinicia un proceso trabado, y una mala configuración puede convertir lentitud transitoria en tormenta de reinicios.</p>
+
+  <h3 id="r07-disponibilidad">Alta disponibilidad y confiabilidad</h3>
+  <div class="def"><b>Availability.</b> Fracción del tiempo en que el servicio está disponible: <code>A = MTTF / (MTTF + MTTR)</code>.</div>
+  <div class="def"><b>Reliability.</b> Probabilidad de operar correctamente sin interrupción durante un intervalo.</div>
+  <p>Disponibilidad mejora al fallar menos o reparar más rápido. Los “nueves” convierten porcentaje en presupuesto anual aproximado:</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Objetivo</th><th>Indisponibilidad anual aproximada</th></tr></thead>
+    <tbody>
+      <tr><td>99%</td><td>3 días 15 horas</td></tr>
+      <tr><td>99.9%</td><td>8 horas 46 minutos</td></tr>
+      <tr><td>99.99%</td><td>52 minutos 36 segundos</td></tr>
+      <tr><td>99.999%</td><td>5 minutos 15 segundos</td></tr>
+    </tbody>
+  </table></div>
+  <p>Si componentes independientes están en serie y todos deben funcionar:</p>
+  <pre><code>A_serie = A1 * A2 * ... * An</code></pre>
+  <p>Si dos componentes independientes son redundantes y alcanza con uno:</p>
+  <pre><code>A_paralelo = 1 - (1 - A1) * (1 - A2)</code></pre>
+  <div class="ej">Dos instancias independientes de 99% en paralelo darían 99.99%. La cuenta deja de valer si comparten base, zona, configuración defectuosa o despliegue que las rompe juntas.</div>
+  <p>Un cluster necesita redundancia, detección y failover. Redundar sin un mecanismo para desviar tráfico no aumenta el servicio observable. También importan dominios de fallo independientes, capacidad de la réplica durante el failover y pruebas periódicas.</p>
+
+  <h4 id="r07-sli-slo-sla">SLI, SLO y SLA</h4>
+  <ul>
+    <li><b>SLI:</b> medición, por ejemplo proporción de requests válidos con latencia menor a 300 ms.</li>
+    <li><b>SLO:</b> objetivo interno sobre un SLI, por ejemplo 99.95% mensual.</li>
+    <li><b>SLA:</b> compromiso contractual y consecuencias si no se cumple.</li>
+  </ul>
+  <p>El error budget es <code>1 - SLO</code>. Permite equilibrar cambios y estabilidad. Un promedio de latencia oculta colas largas; se usan percentiles como p95 o p99.</p>
+
+  <h3 id="r07-cap">Teorema CAP</h3>
+  <p>Ante una partición de red entre réplicas, un sistema distribuido no puede garantizar simultáneamente:</p>
+  <ul>
+    <li><b>Consistencia C:</b> cada operación observa una única historia equivalente a una copia actualizada, en la interpretación usual de CAP.</li>
+    <li><b>Disponibilidad A:</b> todo pedido a un nodo no fallado obtiene una respuesta no errónea.</li>
+    <li><b>Tolerancia a particiones P:</b> el sistema sigue bajo pérdida arbitraria de mensajes entre grupos.</li>
+  </ul>
+  <p>Cuando ocurre P, un lado puede rechazar operaciones para preservar C, o responder sin coordinar para preservar A y aceptar divergencia. Fuera de una partición se siguen negociando latencia y consistencia. CAP no dice que un sistema elige solo dos propiedades todo el tiempo ni que una réplica local lenta sea una partición.</p>
+
+  <h3 id="r07-evolucion">Monolito, SOA, microservicios y serverless</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Estilo</th><th>Unidad de despliegue</th><th>Ventaja</th><th>Costo</th></tr></thead>
+    <tbody>
+      <tr><td>Monolito</td><td>Aplicación completa</td><td>Llamadas y transacciones locales, operación simple</td><td>Escala y releases acoplados</td></tr>
+      <tr><td>Monolito escalable</td><td>Réplicas de la aplicación</td><td>Horizontalidad sin dividir dominio</td><td>Todas las réplicas cargan todo</td></tr>
+      <tr><td>SOA</td><td>Servicios de negocio</td><td>Integración y reutilización empresarial</td><td>Gobernanza y middleware central pueden crecer</td></tr>
+      <tr><td>Microservicios</td><td>Servicio pequeño autónomo</td><td>Despliegue y escala independientes</td><td>Red, observabilidad, datos y consistencia distribuidos</td></tr>
+      <tr><td>Serverless</td><td>Función o servicio administrado</td><td>Escala automática y pago por uso</td><td>Cold start, límites, lock in y estado externo</td></tr>
+    </tbody>
+  </table></div>
+  <p>La granularidad se elige por cohesión, autonomía de datos, ritmo de cambio y propiedad del equipo, no por cantidad arbitraria de líneas. Una transición segura extrae una capacidad con frontera clara, observa su tráfico y evita compartir tablas como contrato permanente.</p>
+  <p>SOA suele integrar servicios más gruesos y puede usar un Enterprise Service Bus. Microservicios enfatizan equipos autónomos, despliegue independiente, automatización y endpoints livianos. Ambos son arquitecturas orientadas a servicios.</p>
+  <p>Un <b>API Gateway</b> ofrece un frente estable para clientes: termina autenticación, aplica cuotas, enruta, traduce versiones y puede agregar respuestas. Evita que el cliente conozca cada instancia o servicio interno. No debe concentrar lógica de negocio ni convertirse en un monolito oculto. Se replica y su configuración se versiona.</p>
+
+  <h3 id="r07-cloud">Cloud y modelos de servicio</h3>
+  <div class="def"><b>Cloud computing.</b> Acceso bajo demanda a recursos compartidos configurables, aprovisionados rápidamente, medidos y administrados mediante interfaces de servicio.</div>
+  <p>Características: autoservicio, acceso por red, pool de recursos, elasticidad rápida y medición. Cloud pública pertenece a un proveedor y comparte infraestructura con aislamiento. Cloud privada aplica el modelo a infraestructura dedicada de una organización. Híbrida conecta ambas.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Modelo</th><th>Proveedor administra</th><th>Usuario administra</th></tr></thead>
+    <tbody>
+      <tr><td>IaaS</td><td>Hardware, red, virtualización</td><td>SO, runtime, aplicación y datos</td></tr>
+      <tr><td>PaaS</td><td>También SO, runtime, escalado y plataforma</td><td>Aplicación y datos</td></tr>
+      <tr><td>SaaS</td><td>Aplicación completa</td><td>Configuración y uso de datos</td></tr>
+    </tbody>
+  </table></div>
+  <p>Adoptar cloud intercambia control directo por velocidad y servicios administrados. Se evalúan costo total, residencia de datos, skills, portabilidad, dependencia del proveedor, observabilidad y recuperación, no solo precio por VM.</p>
+  <div class="examen">Para justificar alta disponibilidad, calculá la cadena completa y buscá fallos comunes. Dos APIs detrás de un balanceador no alcanzan si ambas dependen de una única base sin failover.</div>
+</section>

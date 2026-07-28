@@ -1,0 +1,109 @@
+<section class="unidad" id="r11" data-titulo="Fallos, coordinación y transacciones">
+  <h2>Fallos, coordinación y transacciones</h2>
+  <p class="intro">Tolerar fallos empieza por distinguir causa, estado incorrecto y servicio incorrecto. Después se elige detección, redundancia y recuperación. La coordinación distribuida agrega protocolos para exclusión y commit, pero ningún protocolo puede convertir una detección incierta en conocimiento perfecto.</p>
+
+  <h3 id="r11-terminologia">Fallo, error y avería</h3>
+  <div class="def"><b>Fault.</b> Causa adjudicada o hipotética de un error, por ejemplo un bit alterado, un bug o un corte.</div>
+  <div class="def"><b>Error.</b> Estado interno incorrecto que puede conducir a servicio incorrecto.</div>
+  <div class="def"><b>Failure o avería.</b> Desviación observable del servicio respecto de su especificación.</div>
+  <pre><code>fault se activa -&gt; error interno -&gt; cruza la frontera -&gt; failure observable</code></pre>
+  <p>Contener el error antes de la frontera evita que se convierta en avería. Un checksum detecta corrupción, una réplica puede enmascararla y una validación puede impedir propagarla.</p>
+
+  <h3 id="r11-clasificacion">Modelos de fallo</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Clase</th><th>Comportamiento</th><th>Ejemplo</th></tr></thead>
+    <tbody>
+      <tr><td>Crash</td><td>El proceso deja de actuar</td><td>Host apagado</td></tr>
+      <tr><td>Omisión de envío</td><td>No emite un mensaje debido</td><td>Buffer o enlace descarta</td></tr>
+      <tr><td>Omisión de recepción</td><td>No procesa un mensaje recibido</td><td>Cola interna saturada</td></tr>
+      <tr><td>Timing</td><td>Responde fuera del intervalo permitido</td><td>Deadline incumplida</td></tr>
+      <tr><td>Respuesta</td><td>Valor o transición incorrectos</td><td>Cálculo o estado inválido</td></tr>
+      <tr><td>Bizantino</td><td>Comportamiento arbitrario, incluso distinto para cada peer</td><td>Corrupción o actor malicioso</td></tr>
+    </tbody>
+  </table></div>
+  <p>Un sistema puede ser sincrónico, parcialmente sincrónico o asincrónico según qué cotas conoce sobre cómputo, mensajes y relojes. El detector de fallos usa señales y timeouts, pero en un modelo asincrónico una ausencia de respuesta solo genera sospecha. La exactitud y rapidez del detector compiten.</p>
+
+  <h3 id="r11-estrategias">Manejo de fallos</h3>
+  <ul>
+    <li><b>Prevención:</b> reducir faults mediante diseño, tipos, pruebas y operación.</li>
+    <li><b>Eliminación:</b> encontrar y corregir faults antes o después del despliegue.</li>
+    <li><b>Predicción:</b> estimar tasa, consecuencias y riesgo.</li>
+    <li><b>Tolerancia:</b> mantener servicio aceptable aunque el fault ocurra.</li>
+  </ul>
+  <p>La tolerancia combina detección, confinamiento, enmascaramiento, reconfiguración y recuperación. <b>Resiliencia</b> es adaptarse y recuperar capacidad. <b>Degradación suave</b> conserva funciones esenciales y reduce otras, por ejemplo servir lecturas y rechazar escrituras durante una pérdida de quorum.</p>
+
+  <h3 id="r11-redundancia">Redundancia y replicación operativa</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Esquema</th><th>Ejecución</th><th>Failover</th><th>Tradeoff</th></tr></thead>
+    <tbody>
+      <tr><td>Pasiva, primary backup</td><td>Primary procesa y transfiere estado</td><td>Backup toma control</td><td>Simple, con demora y posible estado perdido</td></tr>
+      <tr><td>Activa, state machine replication</td><td>Todas procesan las mismas operaciones ordenadas</td><td>Otra ya tiene el resultado</td><td>Rápida, exige determinismo y orden total</td></tr>
+      <tr><td>Semi activa, leader follower</td><td>Leader decide, followers acompañan</td><td>Se elige follower actualizado</td><td>Equilibrio, requiere consenso de término y log</td></tr>
+    </tbody>
+  </table></div>
+  <p>Redundancia espacial usa componentes simultáneos. Redundancia temporal reintenta. Redundancia de información agrega checksum o códigos. Réplicas idénticas no protegen contra el mismo bug o configuración: safety crítica puede exigir diversidad de diseño.</p>
+
+  <h3 id="r11-recuperacion">Recuperación y dependability</h3>
+  <ul>
+    <li><b>Backward recovery:</b> volver a un checkpoint consistente y reproducir.</li>
+    <li><b>Forward recovery:</b> transformar el estado erróneo en uno válido y continuar.</li>
+    <li><b>Log y replay:</b> reconstruir estado aplicando operaciones durables.</li>
+    <li><b>Infraestructura inmutable:</b> reemplazar una instancia por una conocida en vez de repararla manualmente.</li>
+  </ul>
+  <p>RPO mide cuántos datos se acepta perder en tiempo. RTO mide cuánto puede tardar la restauración. Backup sin restauración probada no demuestra recuperación. Disaster recovery debe cubrir credenciales, configuración, dependencias externas y procedimientos, no solo archivos.</p>
+  <p>Un sistema dependable se evalúa por availability, reliability, safety y maintainability. Availability es tiempo servido, reliability continuidad sin avería, safety ausencia de consecuencias catastróficas y maintainability facilidad y velocidad de reparación. Un servicio que se apaga cada domingo puede ser confiable durante cada período, pero tiene menor disponibilidad.</p>
+
+  <h3 id="r11-exclusion">Exclusión mutua distribuida</h3>
+  <p>El objetivo es que un solo proceso acceda a un recurso crítico, con progreso y, si se pide, orden justo. No hay memoria compartida para un mutex.</p>
+  <h4 id="r11-central">Servidor central</h4>
+  <p>Los procesos envían <code>REQUEST</code> a un coordinador. Si está libre, responde <code>GRANT</code>; si no, encola. Al salir reciben <code>RELEASE</code>. Usa tres mensajes por entrada y es fácil de razonar, pero el coordinador es cuello y dominio de fallo. Hay que recuperar quién tenía el lock y evitar dos coordinadores activos.</p>
+
+  <h4 id="r11-token">Token ring</h4>
+  <p>Un token circula por un anillo lógico. Quien lo posee puede entrar y luego lo pasa. Garantiza exclusión y espera acotada si el anillo funciona. Perder token requiere regenerarlo sin crear dos; caer un nodo requiere reconstruir sucesores.</p>
+
+  <h4 id="r11-ricart">Ricart y Agrawala</h4>
+  <p>Cada proceso timestampa su pedido con reloj de Lamport y lo envía a todos. Un receptor responde de inmediato si no quiere entrar o si el pedido ajeno tiene menor par <code>(timestamp, id)</code>; en otro caso difiere la respuesta. El solicitante entra al recibir respuesta de los otros <code>N - 1</code>.</p>
+  <pre><code>solicitar:
+    estado = WANTED
+    pedido = (lamport++, mi_id)
+    enviar REQUEST(pedido) a todos
+    esperar REPLY de todos
+    estado = HELD
+
+recibir REQUEST(r):
+    if estado == HELD or (estado == WANTED and mi_pedido &lt; r):
+        diferir(r.origen)
+    else:
+        enviar REPLY
+
+liberar:
+    estado = RELEASED
+    responder a diferidos</code></pre>
+  <p>Cuesta <code>2(N - 1)</code> mensajes y la caída de un participante puede bloquear si se espera a todos. La comparación total rompe empates y preserva orden.</p>
+
+  <h3 id="r11-2pc">Two Phase Commit</h3>
+  <div class="def"><b>2PC.</b> Protocolo de atomic commit en el que un coordinador pregunta si todos pueden confirmar y luego comunica una decisión global commit o abort.</div>
+  <pre><code>Fase 1, prepare:
+  coordinador -&gt; PREPARE a participantes
+  participante:
+      valida y fuerza estado PREPARED en log
+      responde YES
+      o responde NO y aborta
+
+Fase 2, decision:
+  si todos YES: coordinador fuerza COMMIT y lo envia
+  si algun NO o timeout antes de decidir: fuerza ABORT y lo envia
+  participantes registran decision, liberan locks y confirman</code></pre>
+  <p>Un participante que votó YES prometió poder confirmar después de reiniciar, por eso persiste cambios y conserva locks. Si queda PREPARED y pierde contacto con el coordinador, no puede decidir unilateralmente: podría contradecir un commit ya decidido. 2PC es bloqueante.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Fallo</th><th>Recuperación</th></tr></thead>
+    <tbody>
+      <tr><td>Participante antes de votar YES</td><td>Al recuperar puede abortar</td></tr>
+      <tr><td>Participante después de YES</td><td>Consulta decisión, permanece bloqueado si no la conoce</td></tr>
+      <tr><td>Coordinador antes de decisión durable</td><td>Recupera log y puede abortar según estado</td></tr>
+      <tr><td>Coordinador después de decisión durable</td><td>Reenvía la misma decisión</td></tr>
+    </tbody>
+  </table></div>
+  <p>2PC no es consenso tolerante a particiones: presupone recuperación del coordinador o acceso a su decisión. Una saga evita locks largos dividiendo en transacciones locales y compensaciones, pero ofrece una semántica de negocio distinta de atomicidad ACID global.</p>
+  <div class="examen">Para dibujar 2PC, incluí logs durables y el estado PREPARED. Si solo aparecen mensajes YES y COMMIT, falta explicar por qué un nodo puede cumplir su voto después de caer.</div>
+</section>

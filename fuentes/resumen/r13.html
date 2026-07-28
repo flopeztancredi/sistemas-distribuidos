@@ -1,0 +1,128 @@
+<section class="unidad" id="r13" data-titulo="Consenso y elección de líder">
+  <h2>Consenso y elección de líder</h2>
+  <p class="intro">Consenso hace que procesos correctos decidan un mismo valor pese a fallos. Elegir líder resuelve quién coordina durante una época, pero no alcanza para preservar decisiones entre líderes. Paxos y Raft combinan quorums, términos y logs para conservar safety durante cambios.</p>
+
+  <h3 id="r13-lider">Elección de líder</h3>
+  <p>Propiedades esperadas:</p>
+  <ul>
+    <li><b>Safety:</b> a lo sumo un líder válido por término o vista.</li>
+    <li><b>Liveness:</b> si existe suficiente conectividad, finalmente se elige uno.</li>
+    <li><b>Acuerdo:</b> procesos correctos reconocen al mismo líder y término.</li>
+    <li><b>Unicidad de identidad:</b> los candidatos se comparan sin empate.</li>
+  </ul>
+  <p>Un detector basado en timeout puede iniciar elecciones aunque el líder siga vivo pero aislado. Por eso cada autoridad lleva un número de término y una operación se acepta solo bajo reglas que impiden dos términos activos sobre el mismo estado.</p>
+
+  <h4 id="r13-anillo">Algoritmo del anillo</h4>
+  <p>Los procesos forman un anillo lógico y tienen IDs únicos. Al sospechar al líder, un proceso envía <code>ELECTION</code> con su ID. Cada receptor agrega o conserva el máximo y reenvía. Cuando el mensaje vuelve al iniciador, el máximo es líder y circula <code>COORDINATOR</code>.</p>
+  <pre><code>P2 -&gt; P3 -&gt; P4 -&gt; P1 -&gt; P2
+ELECTION: max visto hasta recorrer el anillo
+COORDINATOR(max_id): segunda vuelta para informar</code></pre>
+  <p>Puede costar O(N) mensajes con mensaje de máximo o O(N cuadrado) en variantes donde cada candidato circula. Dos elecciones simultáneas convergen al mismo máximo si mensajes y membresía se manejan correctamente. Caídas exigen saltar al siguiente vivo y reparar el anillo.</p>
+
+  <h4 id="r13-bully">Bully algorithm</h4>
+  <p>Al detectar que el coordinador no responde, un proceso envía <code>ELECTION</code> a todos con ID mayor. Si nadie responde, se proclama y envía <code>COORDINATOR</code> a los menores. Si responde alguno, el iniciador se retira y uno mayor continúa. Al recuperarse, un proceso alto puede iniciar elección y desplazar al actual.</p>
+  <p>En el peor caso genera O(N cuadrado) mensajes. Presupone conocer a todos y poder contactarlos. El mayor ID gana, no el más capaz salvo que el ID codifique esa política.</p>
+
+  <h3 id="r13-consenso">Problema del consenso</h3>
+  <p>Cada proceso propone un valor y debe decidir:</p>
+  <ul>
+    <li><b>Agreement:</b> procesos correctos no deciden distinto.</li>
+    <li><b>Validity:</b> el valor decidido fue propuesto o cumple la regla de validez.</li>
+    <li><b>Integrity:</b> cada proceso decide a lo sumo una vez.</li>
+    <li><b>Termination:</b> procesos correctos finalmente deciden.</li>
+  </ul>
+  <p>En un sistema completamente asincrónico con al menos un posible crash, ningún algoritmo determinista garantiza siempre termination. Los protocolos prácticos preservan safety sin tiempo y obtienen liveness bajo sincronía parcial, timeouts y períodos estables.</p>
+
+  <h4 id="r13-rondas">Consenso sincrónico por rondas</h4>
+  <p>Si se conoce una cota de <code>f</code> crashes y las rondas tienen entrega acotada, cada proceso difunde los valores conocidos durante <code>f + 1</code> rondas. La ronda extra permite que un valor recibido justo antes de caer se propague. Al final todos aplican la misma función determinista, por ejemplo mínimo.</p>
+  <pre><code>known = {mi_propuesta}
+por ronda 1 hasta f + 1:
+    enviar known a todos
+    known = union(known, conjuntos_recibidos)
+decidir min(known)</code></pre>
+  <p>La prueba depende de rondas y límites conocidos. Sin ellos, no recibir en una ronda no distingue crash de demora.</p>
+
+  <h3 id="r13-bizantinos">Generales bizantinos</h3>
+  <p>Un participante bizantino puede mentir, omitir o enviar valores diferentes. En el problema clásico de mensajes orales sin firmas, para tolerar <code>f</code> traidores hacen falta:</p>
+  <pre><code>N &gt;= 3f + 1</code></pre>
+  <p>Con tres generales y un traidor, los leales no pueden distinguir si el comandante mintió o el mensajero alteró. Con cuatro y uno, cada general reenvía lo que recibió y la mayoría permite filtrar una versión inconsistente.</p>
+  <p>El algoritmo OM(f) reenvía recursivamente valores por caminos de longitud hasta <code>f + 1</code> y aplica mayoría. Su costo crece rápidamente. Firmas digitales cambian supuestos porque un traidor no puede falsificar lo dicho por otro, aunque todavía puede omitir.</p>
+  <div class="warn">Tolerar crash con mayoría de <code>2f + 1</code> réplicas no equivale a tolerar Byzantine. Con actores arbitrarios, la cota clásica es <code>3f + 1</code>.</div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Objetivo</th><th>Réplicas mínimas habituales</th><th>Supuesto</th></tr></thead>
+    <tbody>
+      <tr><td>Tolerar 1 crash y conservar mayoría</td><td>3</td><td><code>N = 2f + 1</code></td></tr>
+      <tr><td>Tolerar 2 crashes y conservar mayoría</td><td>5</td><td><code>N = 2f + 1</code></td></tr>
+      <tr><td>Tolerar 1 bizantino</td><td>4</td><td><code>N = 3f + 1</code>, mensajes orales</td></tr>
+    </tbody>
+  </table></div>
+
+  <h4 id="r13-ejemplo-rondas">Ejemplo paso a paso</h4>
+  <p>Cuatro servicios miden <code>1010, 1000, 1000, 1030</code>. Un algoritmo válido debe declarar la función de decisión. En una ronda sin fallos, cada uno difunde <code>(id, medición)</code>, espera los cuatro valores y aplica mediana inferior o mayoría de valor si existe. Con mediana ordena <code>[1000, 1000, 1010, 1030]</code> y todos deciden 1000 por la misma regla. Si se tolera un crash en rondas sincrónicas, se propagan conjuntos durante dos rondas antes de decidir. El protocolo acuerda un valor, no demuestra que el sensor sea físicamente correcto.</p>
+
+  <h3 id="r13-paxos">Paxos</h3>
+  <p>Paxos decide un valor por instancia. Roles lógicos:</p>
+  <ul>
+    <li><b>Proposer:</b> propone número y valor.</li>
+    <li><b>Acceptor:</b> participa en quorums y conserva promesas y aceptaciones.</li>
+    <li><b>Learner:</b> aprende el valor elegido.</li>
+  </ul>
+  <p>Un número de propuesta es único y totalmente ordenado, por ejemplo <code>(contador, proposer_id)</code>. Una mayoría de acceptors forma quorum. Dos mayorías intersectan, base de la safety.</p>
+
+  <h4 id="r13-paxos-fases">Fase 1, prepare y promise</h4>
+  <pre><code>proposer elige n y envia PREPARE(n)
+
+acceptor al recibir:
+    si n &gt; mayor_prometido:
+        persistir mayor_prometido = n
+        responder PROMISE(n, ultima_aceptada_n, ultima_aceptada_valor)
+    si no:
+        rechazar o informar mayor_prometido</code></pre>
+  <p>La promesa significa no aceptar propuestas futuras menores que <code>n</code>. La respuesta incluye el último par aceptado para que un proposer nuevo preserve una elección que pudo haber ocurrido aunque el proposer anterior haya caído.</p>
+
+  <h4 id="r13-paxos-fase2">Fase 2, accept y accepted</h4>
+  <pre><code>al reunir PROMISE de mayoria:
+    si alguna respuesta trae valor aceptado:
+        v = valor con mayor numero aceptado informado
+    si no:
+        v = mi valor
+    enviar ACCEPT(n, v)
+
+acceptor:
+    si n &gt;= mayor_prometido:
+        persistir aceptada = (n, v)
+        responder ACCEPTED(n, v)</code></pre>
+  <p>El valor queda <b>chosen</b> cuando una mayoría lo acepta. Que un proposer reciba mayoría es una forma de enterarse, no lo que crea la elección. Si luego aparece número mayor, la regla de adoptar el valor aceptado con mayor número mantiene el mismo valor.</p>
+  <p>Dos proposers pueden interrumpirse con números crecientes y no avanzar. Un líder estable ejecuta prepare una vez y propone posiciones sucesivas, Multi Paxos. Paxos garantiza safety con mensajes demorados o duplicados; liveness requiere conectividad de quorum y competencia controlada.</p>
+
+  <h3 id="r13-raft">Raft</h3>
+  <p>Raft replica un log mediante roles follower, candidate y leader, divididos en términos crecientes.</p>
+  <h4 id="r13-raft-eleccion">Elección</h4>
+  <ol>
+    <li>Followers reciben heartbeats del leader.</li>
+    <li>Al vencer un timeout aleatorio, uno incrementa término, vota por sí mismo y pide votos.</li>
+    <li>Cada nodo vota como máximo una vez por término y solo por un candidato cuyo log esté al menos tan actualizado.</li>
+    <li>Con mayoría, el candidato es leader y envía heartbeats.</li>
+  </ol>
+  <p>Timeouts aleatorios reducen empates. Un mensaje con término mayor obliga a bajar a follower.</p>
+
+  <h4 id="r13-raft-log">Replicación y commit</h4>
+  <p>El leader recibe un comando, lo agrega a su log y envía <code>AppendEntries</code> con índice y término del entry anterior. Si el follower no coincide, rechaza y el leader retrocede hasta encontrar prefijo común, luego reemplaza el sufijo conflictivo.</p>
+  <p>Una entrada del término actual queda committed cuando está almacenada en mayoría. El leader avanza <code>commitIndex</code> y las máquinas de estado aplican en orden. Entries anteriores quedan comprometidas indirectamente. La restricción de voto sobre log actualizado evita elegir un leader que perdió entradas committed.</p>
+  <pre><code>cliente -&gt; leader: comando
+leader: append local
+leader -&gt; followers: AppendEntries
+mayoria confirma
+leader: commit y aplicar
+leader -&gt; cliente: resultado</code></pre>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>Paxos</th><th>Raft</th></tr></thead>
+    <tbody>
+      <tr><td>Objeto básico</td><td>Valor por instancia, extendido a log</td><td>Log replicado</td></tr>
+      <tr><td>Liderazgo</td><td>No esencial para safety, útil para progreso</td><td>Líder fuerte por término</td></tr>
+      <tr><td>Safety</td><td>Intersección y adopción de valor previo</td><td>Mayoría, términos y restricción de log</td></tr>
+      <tr><td>Lectura conceptual</td><td>Protocolo mínimo de acuerdo</td><td>Protocolo operacional explícito</td></tr>
+    </tbody>
+  </table></div>
+  <div class="examen">En Paxos, la pregunta clave es por qué PROMISE devuelve <code>(n', v')</code>: obliga a propuestas futuras a conservar un valor que quizá ya fue elegido. En Raft, dibujá términos, mayoría, log e índice de commit.</div>
+</section>

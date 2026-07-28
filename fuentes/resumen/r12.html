@@ -1,0 +1,112 @@
+<section class="unidad" id="r12" data-titulo="Tiempo, orden y snapshots">
+  <h2>Tiempo, orden y snapshots</h2>
+  <p class="intro">Los relojes físicos aproximan tiempo real, los lógicos representan causalidad. A partir de causalidad se definen órdenes de entrega y cortes consistentes. Esta sección desarrolla algoritmos y condiciones, porque son preguntas centrales de final.</p>
+
+  <h3 id="r12-fisicos">Relojes físicos, drift y skew</h3>
+  <div class="def"><b>Drift.</b> Diferencia entre la velocidad de un reloj y la del tiempo ideal.</div>
+  <div class="def"><b>Skew.</b> Diferencia instantánea entre dos lecturas de reloj.</div>
+  <p>Si la tasa de drift está acotada por <code>rho</code>, dos relojes que se sincronizaron juntos pueden separarse hasta aproximadamente <code>2 * rho * tiempo</code>. Para mantener skew menor que <code>delta</code> hay que resincronizar antes de <code>delta / (2 * rho)</code>.</p>
+  <p>Ajustar el reloj hacia atrás puede romper timers y orden local. Los sistemas suelen corregir gradualmente la velocidad, <b>slewing</b>, o separar reloj monotónico para duraciones de reloj de pared para fechas.</p>
+
+  <h4 id="r12-cristian">Algoritmo de Cristian</h4>
+  <p>El cliente envía en <code>t0</code>, el servidor responde con su tiempo <code>Ts</code> y el cliente recibe en <code>t1</code>. Si la demora es simétrica y el procesamiento es despreciable:</p>
+  <pre><code>RTT = t1 - t0
+tiempo_estimado_al_recibir = Ts + RTT/2
+incertidumbre aproximada = RTT/2</code></pre>
+  <p>Se repite y se prefiere la muestra con menor RTT, porque probablemente tuvo menos cola. Si ida y vuelta son asimétricas, el error puede acercarse a esa asimetría.</p>
+
+  <h4 id="r12-ntp">NTP</h4>
+  <p>Con cuatro timestamps, <code>t1</code> salida cliente, <code>t2</code> recepción servidor, <code>t3</code> salida servidor y <code>t4</code> recepción cliente:</p>
+  <pre><code>offset theta = ((t2 - t1) + (t3 - t4)) / 2
+delay  delta = (t4 - t1) - (t3 - t2)</code></pre>
+  <p>NTP organiza servidores en estratos respecto de fuentes de referencia. Modos: cliente servidor, simétrico entre peers y broadcast o multicast con menor precisión. Filtra muestras, estima drift y evita depender de una única fuente.</p>
+
+  <h3 id="r12-causalidad">Eventos y happened before</h3>
+  <div class="def"><b>Happened before.</b> Relación <code>a -&gt; b</code> si ambos eventos pertenecen al mismo proceso y a ocurre antes, si a es envío y b su recepción, o por transitividad.</div>
+  <p>Si no vale <code>a -&gt; b</code> ni <code>b -&gt; a</code>, son concurrentes. Causalidad es un orden parcial: algunos pares son comparables y otros no.</p>
+
+  <h4 id="r12-lamport">Relojes de Lamport</h4>
+  <pre><code>antes de cada evento local o envio:
+    C = C + 1
+    si envia, adjunta C
+
+al recibir timestamp T:
+    C = max(C, T) + 1</code></pre>
+  <p>Garantiza <code>a -&gt; b implica L(a) &lt; L(b)</code>. La inversa no vale: timestamps distintos no prueban causalidad. Para obtener un orden total operativo se compara <code>(L(evento), process_id)</code>, pero ese desempate ordena también eventos concurrentes.</p>
+
+  <h4 id="r12-vectores">Vectores de relojes</h4>
+  <p>Cada proceso <code>i</code> mantiene un vector de N componentes:</p>
+  <pre><code>evento local o envio en i:
+    V[i] = V[i] + 1
+    adjuntar V
+
+recepcion en i de vector W:
+    para cada k: V[k] = max(V[k], W[k])
+    V[i] = V[i] + 1</code></pre>
+  <p>Se define <code>V &lt; W</code> si todos los componentes de V son menores o iguales y al menos uno es menor. Entonces:</p>
+  <pre><code>a -&gt; b  si y solo si  V(a) &lt; V(b)
+a || b  si V(a) y V(b) son incomparables</code></pre>
+  <p>Lamport cuesta un entero por mensaje y no detecta concurrencia. Vectores cuestan N y requieren gestionar membresía, pero capturan causalidad exactamente.</p>
+
+  <h3 id="r12-sincronismo">Sincronismo de comunicación</h3>
+  <p><b>Steadiness</b> describe regularidad del intervalo entre mensajes. <b>Tightness</b> describe cercanía temporal de copias del mismo mensaje en distintos receptores. Son propiedades distintas.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Protocolo</th><th>Garantía temporal</th><th>Mecanismo</th></tr></thead>
+    <tbody>
+      <tr><td>Mejor esfuerzo</td><td>Ninguna</td><td>Enviar y continuar</td></tr>
+      <tr><td>ACK y retry</td><td>Entrega eventual bajo supuestos</td><td>Timeout y retransmisión</td></tr>
+      <tr><td>Fases con ACK</td><td>Avance coordinado</td><td>No pasar de fase hasta confirmaciones</td></tr>
+      <tr><td>Ventana delta</td><td>Procesar dentro de intervalo acordado</td><td>Descartar o marcar tardíos</td></tr>
+      <tr><td>TDMA</td><td>Slots deterministas</td><td>Relojes sincronizados y calendario</td></tr>
+    </tbody>
+  </table></div>
+  <p>Un sistema sincrónico conoce cotas de cómputo, transmisión y clock drift. Uno asincrónico no las presupone. Parcialmente sincrónico significa que las cotas existen después de un momento desconocido o son desconocidas para el algoritmo.</p>
+
+  <h3 id="r12-orden">Órdenes de mensajes</h3>
+  <p>Recepción es llegada al middleware. Delivery es exposición a la aplicación. Una <b>hold back queue</b> retiene mensajes hasta satisfacer la condición del orden.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Orden</th><th>Condición</th><th>Metadata típica</th></tr></thead>
+    <tbody>
+      <tr><td>Sincrónico</td><td>Se entrega siguiendo rondas o ventanas</td><td>Número de ronda</td></tr>
+      <tr><td>FIFO</td><td>De cada emisor se respeta su orden de envío</td><td>Secuencia por emisor</td></tr>
+      <tr><td>Causal</td><td>Si envío de m1 causa envío de m2, todos entregan m1 antes</td><td>Vector</td></tr>
+      <tr><td>Total</td><td>Todos entregan todos los mensajes en el mismo orden</td><td>Sequencer o acuerdo</td></tr>
+    </tbody>
+  </table></div>
+  <p>FIFO no ordena emisores diferentes. Causal ordena solo dependencias. Total puede decidir <code>m2, m1</code> en todos y aun violar causalidad si <code>m1 -&gt; m2</code>. Para total causal se combinan ambas condiciones.</p>
+  <pre><code>FIFO desde emisor j:
+    entregar m si seq(m) == siguiente[j]
+    luego incrementar y revisar buffer
+
+causal con vector W recibido en proceso i:
+    entregar si W[j] == V[j] + 1 para el emisor j
+    y W[k] &lt;= V[k] para todo k distinto de j</code></pre>
+  <p>Orden total puede implementarse con sequencer que asigna número global, token que serializa emisiones o consenso por posición de log. El sequencer es simple pero necesita replicación para no ser único punto de fallo.</p>
+
+  <h3 id="r12-estado">Estado global y cortes</h3>
+  <p>Un estado global combina un estado local de cada proceso y el estado de canales. Un corte elige un prefijo de la historia de cada proceso.</p>
+  <div class="def"><b>Corte consistente.</b> Si contiene un evento, contiene todas sus causas. En particular, no contiene una recepción sin contener el envío correspondiente.</div>
+  <p>Puede contener un envío sin recepción: el mensaje está en tránsito y pertenece al estado del canal. Un corte inconsistente describe un estado global imposible.</p>
+
+  <h4 id="r12-chandy">Snapshot de Chandy y Lamport</h4>
+  <p>Supuestos: canales confiables FIFO, procesos que no se detienen y grafo conectado.</p>
+  <pre><code>iniciador:
+    guardar estado local
+    enviar MARKER por todos los canales salientes
+    comenzar a registrar mensajes de cada canal entrante
+
+al recibir primer MARKER por canal c:
+    si aun no guardo estado:
+        guardar estado local
+        estado(c) = vacio
+        enviar MARKER por salientes
+        registrar otros canales entrantes
+    si ya habia guardado:
+        estado(c) = mensajes registrados en c
+        dejar de registrar c
+
+termina cuando cada proceso recibio MARKER por todos sus canales entrantes</code></pre>
+  <p>FIFO garantiza que los mensajes previos al marker por un canal llegan antes que él. En el canal que trae el primer marker, no puede quedar un mensaje pre snapshot por registrar. El algoritmo no congela el sistema: captura un corte consistente mientras continúa.</p>
+  <p>Usos: checkpoint distribuido, detectar terminación, deadlock, tokens perdidos y propiedades estables. Después hay que recolectar estados locales y de canal para analizarlos.</p>
+  <div class="examen">En Lamport, nunca afirmar la inversa. En snapshots, dibujá al menos un mensaje en tránsito y explicá por qué una recepción sin envío vuelve inconsistente al corte.</div>
+</section>

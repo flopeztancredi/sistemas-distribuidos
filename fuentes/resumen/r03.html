@@ -1,0 +1,103 @@
+<section class="unidad" id="r03" data-titulo="Paralelización y arquitectura física">
+  <h2>Paralelización y arquitectura física</h2>
+  <p class="intro">Paralelizar no es “agregar máquinas”. Primero se descompone el trabajo, se cuantifica el camino crítico y recién después se elige una arquitectura física. Los nombres y diagramas completan el diseño: permiten localizar componentes sin acoplarse a su ubicación y comunicar con precisión cómo se despliegan.</p>
+
+  <h3 id="r03-descomposicion">Descomponer trabajo</h3>
+  <p>Una tarea se divide de dos formas básicas:</p>
+  <ul>
+    <li><b>Descomposición funcional:</b> etapas diferentes realizan transformaciones distintas. Produce pipelines y especialización.</li>
+    <li><b>Particionamiento de datos:</b> workers equivalentes procesan subconjuntos del input. Produce paralelismo de datos.</li>
+  </ul>
+  <p>Los patrones frecuentes son master worker, pipeline, divide and conquer, map reduce, work pool y DAG. Para elegir hay que identificar dependencias, granularidad, balance de carga, volumen que cruza la red y estado compartido.</p>
+  <div class="def"><b>Camino crítico.</b> Cadena de dependencias con mayor duración. Ninguna cantidad de procesadores puede reducir la ejecución por debajo de ese camino.</div>
+
+  <h3 id="r03-leyes">Amdahl, Gustafson y Work Span</h3>
+  <p>Si una fracción <code>P</code> del tiempo original es paralelizable y se usan <code>N</code> procesadores, la ley de Amdahl estima:</p>
+  <pre><code>Speedup_Amdahl(N) = 1 / ((1 - P) + P/N)
+Limite cuando N tiende a infinito = 1 / (1 - P)</code></pre>
+  <div class="ej">Con <code>P = 0.90</code>, ni infinitos procesadores superan un speedup de 10. Con 10 procesadores, el speedup ideal es <code>1 / (0.1 + 0.9/10) = 5.26</code>.</div>
+  <p>Amdahl mantiene fijo el tamaño del problema. Gustafson observa que, al crecer los recursos, suele crecer el trabajo útil y mantiene aproximadamente fija la duración:</p>
+  <pre><code>Speedup_Gustafson(N) = N - alpha * (N - 1)
+alpha = fraccion serial medida en la ejecucion paralela</code></pre>
+  <p>El modelo Work Span separa:</p>
+  <ul>
+    <li><code>T1</code>, <b>work</b>: tiempo con un procesador, suma de todo el trabajo.</li>
+    <li><code>Tinf</code>, <b>span</b>: tiempo con procesadores infinitos, duración del camino crítico.</li>
+    <li>Paralelismo disponible: <code>T1 / Tinf</code>.</li>
+  </ul>
+  <p>Con <code>P</code> procesadores, el tiempo ideal satisface <code>TP &gt;= max(T1/P, Tinf)</code>. En la práctica se suman comunicación, sincronización, scheduling y desbalance. Una tarea demasiado fina pierde más en overhead que lo que gana al paralelizarse.</p>
+
+  <h3 id="r03-balance">Partición y balance</h3>
+  <p>Una partición estática es barata si el costo por elemento es uniforme. Si es irregular, una cola dinámica de tareas mejora utilización, aunque agrega coordinación. El objetivo no es repartir la misma cantidad de elementos, sino aproximar el mismo tiempo de trabajo.</p>
+  <pre><code>particion estatica:
+    worker i procesa rango(i)
+
+work pool dinamico:
+    mientras haya tareas:
+        worker libre toma siguiente tarea atomica</code></pre>
+  <p>La granularidad determina cuántas oportunidades de paralelismo hay y cuánto cuesta coordinarlas. Agrupar tareas reduce overhead, pero puede empeorar balance y recuperación. El dato debe quedarse cerca del cómputo cuando moverlo es más caro que procesarlo.</p>
+
+  <h3 id="r03-flynn">Arquitecturas de procesamiento</h3>
+  <p>La taxonomía de Flynn clasifica por cantidad de flujos de instrucciones y de datos:</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>Un flujo de datos</th><th>Múltiples flujos de datos</th></tr></thead>
+    <tbody>
+      <tr><td>Una instrucción</td><td>SISD, procesador secuencial</td><td>SIMD, misma operación sobre muchos datos</td></tr>
+      <tr><td>Múltiples instrucciones</td><td>MISD, raro, pipelines redundantes</td><td>MIMD, cores o nodos autónomos</td></tr>
+    </tbody>
+  </table></div>
+  <p>En un <b>multiprocessor</b>, varios procesadores comparten memoria:</p>
+  <ul>
+    <li><b>SMP:</b> procesadores simétricos ejecutan el mismo sistema operativo y acceden a los recursos con los mismos roles.</li>
+    <li><b>AMP:</b> procesadores con roles distintos, por ejemplo uno controla I/O y otros computan.</li>
+    <li><b>UMA:</b> latencia aproximadamente uniforme a toda la memoria.</li>
+    <li><b>NUMA:</b> cada procesador tiene memoria cercana más rápida y accede a memoria remota con mayor costo.</li>
+  </ul>
+  <p>En un <b>multicomputer</b>, cada nodo tiene memoria privada y se conecta por red. Escala capacidad y dominio físico, pero cualquier dato compartido debe convertirse en mensajes, replicación o almacenamiento remoto.</p>
+  <div class="warn">NUMA tiene espacio de direcciones compartido, aunque el costo dependa de la ubicación. Multicomputing no tiene memoria compartida de hardware. Esa diferencia determina el modelo de programación.</div>
+
+  <h3 id="r03-nombres">Nombres, direcciones y discovery</h3>
+  <div class="def"><b>Nombre.</b> Identificador lógico de una entidad.</div>
+  <div class="def"><b>Dirección.</b> Información que permite alcanzarla en una ubicación o transporte.</div>
+  <p>Separarlos permite mover, replicar o reemplazar una entidad sin cambiar a sus consumidores. La resolución transforma nombre en una o más direcciones y puede incluir versión, salud, prioridad y balanceo.</p>
+  <p><b>DNS</b> es jerárquico y distribuido: resolvers consultan servidores raíz, de dominio superior y autoritativos, con caches gobernadas por TTL. Un registro A o AAAA da una dirección, CNAME un alias, MX un destino de correo y SRV puede expresar servicio, puerto, prioridad y peso.</p>
+  <p><b>Service discovery</b> adapta la idea a instancias efímeras:</p>
+  <ul>
+    <li><b>Registro:</b> cada instancia o un controlador publica su endpoint y metadata.</li>
+    <li><b>Health check y lease:</b> las entradas vencen o se eliminan si la instancia deja de renovar.</li>
+    <li><b>Descubrimiento del lado cliente:</b> el cliente consulta el registro y elige instancia.</li>
+    <li><b>Descubrimiento del lado servidor:</b> un proxy o balanceador resuelve y enruta.</li>
+  </ul>
+  <div class="idea">El nombre establece identidad. La dirección expresa una decisión de despliegue. Acoplar ambos hace que cada migración se convierta en un cambio de contrato.</div>
+
+  <h3 id="r03-documentacion">Documentar una arquitectura</h3>
+  <p>Un único diagrama no puede responder todas las preguntas. El modelo <b>4+1</b> usa vista lógica, de desarrollo, de procesos, física y escenarios que validan las otras. El modelo <b>C4</b> baja por niveles: contexto, contenedores, componentes y código.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Diagrama</th><th>Responde</th><th>Elementos clave</th></tr></thead>
+    <tbody>
+      <tr><td>Contexto</td><td>¿Qué sistema y actores están en alcance?</td><td>Personas, sistemas externos, límites</td></tr>
+      <tr><td>Contenedores</td><td>¿Qué aplicaciones y almacenes lo componen?</td><td>Responsabilidad, tecnología, comunicación</td></tr>
+      <tr><td>Componentes</td><td>¿Cómo se divide internamente un contenedor?</td><td>Módulos e interfaces</td></tr>
+      <tr><td>Secuencia</td><td>¿En qué orden ocurre un escenario?</td><td>Participantes, mensajes, alternativas</td></tr>
+      <tr><td>Actividad o DAG</td><td>¿Qué trabajo depende de qué?</td><td>Estados, decisiones, paralelismo</td></tr>
+      <tr><td>Despliegue</td><td>¿Dónde corre cada cosa?</td><td>Nodos, instancias, redes, réplicas</td></tr>
+      <tr><td>Robustez</td><td>¿Cómo colaboran boundary, control y entity?</td><td>Interfaz, coordinación, datos</td></tr>
+      <tr><td>Topología</td><td>¿Qué conexiones físicas o lógicas existen?</td><td>Enlaces, dirección, multiplicidad</td></tr>
+    </tbody>
+  </table></div>
+  <p>Un buen diagrama tiene título y objetivo, alcance explícito, leyenda, flechas con dirección y protocolo, multiplicidades relevantes y el nivel justo de detalle. No mezclar clases, procesos y máquinas sin distinguirlos visualmente.</p>
+  <h4 id="r03-vista-fisica">Vista física mínima para un final</h4>
+  <pre><code>[Clientes]
+    | HTTPS
+[Balanceador x2]          dominio de fallo: zona
+    |
+[API xN] ---- [Cache x3]
+    |             |
+    |          invalidacion
+    v
+[Base primaria] -- replicacion --&gt; [Replica]
+
+Anotar: cantidad de instancias, protocolo, estado, particion,
+replicacion, flujo normal y comportamiento ante fallos.</code></pre>
+  <div class="examen">En una consigna de diseño, el diagrama debe probar la explicación. Si el texto promete alta disponibilidad, la vista física tiene que mostrar redundancia, dominios de fallo y cómo se redirige el tráfico.</div>
+</section>
