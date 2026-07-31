@@ -49,7 +49,9 @@ def bloque(autores) -> str:
     if not autores:
         raise ValueError("la materia no declara autores")
     enlaces = []
-    for u in autores:
+    # Alfabetico y no en el orden declarado: ninguno es mas autor que el otro,
+    # y asi el orden no es una decision que alguien pueda leer como jerarquia.
+    for u in sorted(autores, key=str.lower):
         if not USUARIO.match(u):
             raise ValueError(f"usuario de GitHub invalido: {u!r}")
         seguro = html.escape(u)
