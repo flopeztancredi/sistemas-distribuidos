@@ -1,22 +1,14 @@
-"""Firma de autoria de un apunte.
+"""Bloque de autores al pie de la barra lateral: logo de GitHub y usuario.
 
-Un apunte lo escribe quien lo escribe, y no siempre es quien publica el sitio.
-Cada materia declara sus autores y de aca sale el bloque que va al pie de la
-barra lateral: el logo de GitHub y el usuario, nada mas. Sin nombre completo,
-sin ocupar lugar en la lectura, pero enlazado a una identidad verificable.
+Sin `autores` el build falla, a proposito.
 
-Declarar autores es obligatorio: una materia sin `autores` no compila. Es el
-punto de todo esto, que nadie quede publicado sin decir quien lo escribio.
-
-Lo usan los dos armadores (armar.py aca y adaptar_estetica.py en el repo de
-Sistemas Distribuidos). La copia que manda es esta; el otro build avisa cuando
-las dos se separan.
+Copia canonica: la usa tambien adaptar_estetica.py, en el repo de Sistemas
+Distribuidos, que avisa cuando las dos se separan.
 """
 import html
 import re
 
-# El octicon oficial (mark-github-16). Va relleno, a diferencia de los iconos
-# de linea del shell, porque es una marca y no un pictograma.
+# Octicon mark-github-16.
 MARCA = (
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 '
     '3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53'
@@ -29,9 +21,6 @@ MARCA = (
 )
 
 CSS = """
-    /* Firma de autoria: al pie de la barra lateral, el usuario de GitHub y
-       nada mas. Es una atribucion, no un credito: tiene que estar y no
-       molestar. Hereda --muted, asi que sigue la paleta de cada materia. */
     .autoria {
       display: flex;
       flex-direction: column;
@@ -52,13 +41,11 @@ CSS = """
     .autoria svg { flex: none; width: 14px; height: 14px; fill: currentColor; }
 """
 
-# Lo que GitHub acepta como usuario: alfanumerico y guiones, sin guion en las
-# puntas, hasta 39. Se valida porque el usuario entra crudo a una URL.
+# Formato de usuario de GitHub. Se valida porque entra crudo a una URL.
 USUARIO = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 
 
 def bloque(autores) -> str:
-    """El <div class="autoria"> con un enlace por autor."""
     if not autores:
         raise ValueError("la materia no declara autores")
     enlaces = []
@@ -74,22 +61,21 @@ def bloque(autores) -> str:
 
 
 def inyectar(doc: str, autores) -> str:
-    """Pone el CSS y el bloque en el documento. Idempotente.
-
-    Si el documento ya trae una firma (pasa cuando el shell se refresca desde
-    un apunte ya armado) se reemplaza, no se acumula.
-    """
+    """Idempotente: reemplaza la firma que haya en vez de acumular otra."""
     doc = re.sub(r'[ \t]*<div class="autoria">.*?</div>\n?', "", doc, flags=re.S)
-    doc = doc.replace(CSS, "")
+    # Por bloque y no por cadena exacta: si cambia el CSS, la version vieja
+    # tiene que salir igual, sin dejar restos.
+    doc = re.sub(r"\n(?:[ \t]*/\*(?:(?!\*/).)*?\*/[ \t]*\n)?"
+                 r"[ \t]*\.autoria \{.*?\.autoria svg \{[^}]*\}\n",
+                 "", doc, flags=re.S)
 
-    # El ancla se come la sangria de </style>. Si no, cada pasada dejaba la que
-    # habia antes del bloque y corria el CSS dos espacios mas a la derecha.
+    # El ancla se come la sangria de </style>: si no, cada pasada corre el CSS
+    # dos espacios mas a la derecha.
     doc, n = re.subn(r"[ \t]*</style>", lambda _: CSS + "  </style>", doc, count=1)
     if not n:
         raise ValueError("no se encontro </style> para el CSS de autoria")
 
-    # Va al final de la barra lateral, despues de los botones. El primer
-    # </aside> es el de la barra; el segundo es el panel de notas.
+    # El primer </aside> es la barra lateral; el segundo, el panel de notas.
     doc, n = re.subn(r"[ \t]*</aside>",
                      lambda _, b=bloque(autores): b + "  </aside>", doc, count=1)
     if not n:

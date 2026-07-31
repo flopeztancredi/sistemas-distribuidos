@@ -25,10 +25,7 @@ SHELL = BASE / "shell-aa.html"
 # independientes, y el build avisa si se separaron.
 MODULOS = ["sync.html", "imprimir.html"]
 CANONICO = Path("/home/lopez/fiuba/flopeztancredi.github.io/fuentes")
-# Quien escribio este apunte, por usuario de GitHub. Va al pie de la barra
-# lateral. En el repo de la portada esto vive en materias.py; aca es una
-# constante porque este build arma una sola materia.
-AUTORES = ["flopeztancredi"]
+AUTORES = ["flopeztancredi"]  # usuarios de GitHub
 SINT = BASE / "sintesis"
 OUT = Path("/home/lopez/fiuba/distribuidos/apunte/index.html")
 
@@ -396,7 +393,7 @@ def main() -> int:
     doc = doc.replace('content="#167e9e"', 'content="#7455d8"')
     doc = doc.replace("</style>", CSS_EXTRA + "  </style>", 1)
 
-    # 5 bis. firma de autoria al pie de la barra lateral
+    # 5 bis. autores
     gemelo = CANONICO / "autoria.py"
     if gemelo.exists() and gemelo.read_bytes() != (BASE / "autoria.py").read_bytes():
         print(f"  !! autoria.py difiere del canonico en {gemelo}")
