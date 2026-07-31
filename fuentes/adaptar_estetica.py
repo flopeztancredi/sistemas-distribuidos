@@ -15,6 +15,9 @@ import sys
 import unicodedata
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import autoria  # noqa: E402  (necesita el path de arriba)
+
 BASE = Path("/home/lopez/fiuba/distribuidos/apunte/fuentes")
 SHELL = BASE / "shell-aa.html"
 # El modulo de sincronizacion es el mismo para todos los apuntes. La copia que
@@ -22,6 +25,10 @@ SHELL = BASE / "shell-aa.html"
 # independientes, y el build avisa si se separaron.
 MODULOS = ["sync.html", "imprimir.html"]
 CANONICO = Path("/home/lopez/fiuba/flopeztancredi.github.io/fuentes")
+# Quien escribio este apunte, por usuario de GitHub. Va al pie de la barra
+# lateral. En el repo de la portada esto vive en materias.py; aca es una
+# constante porque este build arma una sola materia.
+AUTORES = ["flopeztancredi"]
 SINT = BASE / "sintesis"
 OUT = Path("/home/lopez/fiuba/distribuidos/apunte/index.html")
 
@@ -388,6 +395,16 @@ def main() -> int:
         doc = doc.replace(viejo, nuevo)
     doc = doc.replace('content="#167e9e"', 'content="#7455d8"')
     doc = doc.replace("</style>", CSS_EXTRA + "  </style>", 1)
+
+    # 5 bis. firma de autoria al pie de la barra lateral
+    gemelo = CANONICO / "autoria.py"
+    if gemelo.exists() and gemelo.read_bytes() != (BASE / "autoria.py").read_bytes():
+        print(f"  !! autoria.py difiere del canonico en {gemelo}")
+    try:
+        doc = autoria.inyectar(doc, AUTORES)
+    except ValueError as e:
+        print(f"!! autoria: {e}", file=sys.stderr)
+        return 1
 
     # 6. PWA de la otra materia: sacar lo que no aplica
     doc = re.sub(r'\s*<link rel="manifest"[^>]*>', "", doc)
